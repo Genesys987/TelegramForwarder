@@ -1,5 +1,8 @@
 # --- config.py (Updated) ---
 import os
+from dotenv import dotenv_values
+
+config = dotenv_values(".env")
 
 # Get the directory where config.py is located
 _basedir = os.path.dirname(os.path.abspath(__file__))
@@ -7,14 +10,11 @@ _basedir = os.path.dirname(os.path.abspath(__file__))
 # ----------------------
 # Telegram Bot Settings
 # ----------------------
-API_ID = 23927353  # Replace with your API ID
-API_HASH = "6b90fd26af02e0a3a642b9f846417c3e"  # Replace with your API Hash
-INVITE_LINKS = [
-    "https://t.me/+MlRMaKSc0_gxMGNk",
-    "https://t.me/+Qs5PUoQSXWxlNzBk"
-       
-]
-# Ensure INVITE_LINKS contains valid targets
+API_ID = config["TELEGRAM_API_ID"]
+API_HASH = config["TELEGRAM_API_HASH"]
+INVITE_LINKS = config["INVITE_LINKS"].split(",") if config["INVITE_LINKS"] else []
+assert API_ID is not None, "TELEGRAM_API_ID is not set in .env file"
+assert API_HASH is not None, "TELEGRAM_API_HASH is not set in .env file"
 
 # ----------------------
 # MT4 File Paths
@@ -23,18 +23,20 @@ INVITE_LINKS = [
 # ---
 # Default MT4 Data Folder path component (adjust if needed)
 # Often like: C:\Users\YourUsername\AppData\Roaming\MetaQuotes\Terminal\INSTANCE_ID
-_mt4_data_folder = "C:\\Users\\Juhász Áron\\AppData\\Roaming\\MetaQuotes\\Terminal\\893F70E9EF760D3B32BDD358B27B8555"
-_mql4_files_folder = os.path.join(_mt4_data_folder, "MQL4", "Files")
+mt4_data_folder = config["MT4_FOLDER"]
+assert mt4_data_folder is not None, "MT4_FOLDER is not set in .env file"
+assert os.path.exists(mt4_data_folder), f"MT4 data folder does not exist: {mt4_data_folder}"
+mql4_files_folder = os.path.join(mt4_data_folder, "MQL4", "Files")
 
 # --- Files used for communication ---
 # Queue file (Python writes signals here temporarily) - Can be anywhere Python has access
 MT4_QUEUE_FILE_PATH = os.path.join(_basedir, "signals_queue.txt") # Store alongside scripts
 
 # Signal file (Python writes final signal here for EA) - MUST be in MQL4/Files
-MT4_SIGNAL_FILE_PATH = os.path.join(_mql4_files_folder, "signals.txt")
+MT4_SIGNAL_FILE_PATH = os.path.join(mql4_files_folder, "signals.txt")
 
 # Stoploss update file (Python writes SL commands here for EA) - MUST be in MQL4/Files
-STOPLOSS_UPDATE_FILE_PATH = os.path.join(_mql4_files_folder, "stoploss_update.txt")
+STOPLOSS_UPDATE_FILE_PATH = os.path.join(mql4_files_folder, "stoploss_update.txt")
 
 # --- Files for Python Bot State ---
 # File to store the last used Group ID (Python internal state) - Can be anywhere
