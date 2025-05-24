@@ -89,13 +89,13 @@ async def process_new_standard_signal(message_text: str, message_id: int, messag
             message_date = message_date.astimezone(timezone.utc)
         
         # Convert to UNIX milliseconds
-        timestamp_ms = int(message_date.timestamp() * 1000)
-        signal_data["timestamp_utc_ms"] = timestamp_ms
+        timestamp_ms = int(message_date.timestamp())
+        signal_data["timestamp_utc"] = timestamp_ms
         print(f"   Timestamp hozzáadva: {timestamp_ms} ({message_date.isoformat()})")
     else:
         print(f"   Figyelmeztetés: Nincs üzenet dátum, jelenlegi időt használjuk")
-        timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        signal_data["timestamp_utc_ms"] = timestamp_ms
+        timestamp_ms = int(datetime.now(timezone.utc).timestamp())
+        signal_data["timestamp_utc"] = timestamp_ms
     
     try:
         lot_size = calculate_lot_size(signal_data.get("symbol"), signal_data.get("entry"), signal_data.get("stop_loss"))

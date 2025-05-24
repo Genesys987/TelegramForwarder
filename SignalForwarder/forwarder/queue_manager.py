@@ -25,10 +25,10 @@ def add_signal_to_queue(signal_data: dict) -> bool:
     Feladata, hogy a 'signal_data' dict tartalmából elkészítse azt a sort,
     amit a queue-fájlba (MT4_QUEUE_FILE_PATH) fűz hozzá.
     A paraméterekből létrehoz egy 'message' stringet:
-      "{timestamp_utc_ms}|{signal_type}|{symbol}|{entry}|{tp1,tp2,tp3}|{stop_loss}|{lot_size}|GID:{group_id}"
+      "{timestamp_utc}|{signal_type}|{symbol}|{entry}|{tp1,tp2,tp3}|{stop_loss}|{lot_size}|GID:{group_id}"
 
     Kötelező kulcsok a 'signal_data'-ban:
-      - timestamp_utc_ms: int (UTC timestamp in milliseconds)
+      - timestamp_utc: int (UTC timestamp in milliseconds)
       - signal_type: str (BUY/SELL)
       - symbol: str pl. "XAUUSD"
       - entry: float
@@ -43,7 +43,7 @@ def add_signal_to_queue(signal_data: dict) -> bool:
     """
     try:
         # 1) Alap ellenőrzés
-        required_keys = ["timestamp_utc_ms", "signal_type", "symbol", "entry", "take_profits",
+        required_keys = ["timestamp_utc", "signal_type", "symbol", "entry", "take_profits",
                          "stop_loss", "lot_size", "group_id"]
         if not all(key in signal_data for key in required_keys):
             print(f"❌ [QueueAdd] Hiányzó kulcsok. Van: {list(signal_data.keys())}, Kellene: {required_keys}")
@@ -56,7 +56,7 @@ def add_signal_to_queue(signal_data: dict) -> bool:
             return False
 
         # 3) Timestamp ellenőrzés
-        timestamp_ms = signal_data["timestamp_utc_ms"]
+        timestamp_ms = signal_data["timestamp_utc"]
         if not isinstance(timestamp_ms, int) or timestamp_ms <= 0:
             print(f"❌ [QueueAdd] Érvénytelen timestamp: {timestamp_ms}")
             return False
