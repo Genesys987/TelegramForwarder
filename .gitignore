@@ -1,2 +1,7 @@
 userbot_session.session
+
 .env
+
+signals_queue.txt
+message_gid_map.json
+last_group_id.txt
