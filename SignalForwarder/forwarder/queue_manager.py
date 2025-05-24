@@ -56,14 +56,14 @@ def add_signal_to_queue(signal_data: dict) -> bool:
             return False
 
         # 3) Timestamp ellenőrzés
-        timestamp_ms = signal_data["timestamp_utc"]
-        if not isinstance(timestamp_ms, int) or timestamp_ms <= 0:
-            print(f"❌ [QueueAdd] Érvénytelen timestamp: {timestamp_ms}")
+        timestamp = signal_data["timestamp_utc"]
+        if not isinstance(timestamp, int) or timestamp <= 0:
+            print(f"❌ [QueueAdd] Érvénytelen timestamp: {timestamp}")
             return False
 
         # 4) Sor összerakása timestamp-pel kezdve (prefix nélkül)
         tp_str = ",".join(str(tp) for tp in tps)
-        message = (f"{timestamp_ms}|{signal_data['signal_type']}|{signal_data['symbol']}|{signal_data['entry']}|"
+        message = (f"{timestamp}|{signal_data['signal_type']}|{signal_data['symbol']}|{signal_data['entry']}|"
                    f"{tp_str}|{signal_data['stop_loss']}|{signal_data['lot_size']}|"
                    f"GID:{signal_data['group_id']}\n")
 
