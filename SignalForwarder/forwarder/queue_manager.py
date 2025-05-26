@@ -25,9 +25,10 @@ def add_signal_to_queue(signal_data: dict) -> bool:
     Feladata, hogy a 'signal_data' dict tartalmából elkészítse azt a sort,
     amit a queue-fájlba (MT4_QUEUE_FILE_PATH) fűz hozzá.
     A paraméterekből létrehoz egy 'message' stringet:
-      "{signal_type}|{symbol}|{entry}|{tp1,tp2,tp3}|{stop_loss}|{lot_size}|GID:{group_id}"
+      "{timestamp_utc}|{signal_type}|{symbol}|{entry}|{tp1,tp2,tp3}|{stop_loss}|{lot_size}|GID:{group_id}"
 
     Kötelező kulcsok a 'signal_data'-ban:
+      - timestamp_utc: int (UTC timestamp in milliseconds)
       - signal_type: str (BUY/SELL)
       - symbol: str pl. "XAUUSD"
       - entry: float
@@ -42,7 +43,7 @@ def add_signal_to_queue(signal_data: dict) -> bool:
     """
     try:
         # 1) Alap ellenőrzés
-        required_keys = ["signal_type", "symbol", "entry", "take_profits",
+        required_keys = ["timestamp_utc", "signal_type", "symbol", "entry", "take_profits",
                          "stop_loss", "lot_size", "group_id"]
         if not all(key in signal_data for key in required_keys):
             print(f"❌ [QueueAdd] Hiányzó kulcsok. Van: {list(signal_data.keys())}, Kellene: {required_keys}")
@@ -54,13 +55,19 @@ def add_signal_to_queue(signal_data: dict) -> bool:
             print(f"❌ [QueueAdd] Érvénytelen take_profits: {tps}")
             return False
 
-        # 3) Sor összerakása
+        # 3) Timestamp ellenőrzés
+        timestamp = signal_data["timestamp_utc"]
+        if not isinstance(timestamp, int) or timestamp <= 0:
+            print(f"❌ [QueueAdd] Érvénytelen timestamp: {timestamp}")
+            return False
+
+        # 4) Sor összerakása timestamp-pel kezdve (prefix nélkül)
         tp_str = ",".join(str(tp) for tp in tps)
-        message = (f"{signal_data['signal_type']}|{signal_data['symbol']}|{signal_data['entry']}|"
+        message = (f"{timestamp}|{signal_data['signal_type']}|{signal_data['symbol']}|{signal_data['entry']}|"
                    f"{tp_str}|{signal_data['stop_loss']}|{signal_data['lot_size']}|"
                    f"GID:{signal_data['group_id']}\n")
 
-        # 4) I/O művelet: Hozzáfűzés a queue-fájlhoz
+        # 5) I/O művelet: Hozzáfűzés a queue-fájlhoz
         with open(MT4_QUEUE_FILE_PATH, "a", encoding='utf-8') as f:
             f.write(message)
 

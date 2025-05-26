@@ -11,6 +11,9 @@
 extern bool   debugMode                = true;  // Enable detailed logging
 extern int    trailingCheckIntervalSec = 5;     // Interval (sec) between trailing stop scans
 extern int    triggerTolerancePips     = 5;     // Pips tolerance for trailing stop trigger
+extern int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC in minutes (e.g., UTC+2 = 120)
+extern int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
+extern string symbolPostfix           = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -58,6 +61,7 @@ bool    CheckFreezeLevel(string symbol,
                          double openPrice, double ask, double bid);
 
 // Utility functions
+bool    IsSignalTooOld(long signalTimestampMs);
 bool    FileExists(string filename);
 string  Trim(string s);
 string  ToUpperCase(string s);
@@ -149,6 +153,7 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
             Print(eaName, ": Raw signal= [", raw, "]");
         }
     }
+    
     // Move file to temp to avoid reprocessing
     if(!FileMove(gSignalFile, 0, gTempFile, FILE_REWRITE))
         return(false);
@@ -166,34 +171,44 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
     if(StringLen(line) == 0 || StringFind(line, "PROCESSED") >= 0)
         return(false);
 
-    // Expect: TYPE|SYMBOL|ENTRY|TP1,TP2,TP3|SL|LOT|GID:<id>
+    // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3|SL|LOT|GID:<id>
     string parts[];
-    if(StringSplit(line, '|', parts) < 7)
+    if(StringSplit(line, '|', parts) < 8)
         return(false);
 
+    // 0) Extract and validate timestamp (first part, no prefix)
+    string timestampStr = parts[0];
+    long signalTimestamp = StrToInteger(timestampStr);
+    
+    if(IsSignalTooOld(signalTimestamp))
+    {
+        Print(eaName, ": Signal too old, skipping. Timestamp=", IntegerToString(signalTimestamp));
+        return(false);
+    }
+
     // 1) Signal type
-    signalType = ToUpperCase(Trim(parts[0]));
+    signalType = ToUpperCase(Trim(parts[1]));
     if(signalType != "BUY" && signalType != "SELL")
         return(false);
 
     // 2) Symbol validation
-    symbol = Trim(parts[1]);
+    symbol = Trim(parts[2]) + symbolPostfix;
     if(MarketInfo(symbol, MODE_TIME) == 0)
         return(false);
 
     // 3) Entry price
-    if(!IsValidDouble(parts[2])) return(false);
-    entryPrice = NormalizeDouble(StrToDouble(parts[2]), MarketInfo(symbol, MODE_DIGITS));
+    if(!IsValidDouble(parts[3])) return(false);
+    entryPrice = NormalizeDouble(StrToDouble(parts[3]), MarketInfo(symbol, MODE_DIGITS));
 
     // 4) TP levels
     string tpsArr[];
-    if(StringSplit(parts[3], ',', tpsArr) < 3) return(false);
+    if(StringSplit(parts[4], ',', tpsArr) < 3) return(false);
     tp1 = NormalizeDouble(StrToDouble(tpsArr[0]), MarketInfo(symbol, MODE_DIGITS));
     tp2 = NormalizeDouble(StrToDouble(tpsArr[1]), MarketInfo(symbol, MODE_DIGITS));
     tp3 = NormalizeDouble(StrToDouble(tpsArr[2]), MarketInfo(symbol, MODE_DIGITS));
 
     // 5) Stop loss, remove brackets
-    string rawSL = parts[4];
+    string rawSL = parts[5];
     while(StringFind(rawSL, "[") >= 0)
     {
         int b1 = StringFind(rawSL, "[");
@@ -205,11 +220,11 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
     stopLoss = NormalizeDouble(StrToDouble(rawSL), MarketInfo(symbol, MODE_DIGITS));
 
     // 6) Lot size
-    if(!IsValidDouble(parts[5])) return(false);
-    lotSize = NormalizeDouble(StrToDouble(parts[5]), 2);
+    if(!IsValidDouble(parts[6])) return(false);
+    lotSize = NormalizeDouble(StrToDouble(parts[6]), 2);
 
     // 7) Group ID
-    string gidPart = parts[6];
+    string gidPart = parts[7];
     if(StringFind(gidPart, "GID:") != 0) return(false);
     groupId = (int)StrToInteger(StringSubstr(gidPart, 4));
     if(groupId <= 0) return(false);
@@ -296,7 +311,6 @@ void SendMarketOrders(string signalType, string symbol,
 
     for(int k=0; k<3; k++)
     {
-        // frissítsük le az árakat minden próbálkozás előtt
         RefreshRates();
         double currentPrice = (orderType == OP_BUY)
                               ? NormalizeDouble(MarketInfo(symbol, MODE_ASK), digits)
@@ -305,9 +319,12 @@ void SendMarketOrders(string signalType, string symbol,
         string comment = "GID:" + IntegerToString(groupId) + "|SL:" + DoubleToString(rawSL, digits);
         int ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
                                rawSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
+        if(ticket < 0 && debugMode) {
+         Print("Error creating ticket", GetLastError());
+        }
         if(ticket < 0 && GetLastError() == 130)
         {
-            RefreshRates();  // és itt is frissítsünk
+            RefreshRates();
             ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
                                fallbackSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
         }
@@ -500,6 +517,31 @@ bool CheckFreezeLevel(string symbol,
         return(false);
     }
     return(true);
+}
+
+//+------------------------------------------------------------------+
+//| IsSignalTooOld: validate if signal timestamp is too old         |
+//+------------------------------------------------------------------+
+bool IsSignalTooOld(long signalTimestamp)
+{
+    if(signalTimestamp <= 0) return(true);
+    
+    datetime signalTime = (datetime)(signalTimestamp);
+    
+    // Get current broker time and convert to UTC
+    datetime brokerTime = TimeCurrent();
+    datetime utcTime = brokerTime - (brokerTimeOffsetMinutes * 60);
+    
+    // Calculate age in minutes
+    int ageSeconds = (int)(utcTime - signalTime);
+    int ageMinutes = ageSeconds / 60;
+    
+    if(debugMode)
+        Print(eaName, ": Signal age check - UTC now: ", TimeToString(utcTime), 
+              ", Signal time: ", TimeToString(signalTime), 
+              ", Age: ", IntegerToString(ageMinutes), " minutes");
+    
+    return(ageMinutes > signalMaxAgeMinutes);
 }
 
 //+------------------------------------------------------------------+

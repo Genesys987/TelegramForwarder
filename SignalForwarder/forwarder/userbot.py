@@ -4,6 +4,7 @@ import asyncio
 import re
 import time
 import json # GID map perzisztenciához
+from datetime import datetime, timezone
 from telethon import TelegramClient, events
 import traceback
 import os
@@ -73,11 +74,29 @@ client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 
 # --- Fő Feldolgozó Függvények ---
 
-async def process_new_standard_signal(message_text: str, message_id: int):
-    """Parse-ol, lot-ot számol, GID-t generál, map-et tárol, queue-hoz ad."""
+async def process_new_standard_signal(message_text: str, message_id: int, message_date):
+    """Parse-ol, lot-ot számol, GID-t generál, map-et tárol, queue-hoz ad, timestamp-et ad hozzá."""
     print(f"   Standard szignál feldolgozása (ID: {message_id})...")
     signal_data = parse_signal(message_text)
     if not signal_data: print(f"   Szignál parse sikertelen."); return None
+    
+    # Extract UTC timestamp in milliseconds
+    if message_date:
+        # Convert to UTC if not already
+        if message_date.tzinfo is None:
+            message_date = message_date.replace(tzinfo=timezone.utc)
+        else:
+            message_date = message_date.astimezone(timezone.utc)
+        
+        # Convert to UNIX milliseconds
+        timestamp = int(message_date.timestamp())
+        signal_data["timestamp_utc"] = timestamp
+        print(f"   Timestamp hozzáadva: {timestamp} ({message_date.isoformat()})")
+    else:
+        print(f"   Figyelmeztetés: Nincs üzenet dátum, jelenlegi időt használjuk")
+        timestamp = int(datetime.now(timezone.utc).timestamp())
+        signal_data["timestamp_utc"] = timestamp
+    
     try:
         lot_size = calculate_lot_size(signal_data.get("symbol"), signal_data.get("entry"), signal_data.get("stop_loss"))
         signal_data["lot_size"] = lot_size # Hozzáadjuk a dict-hez
@@ -146,7 +165,7 @@ async def run_userbot():
 
         # === Standard szignál feldolgozás ===
         else:
-            try: await process_new_standard_signal(message_text, message_id)
+            try: await process_new_standard_signal(message_text, message_id, message.date)
             except Exception as e: print(f"   Hiba process_new_standard_signal hívásakor: {e}"); traceback.print_exc()
 
     print("🟢 Userbot elindult. Várakozás...")

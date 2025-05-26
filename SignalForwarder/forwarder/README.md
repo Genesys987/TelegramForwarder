@@ -3,6 +3,8 @@
 Uses Pipenv
 https://packaging.python.org/en/latest/tutorials/managing-dependencies/
 
+Get Telegram API key at https://my.telegram.org/.
+
 ```bash
 #copy config
 cp .env.example .env
