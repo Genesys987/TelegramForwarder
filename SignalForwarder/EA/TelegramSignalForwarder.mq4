@@ -275,15 +275,30 @@ void SendMarketOrders(string signalType, string symbol,
     int stopLevel = MarketInfo(symbol, MODE_STOPLEVEL);
 
     RefreshRates();
-    double price = (orderType == OP_BUY) ? MarketInfo(symbol, MODE_ASK) : MarketInfo(symbol, MODE_BID);
+    double ask = MarketInfo(symbol, MODE_ASK);
+    double bid = MarketInfo(symbol, MODE_BID);
+    double price = (orderType == OP_BUY) ? ask : bid;
     price = NormalizeDouble(price, digits);
 
-    double rawSL      = NormalizeDouble(stopLoss, digits);
-    double fallbackSL = (orderType == OP_BUY)
+    // Check if we've missed TP1 already
+    bool missedTP1 = (orderType == OP_BUY) ? bid >= tp1 : ask <= tp1;
+    
+    // Determine which SL to use
+    double rawSL, fallbackSL;
+    if(missedTP1) {
+        // Use entry price as SL if we've missed TP1
+        rawSL = NormalizeDouble(entryPrice, digits);
+        fallbackSL = rawSL; // No fallback needed since we're using entry
+    } else {
+        // Normal SL logic
+        rawSL = NormalizeDouble(stopLoss, digits);
+        fallbackSL = (orderType == OP_BUY)
                         ? price - MathAbs(entryPrice - stopLoss)
                         : price + MathAbs(stopLoss - entryPrice);
-    fallbackSL = NormalizeDouble(fallbackSL, digits);
+        fallbackSL = NormalizeDouble(fallbackSL, digits);
+    }
 
+    // Apply minimum distance for SL if needed
     double minDist = MathMax(stopLevel * point, point);
     if(orderType == OP_BUY && price - fallbackSL < minDist) fallbackSL = price - minDist;
     if(orderType == OP_SELL && fallbackSL - price < minDist) fallbackSL = price + minDist;
@@ -303,8 +318,11 @@ void SendMarketOrders(string signalType, string symbol,
         tps[j] = NormalizeDouble(tps[j], digits);
     }
 
-    if(debugMode)
-        Print(eaName, ": Sending orders for GID=", IntegerToString(groupId));
+    if(debugMode) {
+        Print(eaName, ": Sending orders for GID=", IntegerToString(groupId),
+              " Missed TP1=", missedTP1 ? "Yes" : "No",
+              " Using SL=", DoubleToString(rawSL, digits));
+    }
 
     int slippage = 5;
     color cols[3] = { clrBlue, clrGreen, clrRed };
@@ -312,22 +330,21 @@ void SendMarketOrders(string signalType, string symbol,
     for(int k=0; k<3; k++)
     {
         RefreshRates();
-        double currentPrice = (orderType == OP_BUY)
-                              ? NormalizeDouble(MarketInfo(symbol, MODE_ASK), digits)
-                              : NormalizeDouble(MarketInfo(symbol, MODE_BID), digits);
-
         string comment = "GID:" + IntegerToString(groupId) + "|SL:" + DoubleToString(rawSL, digits);
         int ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
                                rawSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
+                               
         if(ticket < 0 && debugMode) {
-         Print("Error creating ticket", GetLastError());
+            Print("Error creating ticket", GetLastError());
         }
+        
         if(ticket < 0 && GetLastError() == 130)
         {
             RefreshRates();
             ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
                                fallbackSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
         }
+        
         if(debugMode)
             Print(eaName, ": Order[", IntegerToString(k), "] ticket=", IntegerToString(ticket));
     }
