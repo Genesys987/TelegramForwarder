@@ -14,6 +14,7 @@ extern int    triggerTolerancePips     = 5;     // Pips tolerance for trailing s
 extern int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC in minutes (e.g., UTC+2 = 120)
 extern int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
 extern string symbolPostfix           = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
+extern int    limitOrderTolerancePips  = 5;     // Tolerance in pips for limit orders (-1 to use market orders)
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -45,10 +46,11 @@ bool    ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
                        double &tp1, double &tp2, double &tp3,
                        int &groupId);
 void    UpdateExistingOrdersSL(string symbol, int orderType, double newSL);
-void    SendMarketOrders(string signalType, string symbol,
+void    SendOrders(string signalType, string symbol,
                          double entryPrice, double stopLoss,
                          double lotSize, double tp1, double tp2, double tp3,
                          int groupId);
+int     GetOrderType(string signalType);
 void    HandleTrailingStops();
 void    ProcessExternalSLUpdates();
 bool    ParseOrderComment(string comment, int &groupId, double &signalSL);
@@ -115,9 +117,8 @@ int start()
         if(ReadSignalFile(signalType, symbol, entryPrice,
                           stopLoss, lotSize, tp1, tp2, tp3, groupId))
         {
-            int orderType = (signalType == "SELL") ? OP_SELL : OP_BUY;
-            UpdateExistingOrdersSL(symbol, orderType, stopLoss);
-            SendMarketOrders(signalType, symbol,
+            UpdateExistingOrdersSL(symbol, signalType, stopLoss);
+            SendOrders(signalType, symbol,
                              entryPrice, stopLoss,
                              lotSize, tp1, tp2, tp3,
                              groupId);
@@ -238,10 +239,13 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
 //+------------------------------------------------------------------+
 //| UpdateExistingOrdersSL: Update SL of existing orders            |
 //+------------------------------------------------------------------+
-void UpdateExistingOrdersSL(string symbol, int orderType, double newSL)
+void UpdateExistingOrdersSL(string symbol, string signalType, double newSL)
 {
+    int orderType = GetOrderType(signalType);
+    
     for(int i=0; i<OrdersTotal(); i++)
     {
+        
         if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
         if(OrderMagicNumber() != MAGIC_NUMBER) continue;
         if(OrderSymbol() != symbol || OrderType() != orderType) continue;
@@ -262,14 +266,29 @@ void UpdateExistingOrdersSL(string symbol, int orderType, double newSL)
 }
 
 //+------------------------------------------------------------------+
-//| SendMarketOrders: Place three market orders with SL & TP        |
+//| GetOrderType: Determine order type based on signal and settings |
 //+------------------------------------------------------------------+
-void SendMarketOrders(string signalType, string symbol,
+int GetOrderType(string signalType)
+{
+    bool shouldBuy = (signalType == "BUY");
+    bool useLimitOrders = (limitOrderTolerancePips >= 0);
+    if (useLimitOrders) {
+        return (shouldBuy) ? OP_BUYLIMIT : OP_SELLLIMIT;
+    } else {
+        return (shouldBuy) ? OP_BUY : OP_SELL;
+    }
+}
+
+//+------------------------------------------------------------------+
+//| SendOrders: Place three market or limit orders with SL & TP        |
+//+------------------------------------------------------------------+
+void SendOrders(string signalType, string symbol,
                       double entryPrice, double stopLoss,
                       double lotSize, double tp1, double tp2, double tp3,
                       int groupId)
 {
-    int orderType = (signalType == "SELL") ? OP_SELL : OP_BUY;
+    int orderType = GetOrderType(signalType);
+
     int digits    = MarketInfo(symbol, MODE_DIGITS);
     double point  = MarketInfo(symbol, MODE_POINT);
     int stopLevel = MarketInfo(symbol, MODE_STOPLEVEL);
@@ -277,22 +296,33 @@ void SendMarketOrders(string signalType, string symbol,
     RefreshRates();
     double ask = MarketInfo(symbol, MODE_ASK);
     double bid = MarketInfo(symbol, MODE_BID);
-    double price = (orderType == OP_BUY) ? ask : bid;
+    double price;
+    bool shouldUseLimitOrders = (limitOrderTolerancePips >= 0);
+    bool shouldBuy = signalType == "BUY";
+    if (shouldUseLimitOrders) {
+        // For limit orders, use entry price adjusted by tolerance
+        double tolerance = limitOrderTolerancePips * point;
+        // tolerance means, for buy orders we tolerate a higher entry price, for sell orders a lower entry price
+        price = NormalizeDouble((shouldBuy) ? entryPrice + tolerance : entryPrice - tolerance, digits);
+    } else {
+        // For market orders, use current ask/bid
+        price = (shouldBuy) ? ask : bid;
+    }
     price = NormalizeDouble(price, digits);
 
     // Check if we've missed TP1 already
-    bool missedTP1 = (orderType == OP_BUY) ? bid >= tp1 : ask <= tp1;
-    
+    bool missedTP1 = (shouldBuy) ? bid >= tp1 : ask <= tp1;
+
     // Determine which SL to use
     double rawSL, fallbackSL;
-    if(missedTP1) {
+    if(!shouldUseLimitOrders && missedTP1) {
         // Use entry price as SL if we've missed TP1
         rawSL = NormalizeDouble(entryPrice, digits);
         fallbackSL = rawSL; // No fallback needed since we're using entry
     } else {
         // Normal SL logic
         rawSL = NormalizeDouble(stopLoss, digits);
-        fallbackSL = (orderType == OP_BUY)
+        fallbackSL = (shouldBuy)
                         ? price - MathAbs(entryPrice - stopLoss)
                         : price + MathAbs(stopLoss - entryPrice);
         fallbackSL = NormalizeDouble(fallbackSL, digits);
@@ -300,8 +330,8 @@ void SendMarketOrders(string signalType, string symbol,
 
     // Apply minimum distance for SL if needed
     double minDist = MathMax(stopLevel * point, point);
-    if(orderType == OP_BUY && price - fallbackSL < minDist) fallbackSL = price - minDist;
-    if(orderType == OP_SELL && fallbackSL - price < minDist) fallbackSL = price + minDist;
+    if(shouldBuy && price - fallbackSL < minDist) fallbackSL = price - minDist;
+    if(!shouldBuy && fallbackSL - price < minDist) fallbackSL = price + minDist;
     fallbackSL = NormalizeDouble(fallbackSL, digits);
 
     double tps[3];
@@ -314,7 +344,7 @@ void SendMarketOrders(string signalType, string symbol,
         tps[j] = NormalizeDouble(tps[j], digits);
         double dist = MathAbs(tps[j] - entryPrice);
         if(dist < minDist)
-            tps[j] = (orderType == OP_BUY) ? price + minDist : price - minDist;
+            tps[j] = (shouldBuy) ? price + minDist : price - minDist;
         tps[j] = NormalizeDouble(tps[j], digits);
     }
 
@@ -338,9 +368,12 @@ void SendMarketOrders(string signalType, string symbol,
             Print("Error creating ticket", GetLastError());
         }
         
-        if(ticket < 0 && GetLastError() == 130)
+        if(ticket < 0 && GetLastError() == ERR_INVALID_STOPS)
         {
             RefreshRates();
+            // retry with fallback SL
+            if(debugMode)
+                Print(eaName, ": Retrying with fallback SL=", DoubleToString(fallbackSL, digits));
             ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
                                fallbackSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
         }
@@ -369,7 +402,7 @@ void HandleTrailingStops()
         double closeP = OrderClosePrice();
         double tp       = OrderTakeProfit();
         double tol      = triggerTolerancePips * MarketInfo(OrderSymbol(), MODE_POINT);
-        bool  triggered = (OrderType()==OP_BUY)
+        bool  triggered = (OrderType() == OP_BUY || OrderType() == OP_BUYLIMIT)
                           ? (closeP >= tp - tol)
                           : (closeP <= tp + tol);
         if(!triggered) continue;
@@ -500,12 +533,14 @@ bool CheckStopLevel(string symbol, int orderType,
     if(sl <= 0) return(true);
     int digits = MarketInfo(symbol, MODE_DIGITS);
     double point= MarketInfo(symbol, MODE_POINT);
-    double minDist = MarketInfo(symbol, MODE_STOPLEVEL) * point + point;
+    double minStopLevelDist = MarketInfo(symbol, MODE_STOPLEVEL) * point + point;
     bool valid;
-    if(orderType == OP_BUY)
-        valid = (sl < bid && bid - sl >= minDist);
-    else if(orderType == OP_SELL)
-        valid = (sl > ask && sl - ask >= minDist);
+    if(orderType == OP_BUY || orderType == OP_BUYLIMIT)
+         // For buy orders, SL must be below the bid price
+         valid = (sl < bid && bid - sl >= minStopLevelDist);
+    else if(orderType == OP_SELL || orderType == OP_SELLLIMIT)
+         // For sell orders, SL must be above the ask price
+         valid = (sl > ask && sl - ask >= minStopLevelDist);
     else valid = false;
     if(!valid && debugMode)
         Print(eaName, ": invalid SL ", DoubleToString(sl, digits));
