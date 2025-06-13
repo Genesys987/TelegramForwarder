@@ -15,4 +15,6 @@ python3 -m pip install --user pipenv
 pipenv install
 # run app
 pipenv run python main.py
+# run unit tests
+pipenv run python -m unittest
 ```
