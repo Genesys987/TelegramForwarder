@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from telethon import TelegramClient, events
 import traceback
 import os
+from channel_utils import join_channel
 
 # --- Configuration ---
 try:
@@ -105,14 +106,13 @@ async def process_new_standard_signal(message_text: str, message_id: int, messag
     group_id = get_next_group_id() # Generáljuk az ÚJ GID-t
     signal_data["group_id"] = group_id # Hozzáadjuk a dict-hez
     print(f"   Új GroupID: {group_id}")
-
     add_gid_mapping(message_id, group_id) # Eltároljuk az összerendelést
     print(f"   Map tárolva: MsgID {message_id} -> GID {group_id}")
 
     # Hozzáadjuk a queue-hoz (a queue manager formázza és írja a queue fájlba)
     if add_signal_to_queue(signal_data): print(f"   Jelzés queue-hoz adva (GID {group_id})."); return group_id
     else: print(f"   Hiba: Jelzés queue-hoz adása sikertelen (GID {group_id})."); return None
-
+    
 # --- Main Bot Logic ---
 async def run_userbot():
     print("Bot indítása...")
@@ -133,6 +133,21 @@ async def run_userbot():
                 joined_chats_entity.append(entity)
             except Exception as e: print(f"❌ Hiba csatorna kezelésekor ({link}): {e}")
     if not joined_chats_entity: print("Figyelmeztetés: Nem figyelünk csatornákat.")
+
+    # Példa: join_channel használata a config.py-ból szervezett targetekkel
+    from config import CHANNEL_JOIN_TARGETS
+    for target in CHANNEL_JOIN_TARGETS:
+        try:
+            print(f"Próbálkozás csatlakozni: {target}")
+            channel = await join_channel(client, target)
+            if channel:
+                print(f"Sikeres csatlakozás: {getattr(channel, 'title', repr(channel))}")
+            else:
+                print(f"Nem sikerült csatlakozni: {target}")
+        except Exception as e:
+            print(f"join_channel hiba: {type(e).__name__}, üzenet: {e}")
+    else:
+        print(f"Összesen {len(joined_chats_entity)} csatornát figyelünk.")
 
     @client.on(events.NewMessage(chats=joined_chats_entity or None))
     async def new_message_handler(event):

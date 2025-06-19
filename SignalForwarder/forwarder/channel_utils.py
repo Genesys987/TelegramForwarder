@@ -1,0 +1,126 @@
+from typing import Union, Optional
+from telethon.tl.types import InputPeerChannel
+from telethon.tl.functions.channels import JoinChannelRequest
+from telethon.tl.functions.messages import ImportChatInviteRequest
+from telethon.errors import (
+    ChannelPrivateError, FloodWaitError, RPCError
+)
+import re
+import asyncio
+
+async def join_channel(client, target: Union[int, str], access_hash: Optional[int] = None):
+    """
+    Intelligens csatorna csatlakozás, ami támogatja az alábbi formátumokat:
+    - Számszerű csatorna ID (pl. -1001234567890)
+    - Meghívó link (pl. https://t.me/joinchat/ABCDEFG vagy https://t.me/+ABCDEFG)
+    - Web Telegram link (pl. https://web.telegram.org/k/#-1234567890)
+    - Username (pl. @channel_name vagy https://t.me/channel_name)
+    
+    Visszaad: Az entity objektumot sikeres csatlakozás esetén, None-t egyébként.
+    Ha már tagok vagyunk, megpróbál egy entity objektumot visszaadni.
+    """
+    print(f"Próbálkozás csatlakozni: {target}")
+    try:
+        # --- Numerikus channel_id ---
+        if isinstance(target, int) or (isinstance(target, str) and target.lstrip('-').isdigit()):
+            channel_id = int(target)
+            if access_hash:
+                peer = InputPeerChannel(channel_id, access_hash)
+            else:
+                entity = await client.get_entity(channel_id)
+                peer = InputPeerChannel(entity.id, entity.access_hash)
+            try:
+                await client(JoinChannelRequest(peer))
+                print(f"Sikeres csatlakozás numerikus ID-val: {channel_id}")
+            except RPCError as e:
+                if any(x in str(e) for x in ['USER_ALREADY_PARTICIPANT', 'ALREADY_PARTICIPANT', 'UserAlreadyParticipantError']):
+                    print(f"Már tag vagy ebben a csatornában: {channel_id}")
+                else:
+                    raise
+            return await client.get_entity(peer)
+
+        # --- Invite-link ---
+        elif isinstance(target, str) and ("t.me/joinchat/" in target or "t.me/+" in target):
+            if "t.me/joinchat/" in target:
+                hash_ = target.rsplit('/', 1)[-1]
+            elif "t.me/+" in target:
+                hash_ = target.split('+', 1)[-1]
+            else:
+                raise ValueError(f"Nem található meghívó hash ebben a linkben: {target}")
+                
+            try:
+                result = await client(ImportChatInviteRequest(hash_))
+                print(f"Sikeres csatlakozás invite-linkkel: {target}")
+                return result
+            except RPCError as e:
+                if any(x in str(e) for x in ['ALREADY_PARTICIPANT', 'USER_ALREADY_PARTICIPANT', 'UserAlreadyParticipantError']):
+                    print(f"Már tag vagy ebben a csatornában (invite-link): {target}")
+                    # Ha már tagok vagyunk, próbáljunk visszaadni egy entitást
+                    try:
+                        # Mivel már csatlakoztunk, próbáljuk megkapni az entitást
+                        # a csatlakoztatott dialógusok listájából
+                        async for dialog in client.iter_dialogs(limit=50):  # csak az első 50-et nézzük
+                            if dialog.entity and hasattr(dialog.entity, 'title') and dialog.entity.title:
+                                # A dialogusok sorrendje jellemzően a legutóbbi aktivitás szerint van,
+                                # így a frissen csatlakozott csatorna általában az elején lesz
+                                return dialog.entity
+                    except Exception as inner_e:
+                        print(f"Nem sikerült megszerezni az entitást a már csatlakozott csatornához: {inner_e}")
+                else:
+                    raise
+
+        # --- Web Telegram link ---
+        elif isinstance(target, str) and "web.telegram.org/k/" in target and "#" in target:
+            m = re.search(r'#(-?\d+)', target)
+            if not m:
+                raise ValueError("Nem található chat_id a webes linkben.")
+            
+            raw = int(m.group(1))
+            base = abs(raw)
+            chat_id = int(f"-100{base}")
+            
+            entity = await client.get_entity(chat_id)
+            peer = InputPeerChannel(entity.id, entity.access_hash)
+            
+            try:
+                await client(JoinChannelRequest(peer))
+                print(f"Sikeres csatlakozás webes linkkel: {target}")
+            except RPCError as e:
+                if any(x in str(e) for x in ['USER_ALREADY_PARTICIPANT', 'ALREADY_PARTICIPANT', 'UserAlreadyParticipantError']):
+                    print(f"Már tag vagy ebben a csatornában (webes link): {target}")
+                else:
+                    raise
+            
+            return await client.get_entity(peer)        # --- Username (publikus csatornák) ---
+        elif isinstance(target, str) and (target.startswith('@') or ('t.me/' in target and not ('joinchat' in target or '+' in target))):
+            username = target.replace('https://t.me/', '').replace('@', '')
+            try:
+                entity = await client.get_entity(username)
+                try:
+                    await client(JoinChannelRequest(entity))
+                    print(f"Sikeres csatlakozás username-mel: {username}")
+                except RPCError as e:
+                    if any(x in str(e) for x in ['USER_ALREADY_PARTICIPANT', 'ALREADY_PARTICIPANT', 'UserAlreadyParticipantError']):
+                        print(f"Már tag vagy ebben a csatornában: {username}")
+                    else:
+                        raise
+                return entity
+            except Exception as e:
+                print(f"Hiba username ({username}) kezelésekor: {e}")
+                
+        else:
+            raise ValueError("Ismeretlen target formátum.")
+
+    except ChannelPrivateError as e:
+        print(f"Hiba: {type(e).__name__}, üzenet: {e} (Privát vagy tiltott csatorna)")
+    except FloodWaitError as e:
+        print(f"Hiba: {type(e).__name__}, üzenet: {e}. Várakozás {e.seconds} másodpercig...")
+        await asyncio.sleep(e.seconds)
+        return await join_channel(client, target, access_hash)
+    except RPCError as e:
+        print(f"Hiba: {type(e).__name__}, üzenet: {e}")
+    except ValueError as e:
+        print(f"Hiba: {type(e).__name__}, üzenet: {e}")
+    except Exception as e:
+        print(f"Hiba: {type(e).__name__}, üzenet: {e}")
+    return None
