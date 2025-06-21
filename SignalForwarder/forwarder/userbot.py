@@ -132,9 +132,12 @@ async def run_userbot():
                 print(f"✅ Figyelés beállítva erre: {title}")
                 joined_chats_entity.append(entity)
             except Exception as e: print(f"❌ Hiba csatorna kezelésekor ({link}): {e}")
-    if not joined_chats_entity: print("Figyelmeztetés: Nem figyelünk csatornákat.")
+    if not joined_chats_entity: 
+        print("Figyelmeztetés: Nem figyelünk csatornákat.")
+        quit()
+    
 
-    @client.on(events.NewMessage(chats=joined_chats_entity or None))
+    @client.on(events.NewMessage(chats=joined_chats_entity))
     async def new_message_handler(event):
         message = event.message; message_text = message.text; message_id = message.id
         chat_title = getattr(event.chat, 'title', None) or getattr(event.chat, 'username', None) or event.chat_id
