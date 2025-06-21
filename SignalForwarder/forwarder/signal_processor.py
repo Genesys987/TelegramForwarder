@@ -23,7 +23,7 @@ def process_signal(text: str):
     stop_loss = parsed["stop_loss"]
 
     # Lot méret kiszámítása
-    lot_size = calculate_lot_size(entry_price, stop_loss)
+    lot_size = calculate_lot_size(symbol, entry_price, stop_loss)
 
     # Végleges signal_data
     signal_data = {
