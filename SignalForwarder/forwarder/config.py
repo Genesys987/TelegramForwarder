@@ -23,8 +23,8 @@ assert API_HASH is not None, "TELEGRAM_API_HASH is not set in .env file"
 # ---
 # Default MT4 Data Folder path component (adjust if needed)
 # Often like: C:\Users\YourUsername\AppData\Roaming\MetaQuotes\Terminal\INSTANCE_ID
-mt4_data_folder = config["MT4_FOLDER"]
-assert mt4_data_folder is not None, "MT4_FOLDER is not set in .env file"
+mt4_data_folder = config["MT4_FOLDERS"]
+assert mt4_data_folder is not None, "MT4_FOLDERS is not set in .env file"
 assert os.path.exists(mt4_data_folder), f"MT4 data folder does not exist: {mt4_data_folder}"
 mql4_files_folder = os.path.join(mt4_data_folder, "MQL4", "Files")
 

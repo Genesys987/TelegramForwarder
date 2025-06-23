@@ -6,18 +6,9 @@ Feladata:
 - A parsed (feldolgozott) signal_data adatait a queue-ba (fájlból) írja (add_signal_to_queue).
 - A queue tartalmát pedig (process_signal_queue) átemeli a signals.txt-be, ha az EA éppen nem használja,
   vagyis ha a signals.txt nem létezik.
-
-Változtatások / Refaktorálás:
-- Részletes docstringek
-- Hibakezelés bővítése
-- Extra log beépítése, ha mégis lenne valami furcsa karakter a kiírt sorokban
-- Minimális formátum-ellenőrzés a queue-ba íráskor
-- Mindkét függvényben robust logolás, traceback, rövid kommentek
 """
 import os
-import time
 import traceback
-import json
 from config import MT4_QUEUE_FILE_PATH, MT4_SIGNAL_FILE_PATH
 
 def add_signal_to_queue(signal_data: dict) -> bool:

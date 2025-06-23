@@ -3,10 +3,12 @@
 # Copies all MQL4 files from the current directory to the Experts directory of the MT4 installation specified in the .env file.
 
 # Load environment variables from .env file
-if [ -f "../forwarder/.env" ]; then
-    export $(grep -v '^#' ../forwarder/.env | xargs)
+ENV_FILE=".env"
+
+if [ -f "$ENV_FILE" ]; then
+    export $(grep -v '^#' "$ENV_FILE" | xargs)
 else
-    echo "Error: .env file not found at ../forwarder/.env"
+    echo "Error: .env file not found at $ENV_FILE"
     exit 1
 fi
 
