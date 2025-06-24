@@ -27,20 +27,42 @@ mt4_data_folders = config["MT4_FOLDERS"].split(",") if config["MT4_FOLDERS"] els
 assert mt4_data_folders is not None, "MT4_FOLDERS is not set in .env file"
 for folder in mt4_data_folders:
     assert os.path.exists(folder), f"MT4 data folder does not exist: {folder}"
-mql4_files_folder = os.path.join(mt4_data_folders[0], "MQL4", "Files")
+
+# --- Helper function to get MT4 data folder ID ---
+def getMT4DataFolderId(folder_path):
+    """
+    Get the MT4 data folder ID from the last directory name.
+    Takes the first 6 characters of the last folder name.
+    Example: /path/to/7D024799C00A011848A10ECEDFE5CBC2 -> 7D0247
+    """
+    folder_name = os.path.basename(folder_path.rstrip(os.sep))
+    return folder_name[:6] if len(folder_name) >= 6 else folder_name
 
 # --- Files used for communication ---
-# Queue file (Python writes signals here temporarily) - Can be anywhere Python has access
-MT4_QUEUE_FILE_PATHS = os.path.join(_basedir, "signals_queue.txt") # Store alongside scripts
-print(f"MT4_QUEUE_FILE_PATH: {MT4_QUEUE_FILE_PATHS}")
+# Queue files (Python writes signals here temporarily) - Can be anywhere Python has access
+MT4_QUEUE_FILE_PATHS = []
+for folder in mt4_data_folders:
+    folder_id = getMT4DataFolderId(folder)
+    queue_filename = f"signals_queue_{folder_id}.txt"
+    queue_path = os.path.join(_basedir, queue_filename)
+    MT4_QUEUE_FILE_PATHS.append(queue_path)
+    print(f"MT4_QUEUE_FILE_PATH: {queue_path}")
 
-# Signal file (Python writes final signal here for EA) - MUST be in MQL4/Files
-MT4_SIGNAL_FILE_PATHS = os.path.join(mql4_files_folder, "signals.txt")
-print(f"MT4_SIGNAL_FILE_PATH: {MT4_SIGNAL_FILE_PATHS}")
+# Signal files (Python writes final signal here for EA) - MUST be in MQL4/Files
+MT4_SIGNAL_FILE_PATHS = []
+for folder in mt4_data_folders:
+    mql4_files_folder = os.path.join(folder, "MQL4", "Files")
+    signal_path = os.path.join(mql4_files_folder, "signals.txt")
+    MT4_SIGNAL_FILE_PATHS.append(signal_path)
+    print(f"MT4_SIGNAL_FILE_PATH: {signal_path}")
 
-# Stoploss update file (Python writes SL commands here for EA) - MUST be in MQL4/Files
-STOPLOSS_UPDATE_FILE_PATHS = os.path.join(mql4_files_folder, "stoploss_update.txt")
-print(f"STOPLOSS_UPDATE_FILE_PATH: {STOPLOSS_UPDATE_FILE_PATHS}")
+# Stoploss update files (Python writes SL commands here for EA) - MUST be in MQL4/Files
+STOPLOSS_UPDATE_FILE_PATHS = []
+for folder in mt4_data_folders:
+    mql4_files_folder = os.path.join(folder, "MQL4", "Files")
+    stoploss_path = os.path.join(mql4_files_folder, "stoploss_update.txt")
+    STOPLOSS_UPDATE_FILE_PATHS.append(stoploss_path)
+    print(f"STOPLOSS_UPDATE_FILE_PATH: {stoploss_path}")
 
 # --- Files for Python Bot State ---
 # File to store the last used Group ID (Python internal state) - Can be anywhere
