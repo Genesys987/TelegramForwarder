@@ -10,7 +10,7 @@ Get Telegram API key at https://my.telegram.org/.
 cp .env.example .env
 # !! At this point, add your config to .env !!
 # install pipenv
-python3 -m pip install --user pipenv
+python -m pip install --user pipenv
 # install project dependencies
 pipenv install
 # run app
