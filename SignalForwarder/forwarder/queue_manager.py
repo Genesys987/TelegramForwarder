@@ -9,7 +9,7 @@ Feladata:
 """
 import os
 import traceback
-from config import MT4_QUEUE_FILE_PATH, MT4_SIGNAL_FILE_PATH
+from config import MT4_QUEUE_FILE_PATHS, MT4_SIGNAL_FILE_PATHS
 
 def add_signal_to_queue(signal_data: dict) -> bool:
     """
@@ -59,11 +59,11 @@ def add_signal_to_queue(signal_data: dict) -> bool:
                    f"GID:{signal_data['group_id']}\n")
 
         # 5) I/O művelet: Hozzáfűzés a queue-fájlhoz
-        with open(MT4_QUEUE_FILE_PATH, "a", encoding='utf-8') as f:
+        with open(MT4_QUEUE_FILE_PATHS, "a", encoding='utf-8') as f:
             f.write(message)
 
         # Logolás
-        print(f"✅ [QueueAdd] Hozzáadva a queue fájlhoz ('{os.path.basename(MT4_QUEUE_FILE_PATH)}'): {message.strip()}")
+        print(f"✅ [QueueAdd] Hozzáadva a queue fájlhoz ('{os.path.basename(MT4_QUEUE_FILE_PATHS)}'): {message.strip()}")
         return True
 
     except Exception as e:
@@ -85,10 +85,10 @@ def process_signal_queue() -> None:
     """
     try:
         # 1) Gyors ellenőrzés: queue létezik-e, van-e benne tartalom
-        if not os.path.exists(MT4_QUEUE_FILE_PATH) or os.path.getsize(MT4_QUEUE_FILE_PATH) == 0:
+        if not os.path.exists(MT4_QUEUE_FILE_PATHS) or os.path.getsize(MT4_QUEUE_FILE_PATHS) == 0:
             return  # Nincs semmi a queue-ban
         # 2) signals.txt létezésének ellenőrzése
-        if os.path.exists(MT4_SIGNAL_FILE_PATH):
+        if os.path.exists(MT4_SIGNAL_FILE_PATHS):
             # Az EA még valószínűleg nem dolgozta fel az előző jelet
             return
 
@@ -97,7 +97,7 @@ def process_signal_queue() -> None:
         first_valid_line_index = -1
 
         # 3) Beolvassuk a queue file sorait
-        with open(MT4_QUEUE_FILE_PATH, "r", encoding='utf-8') as f:
+        with open(MT4_QUEUE_FILE_PATHS, "r", encoding='utf-8') as f:
             lines = f.readlines()
         if not lines:  # semmi nincs benne
             return
@@ -113,14 +113,14 @@ def process_signal_queue() -> None:
         if next_signal is None:
             # minden sor üres, akkor resetelhetjük a file-t
             if all(not line.strip() for line in lines):
-                open(MT4_QUEUE_FILE_PATH, 'w', encoding='utf-8').close()
+                open(MT4_QUEUE_FILE_PATHS, 'w', encoding='utf-8').close()
             return
 
         # 5) Megpróbáljuk írni a signals.txt-be
         # Ha közben a signals.txt létrejött, azaz az EA (vagy más) is...
         # de a fenti if ezt már lekezelte, feltételezzük, hogy most még nincs signals.txt
         try:
-            with open(MT4_SIGNAL_FILE_PATH, "w", encoding='utf-8') as f:
+            with open(MT4_SIGNAL_FILE_PATHS, "w", encoding='utf-8') as f:
                 f.write(next_signal)
         except IOError as e:
             print(f"❌ [Queue->EA] Hiba signals.txt írásnál: {e}")
@@ -128,10 +128,10 @@ def process_signal_queue() -> None:
 
         # 6) Töröljük az első érvényes sort a queue-ból
         try:
-            with open(MT4_QUEUE_FILE_PATH, "w", encoding='utf-8') as f:
+            with open(MT4_QUEUE_FILE_PATHS, "w", encoding='utf-8') as f:
                 if first_valid_line_index + 1 < len(lines):
                     f.writelines(lines[first_valid_line_index + 1:])
-            print(f"📤 [Queue->EA] Szignál -> EA fájl ('{os.path.basename(MT4_SIGNAL_FILE_PATH)}'): {next_signal}")
+            print(f"📤 [Queue->EA] Szignál -> EA fájl ('{os.path.basename(MT4_SIGNAL_FILE_PATHS)}'): {next_signal}")
         except IOError as e:
             print(f"❌ [QueueUpdate] Kritikus hiba a queue frissítésnél: {e}")
             return

@@ -23,23 +23,24 @@ assert API_HASH is not None, "TELEGRAM_API_HASH is not set in .env file"
 # ---
 # Default MT4 Data Folder path component (adjust if needed)
 # Often like: C:\Users\YourUsername\AppData\Roaming\MetaQuotes\Terminal\INSTANCE_ID
-mt4_data_folder = config["MT4_FOLDERS"]
-assert mt4_data_folder is not None, "MT4_FOLDERS is not set in .env file"
-assert os.path.exists(mt4_data_folder), f"MT4 data folder does not exist: {mt4_data_folder}"
-mql4_files_folder = os.path.join(mt4_data_folder, "MQL4", "Files")
+mt4_data_folders = config["MT4_FOLDERS"].split(",") if config["MT4_FOLDERS"] else None
+assert mt4_data_folders is not None, "MT4_FOLDERS is not set in .env file"
+for folder in mt4_data_folders:
+    assert os.path.exists(folder), f"MT4 data folder does not exist: {folder}"
+mql4_files_folder = os.path.join(mt4_data_folders[0], "MQL4", "Files")
 
 # --- Files used for communication ---
 # Queue file (Python writes signals here temporarily) - Can be anywhere Python has access
-MT4_QUEUE_FILE_PATH = os.path.join(_basedir, "signals_queue.txt") # Store alongside scripts
-print(f"MT4_QUEUE_FILE_PATH: {MT4_QUEUE_FILE_PATH}")
+MT4_QUEUE_FILE_PATHS = os.path.join(_basedir, "signals_queue.txt") # Store alongside scripts
+print(f"MT4_QUEUE_FILE_PATH: {MT4_QUEUE_FILE_PATHS}")
 
 # Signal file (Python writes final signal here for EA) - MUST be in MQL4/Files
-MT4_SIGNAL_FILE_PATH = os.path.join(mql4_files_folder, "signals.txt")
-print(f"MT4_SIGNAL_FILE_PATH: {MT4_SIGNAL_FILE_PATH}")
+MT4_SIGNAL_FILE_PATHS = os.path.join(mql4_files_folder, "signals.txt")
+print(f"MT4_SIGNAL_FILE_PATH: {MT4_SIGNAL_FILE_PATHS}")
 
 # Stoploss update file (Python writes SL commands here for EA) - MUST be in MQL4/Files
-STOPLOSS_UPDATE_FILE_PATH = os.path.join(mql4_files_folder, "stoploss_update.txt")
-print(f"STOPLOSS_UPDATE_FILE_PATH: {STOPLOSS_UPDATE_FILE_PATH}")
+STOPLOSS_UPDATE_FILE_PATHS = os.path.join(mql4_files_folder, "stoploss_update.txt")
+print(f"STOPLOSS_UPDATE_FILE_PATH: {STOPLOSS_UPDATE_FILE_PATHS}")
 
 # --- Files for Python Bot State ---
 # File to store the last used Group ID (Python internal state) - Can be anywhere

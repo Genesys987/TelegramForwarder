@@ -4,10 +4,10 @@ import os
 import traceback
 
 try:
-    from config import STOPLOSS_UPDATE_FILE_PATH
+    from config import STOPLOSS_UPDATE_FILE_PATHS
 except ImportError:
     print("Hiba: config.py/STOPLOSS_UPDATE_FILE_PATH hiányzik.")
-    STOPLOSS_UPDATE_FILE_PATH = "stoploss_update.txt"
+    STOPLOSS_UPDATE_FILE_PATHS = "stoploss_update.txt"
 
 # Helper function (copied from userbot refactoring)
 def extract_price_from_text(text):
@@ -52,12 +52,12 @@ def process_stoploss_reply(reply_text, original_text, group_id):
     command = f"GID:{group_id}|NEW_SL:{new_sl_value_formatted}"
 
     try:
-        with open(STOPLOSS_UPDATE_FILE_PATH, "w", encoding='utf-8') as f:
+        with open(STOPLOSS_UPDATE_FILE_PATHS, "w", encoding='utf-8') as f:
             f.write(command)
-        print(f"✅ SL Update parancs kiírva ('{os.path.basename(STOPLOSS_UPDATE_FILE_PATH)}'): {command}")
+        print(f"✅ SL Update parancs kiírva ('{os.path.basename(STOPLOSS_UPDATE_FILE_PATHS)}'): {command}")
         return command
     except IOError as e:
-        print(f"❌ Hiba SL Update parancs írásakor ('{STOPLOSS_UPDATE_FILE_PATH}'): {e}")
+        print(f"❌ Hiba SL Update parancs írásakor ('{STOPLOSS_UPDATE_FILE_PATHS}'): {e}")
         return None
     except Exception as e:
         print(f"❌ Váratlan Hiba SL Update parancs írásakor: {e}")
