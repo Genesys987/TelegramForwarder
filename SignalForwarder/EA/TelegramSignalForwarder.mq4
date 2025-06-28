@@ -274,9 +274,18 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL)
     for(int i=0; i<OrdersTotal(); i++)
     {
         
-        if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
-        if(OrderMagicNumber() != MAGIC_NUMBER) continue;
-        if(OrderSymbol() != symbol || OrderType() != orderType) continue;
+        if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+          if (debugMode) Print(eaName, ": Failed to select order at index ", IntegerToString(i), " - error=", IntegerToString(GetLastError()));
+          continue;
+        }
+        if(OrderMagicNumber() != MAGIC_NUMBER) {
+          if (debugMode) Print(eaName, ": Ignoring order at index ", IntegerToString(i), " - wrong magic number");
+          continue;
+        }
+        if(OrderSymbol() != symbol || OrderType() != orderType) {
+          if (debugMode) Print(eaName, ": Ignoring order at index ", IntegerToString(i), " - symbol/type mismatch");
+          continue;
+        }
 
         double currSL = OrderStopLoss();
         if(MathAbs(currSL - newSL) > SL_MODIFY_THRESHOLD)
@@ -552,9 +561,18 @@ void ProcessExternalSLUpdates()
     int total = OrdersTotal();
     for(int i=0; i<total; i++)
     {
-        if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
-        if(OrderMagicNumber() != MAGIC_NUMBER) continue;
-        if(StringFind(OrderComment(), "GID:" + IntegerToString(gid)) < 0) continue;
+        if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+            if(debugMode) Print(eaName, ": ext SL order select failed at index ", IntegerToString(i));
+            continue;
+        }
+        if(OrderMagicNumber() != MAGIC_NUMBER) {
+            if(debugMode) Print(eaName, ": Ignoring order at index ", IntegerToString(i), " - wrong magic number");
+            continue;
+        }
+        if(StringFind(OrderComment(), "GID:" + IntegerToString(gid)) < 0) {
+            if(debugMode) Print(eaName, ": Ignoring order at index ", IntegerToString(i), " - GID mismatch");
+            continue;
+        }
         double op = OrderOpenPrice();
         double tp = OrderTakeProfit();
         if(!OrderModify(OrderTicket(), op, newSL, tp, 0, clrGold) && debugMode)
