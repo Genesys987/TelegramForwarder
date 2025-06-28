@@ -156,26 +156,33 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
     }
     
     // Move file to temp to avoid reprocessing
-    if(!FileMove(gSignalFile, 0, gTempFile, FILE_REWRITE))
-        return(false);
+    if(!FileMove(gSignalFile, 0, gTempFile, FILE_REWRITE)) {
+      Print(eaName, ": Failed to move signal file to temp");
+      return(false);
+    }
 
     int tfh = FileOpen(gTempFile, FILE_READ | FILE_TXT | FILE_ANSI);
     if(tfh == INVALID_HANDLE)
     {
         FileDelete(gTempFile);
+        Print(eaName, ": Failed to open temp file for reading");
         return(false);
     }
     string line = FileReadString(tfh);
     FileClose(tfh);
     FileDelete(gTempFile);
 
-    if(StringLen(line) == 0 || StringFind(line, "PROCESSED") >= 0)
+    if(StringLen(line) == 0 || StringFind(line, "PROCESSED") >= 0) {
+        Print(eaName, ": Empty or already processed signal line, skipping");
         return(false);
+    }
 
     // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3|SL|LOT|GID:<id>
     string parts[];
-    if(StringSplit(line, '|', parts) < 8)
+    if(StringSplit(line, '|', parts) < 8) {
+        Print(eaName, ": Invalid signal format, expected 8 parts but got ", IntegerToString(ArraySize(parts)));
         return(false);
+    }
 
     // 0) Extract and validate timestamp (first part, no prefix)
     string timestampStr = parts[0];
@@ -189,21 +196,31 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
 
     // 1) Signal type
     signalType = ToUpperCase(Trim(parts[1]));
-    if(signalType != "BUY" && signalType != "SELL")
+    if(signalType != "BUY" && signalType != "SELL") {
+        Print(eaName, ": Invalid signal type '", signalType, "', expected BUY or SELL");
         return(false);
+    }
 
     // 2) Symbol validation
     symbol = Trim(parts[2]) + symbolPostfix;
-    if(MarketInfo(symbol, MODE_TIME) == 0)
+    if(MarketInfo(symbol, MODE_TIME) == 0) {
+        Print(eaName, ": Invalid symbol '", symbol, "', skipping");
         return(false);
+    }
 
     // 3) Entry price
-    if(!IsValidDouble(parts[3])) return(false);
+    if(!IsValidDouble(parts[3])) {
+        Print(eaName, ": Invalid entry price '", parts[3], "', skipping");
+        return(false);
+    }
     entryPrice = NormalizeDouble(StrToDouble(parts[3]), MarketInfo(symbol, MODE_DIGITS));
 
     // 4) TP levels
     string tpsArr[];
-    if(StringSplit(parts[4], ',', tpsArr) < 3) return(false);
+    if(StringSplit(parts[4], ',', tpsArr) < 3) {
+        Print(eaName, ": Invalid TP levels '", parts[4], "', skipping");
+        return(false);
+    }
     tp1 = NormalizeDouble(StrToDouble(tpsArr[0]), MarketInfo(symbol, MODE_DIGITS));
     tp2 = NormalizeDouble(StrToDouble(tpsArr[1]), MarketInfo(symbol, MODE_DIGITS));
     tp3 = NormalizeDouble(StrToDouble(tpsArr[2]), MarketInfo(symbol, MODE_DIGITS));
@@ -217,21 +234,32 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
         if(b2 < 0) break;
         rawSL = StringSubstr(rawSL, 0, b1) + StringSubstr(rawSL, b2+1);
     }
-    if(!IsValidDouble(rawSL)) return(false);
+    if(!IsValidDouble(rawSL)) {
+        Print(eaName, ": Invalid stop loss '", rawSL, "', skipping");
+        return(false);
+    }
     stopLoss = NormalizeDouble(StrToDouble(rawSL), MarketInfo(symbol, MODE_DIGITS));
 
     // 6) Lot size
-    if(!IsValidDouble(parts[6])) return(false);
+    if(!IsValidDouble(parts[6])) {
+        Print(eaName, ": Invalid lot size '", parts[6], "', skipping");
+        return(false);
+    }
     lotSize = NormalizeDouble(StrToDouble(parts[6]), 2);
 
     // 7) Group ID
     string gidPart = parts[7];
-    if(StringFind(gidPart, "GID:") != 0) return(false);
+    if(StringFind(gidPart, "GID:") != 0) {
+        Print(eaName, ": Invalid group ID format '", gidPart, "', skipping");
+        return(false);
+    }
     groupId = (int)StrToInteger(StringSubstr(gidPart, 4));
-    if(groupId <= 0) return(false);
+    if(groupId <= 0) {
+        Print(eaName, ": Invalid group ID '", IntegerToString(groupId), "', skipping");
+        return(false);
+    }
 
-    if(debugMode)
-        Print(eaName, ": Parsed signal GID=", IntegerToString(groupId));
+    Print(eaName, ": Parsed signal GID=", IntegerToString(groupId));
 
     return(true);
 }
@@ -397,7 +425,7 @@ void HandleTrailingStops()
     lastTrailingScan = now;
 
     int historyTotal = OrdersHistoryTotal();
-    if(debugMode) Print(eaName, ": TS checking ", IntegerToString(historyTotal), " history orders");
+    Print(eaName, ": TS checking ", IntegerToString(historyTotal), " history orders");
     
     for(int i=historyTotal-1; i>=0; i--)
     {
