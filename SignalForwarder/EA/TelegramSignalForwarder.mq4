@@ -389,49 +389,95 @@ void SendOrders(string signalType, string symbol,
 void HandleTrailingStops()
 {
     datetime now = TimeCurrent();
-    if(now - lastTrailingScan < trailingCheckIntervalSec) return;
+    if(now - lastTrailingScan < trailingCheckIntervalSec) 
+    {
+        if(debugMode) Print(eaName, ": TS scan skipped - interval not reached");
+        return;
+    }
     lastTrailingScan = now;
 
-    if(debugMode) Print(eaName, ": TS scan start");
-
     int historyTotal = OrdersHistoryTotal();
+    if(debugMode) Print(eaName, ": TS checking ", IntegerToString(historyTotal), " history orders");
+    
     for(int i=historyTotal-1; i>=0; i--)
     {
-        if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
-        if(OrderMagicNumber() != MAGIC_NUMBER) continue;
+        if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) 
+        {
+            if(debugMode) Print(eaName, ": TS history order select failed at index ", IntegerToString(i));
+            continue;
+        }
+        if(OrderMagicNumber() != MAGIC_NUMBER) 
+        {
+            if(debugMode) Print(eaName, ": TS skipping history order - wrong magic number: ", IntegerToString(OrderMagicNumber()));
+            continue;
+        }
         double closeP = OrderClosePrice();
         double tp       = OrderTakeProfit();
         double tol      = triggerTolerancePips * MarketInfo(OrderSymbol(), MODE_POINT);
         bool  triggered = (OrderType() == OP_BUY || OrderType() == OP_BUYLIMIT)
                           ? (closeP >= tp - tol)
                           : (closeP <= tp + tol);
-        if(!triggered) continue;
+        if(!triggered) 
+        {
+            if(debugMode) Print(eaName, ": TS order not triggered ticket ", IntegerToString(OrderTicket()), " - closeP=", DoubleToString(closeP, 5), 
+                     " tp=", DoubleToString(tp, 5), " tol=", DoubleToString(tol, 5));
+            continue;
+        }
         int gid; double sl;
         if(ParseOrderComment(OrderComment(), gid, sl))
+        {
+            if(debugMode) Print(eaName, ": TS adding triggered group: ", IntegerToString(gid));
             AddTriggeredGroup(gid);
+        }
+        else if(debugMode) 
+            Print(eaName, ": TS failed to parse comment: ", OrderComment());
     }
 
     if(triggeredCount == 0)
     {
-        if(debugMode) Print(eaName, ": no TS triggers");
+        if(debugMode) Print(eaName, ": no TS triggers found");
         return;
     }
 
+    if(debugMode) Print(eaName, ": TS found ", IntegerToString(triggeredCount), " triggered groups");
+
     int openTotal = OrdersTotal();
+    if(debugMode) Print(eaName, ": TS checking ", IntegerToString(openTotal), " open orders");
+    
     for(int m=0; m<openTotal; m++)
     {
-        if(!OrderSelect(m, SELECT_BY_POS, MODE_TRADES)) continue;
-        if(OrderMagicNumber() != MAGIC_NUMBER) continue;
+        if(!OrderSelect(m, SELECT_BY_POS, MODE_TRADES)) 
+        {
+            if(debugMode) Print(eaName, ": TS open order select failed at index ", IntegerToString(m));
+            continue;
+        }
+        if(OrderMagicNumber() != MAGIC_NUMBER) 
+        {
+            if(debugMode) Print(eaName, ": TS skipping open order - wrong magic number: ", IntegerToString(OrderMagicNumber()));
+            continue;
+        }
         int ticket = OrderTicket();
-        if(HasBeenModified(ticket)) continue;
+        if(HasBeenModified(ticket)) 
+        {
+            if(debugMode) Print(eaName, ": TS skipping ticket ", IntegerToString(ticket), " - already modified");
+            continue;
+        }
 
         int gid; double sl;
-        if(!ParseOrderComment(OrderComment(), gid, sl)) continue;
+        if(!ParseOrderComment(OrderComment(), gid, sl)) 
+        {
+            if(debugMode) Print(eaName, ": TS failed to parse comment for ticket ", IntegerToString(ticket), ": ", OrderComment());
+            continue;
+        }
 
         bool belongs = false;
         for(int n=0; n<triggeredCount; n++)
             if(triggeredGroups[n] == gid) { belongs = true; break; }
-        if(!belongs) continue;
+        if(!belongs) 
+        {
+            if(debugMode) Print(eaName, ": TS ticket ", IntegerToString(ticket), " GID ", IntegerToString(gid), " not in triggered groups");
+            continue;
+        }
 
         double openP = OrderOpenPrice();
         int d       = MarketInfo(OrderSymbol(), MODE_DIGITS);
@@ -440,14 +486,22 @@ void HandleTrailingStops()
         double bid   = MarketInfo(OrderSymbol(), MODE_BID);
         if(!CheckFreezeLevel(OrderSymbol(), openP, ask, bid) ||
            !CheckStopLevel (OrderSymbol(), OrderType(), newSL, ask, bid))
+        {
+            if(debugMode) Print(eaName, ": TS ticket ", IntegerToString(ticket), " failed freeze/stop level checks");
             continue;
+        }
 
         if(OrderModify(ticket, openP, newSL, OrderTakeProfit(), 0, clrMagenta))
+        {
+            if(debugMode) Print(eaName, ": TS successfully modified ticket ", IntegerToString(ticket), " to SL=", DoubleToString(newSL, d));
             MarkAsModified(ticket);
+        }
         else if(debugMode)
             Print(eaName, ": TS modify fail ticket=", IntegerToString(ticket),
                   " err=", IntegerToString(GetLastError()));
     }
+    
+    if(debugMode) Print(eaName, ": TS scan complete");
 }
 
 //+------------------------------------------------------------------+
