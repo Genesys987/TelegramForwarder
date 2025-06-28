@@ -554,7 +554,10 @@ void ProcessExternalSLUpdates()
     FileDelete(gExternalSLFile);
 
     int sep = StringFind(cmd, "|NEW_SL:");
-    if(StringFind(cmd, "GID:") != 0 || sep < 0) return;
+    if(StringFind(cmd, "GID:") != 0 || sep < 0) {
+      if(debugMode) Print(eaName, "Not a SL modify command: ", cmd);
+      return;
+    }
     int gid      = (int)StrToInteger(StringSubstr(cmd, 4, sep-4));
     double newSL = StrToDouble(StringSubstr(cmd, sep+8));
 
@@ -588,7 +591,10 @@ bool ParseOrderComment(string comment, int &groupId, double &signalSL)
 {
     int p1 = StringFind(comment, "GID:");
     int p2 = StringFind(comment, "|SL:");
-    if(p1 != 0 || p2 < 0) return(false);
+    if(p1 != 0 || p2 < 0) {
+        if(debugMode) Print(eaName, ": Invalid comment format, no GID and SL found: ", comment);
+        return(false);
+    }
     groupId  = StrToInteger(StringSubstr(comment, 4, p2-4));
     signalSL = StrToDouble(StringSubstr(comment, p2+4));
     return(groupId > 0);
