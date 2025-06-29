@@ -70,5 +70,3 @@ LAST_GID_FILE = os.path.join(_basedir, "last_group_id.txt")
 
 # File to store Message ID <-> Group ID mapping (Python internal state) - Can be anywhere
 MESSAGE_GID_MAP_FILE = os.path.join(_basedir, "message_gid_map.json")
-
-FIXED_LOT_SIZE = 0.02

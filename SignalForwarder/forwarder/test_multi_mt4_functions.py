@@ -148,13 +148,12 @@ class TestQueueManagerLogic(unittest.TestCase):
             "entry": 2150.5,
             "take_profits": [2155.0, 2160.0, 2165.0],
             "stop_loss": 2145.0,
-            "lot_size": 0.02,
             "group_id": 123
         }
         
         # Test required keys presence
         required_keys = ["timestamp_utc", "signal_type", "symbol", "entry", 
-                        "take_profits", "stop_loss", "lot_size", "group_id"]
+                        "take_profits", "stop_loss", "group_id"]
         self.assertTrue(all(key in signal_data for key in required_keys))
         
         # Test take_profits validation
@@ -173,11 +172,11 @@ class TestQueueManagerLogic(unittest.TestCase):
             "signal_type": "BUY",
             "symbol": "XAUUSD",
             "entry": 2150.5,
-            # Missing take_profits, stop_loss, lot_size, group_id, timestamp_utc
+            # Missing take_profits, stop_loss, group_id, timestamp_utc
         }
         
         required_keys = ["timestamp_utc", "signal_type", "symbol", "entry", 
-                        "take_profits", "stop_loss", "lot_size", "group_id"]
+                        "take_profits", "stop_loss", "group_id"]
         self.assertFalse(all(key in signal_data for key in required_keys))
     
     def test_signal_data_validation_invalid_take_profits(self):
@@ -190,7 +189,6 @@ class TestQueueManagerLogic(unittest.TestCase):
             "entry": 2150.5,
             "take_profits": [2155.0, 2160.0],  # Only 2 TPs, need at least 3
             "stop_loss": 2145.0,
-            "lot_size": 0.02,
             "group_id": 123
         }
         
@@ -215,7 +213,6 @@ class TestQueueManagerLogic(unittest.TestCase):
             "entry": 2150.5,
             "take_profits": [2155.0, 2160.0, 2165.0],
             "stop_loss": 2145.0,
-            "lot_size": 0.02,
             "group_id": 123
         }
         
@@ -246,7 +243,6 @@ class TestQueueManagerLogic(unittest.TestCase):
             "entry": 2150.5,
             "take_profits": [2155.0, 2160.0, 2165.0],
             "stop_loss": 2145.0,
-            "lot_size": 0.02,
             "group_id": 123
         }
         
@@ -254,11 +250,11 @@ class TestQueueManagerLogic(unittest.TestCase):
         tp_str = ",".join(str(tp) for tp in signal_data["take_profits"])
         expected_message = (f"{signal_data['timestamp_utc']}|{signal_data['signal_type']}|"
                            f"{signal_data['symbol']}|{signal_data['entry']}|"
-                           f"{tp_str}|{signal_data['stop_loss']}|{signal_data['lot_size']}|"
+                           f"{tp_str}|{signal_data['stop_loss']}|"
                            f"GID:{signal_data['group_id']}\n")
         
         actual_message = (f"{signal_data['timestamp_utc']}|{signal_data['signal_type']}|{signal_data['symbol']}|{signal_data['entry']}|"
-                         f"{tp_str}|{signal_data['stop_loss']}|{signal_data['lot_size']}|"
+                         f"{tp_str}|{signal_data['stop_loss']}|"
                          f"GID:{signal_data['group_id']}\n")
         
         self.assertEqual(actual_message, expected_message)
@@ -268,7 +264,7 @@ class TestQueueManagerLogic(unittest.TestCase):
         
         # Test message structure
         parts = expected_message.strip().split("|")
-        self.assertEqual(len(parts), 8)  # timestamp, signal_type, symbol, entry, tps, sl, lot_size, GID
+        self.assertEqual(len(parts), 7)  # timestamp, signal_type, symbol, entry, tps, sl, GID
         self.assertTrue(parts[-1].startswith("GID:"))
 
 

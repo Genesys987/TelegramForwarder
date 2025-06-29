@@ -4,7 +4,6 @@ import asyncio
 import re
 import json # GID map perzisztenciához
 from datetime import datetime, timezone
-from config import FIXED_LOT_SIZE
 from telethon import TelegramClient, events
 import traceback
 import os
@@ -95,7 +94,6 @@ async def process_new_standard_signal(message_text: str, message_id: int, messag
         timestamp = int(datetime.now(timezone.utc).timestamp())
         signal_data["timestamp_utc"] = timestamp
 
-    signal_data["lot_size"] = FIXED_LOT_SIZE
     group_id = get_next_group_id() # Generáljuk az ÚJ GID-t
     signal_data["group_id"] = group_id # Hozzáadjuk a dict-hez
     print(f"   Új GroupID: {group_id}")
