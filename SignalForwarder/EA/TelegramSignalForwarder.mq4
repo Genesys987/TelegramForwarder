@@ -385,11 +385,9 @@ void SendOrders(string signalType, string symbol,
         tps[j] = NormalizeDouble(tps[j], digits);
     }
 
-    if(debugMode) {
-        Print(eaName, ": Sending orders for GID=", IntegerToString(groupId),
-              " Missed TP1=", missedTP1 ? "Yes" : "No",
-              " Using SL=", DoubleToString(rawSL, digits));
-    }
+    Print(eaName, ": Sending orders for GID=", IntegerToString(groupId),
+          " Missed TP1=", missedTP1 ? "Yes" : "No",
+          " Using SL=", DoubleToString(rawSL, digits));
 
     int slippage = 5;
     color cols[3] = { clrBlue, clrGreen, clrRed };
@@ -401,7 +399,7 @@ void SendOrders(string signalType, string symbol,
         int ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
                                rawSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
                                
-        if(ticket < 0 && debugMode) {
+        if(ticket < 0) {
             Print("Error creating ticket", GetLastError());
         }
         
@@ -409,14 +407,12 @@ void SendOrders(string signalType, string symbol,
         {
             RefreshRates();
             // retry with fallback SL
-            if(debugMode)
-                Print(eaName, ": Retrying with fallback SL=", DoubleToString(fallbackSL, digits));
+            Print(eaName, ": Retrying with fallback SL=", DoubleToString(fallbackSL, digits));
             ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
                                fallbackSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
         }
         
-        if(debugMode)
-            Print(eaName, ": Order[", IntegerToString(k), "] ticket=", IntegerToString(ticket));
+        Print(eaName, ": Order[", IntegerToString(k), "] ticket=", IntegerToString(ticket));
     }
 }
 
@@ -434,13 +430,13 @@ void HandleTrailingStops()
     lastTrailingScan = now;
 
     int historyTotal = OrdersHistoryTotal();
-    Print(eaName, ": TS checking ", IntegerToString(historyTotal), " history orders");
-    
+    if(debugMode) Print(eaName, ": TS checking ", IntegerToString(historyTotal), " history orders");
+
     for(int i=historyTotal-1; i>=0; i--)
     {
         if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) 
         {
-            if(debugMode) Print(eaName, ": TS history order select failed at index ", IntegerToString(i));
+            Print(eaName, ": TS history order select failed at index ", IntegerToString(i));
             continue;
         }
         if(OrderMagicNumber() != MAGIC_NUMBER) 
@@ -485,7 +481,7 @@ void HandleTrailingStops()
     {
         if(!OrderSelect(m, SELECT_BY_POS, MODE_TRADES)) 
         {
-            if(debugMode) Print(eaName, ": TS open order select failed at index ", IntegerToString(m));
+            Print(eaName, ": TS open order select failed at index ", IntegerToString(m));
             continue;
         }
         if(OrderMagicNumber() != MAGIC_NUMBER) 
@@ -524,17 +520,16 @@ void HandleTrailingStops()
         if(!CheckFreezeLevel(OrderSymbol(), openP, ask, bid) ||
            !CheckStopLevel (OrderSymbol(), OrderType(), newSL, ask, bid))
         {
-            if(debugMode) Print(eaName, ": TS ticket ", IntegerToString(ticket), " failed freeze/stop level checks");
+            Print(eaName, ": TS ticket ", IntegerToString(ticket), " failed freeze/stop level checks");
             continue;
         }
 
         if(OrderModify(ticket, openP, newSL, OrderTakeProfit(), 0, clrMagenta))
         {
-            if(debugMode) Print(eaName, ": TS successfully modified ticket ", IntegerToString(ticket), " to SL=", DoubleToString(newSL, d));
+            Print(eaName, ": TS successfully modified ticket ", IntegerToString(ticket), " to SL=", DoubleToString(newSL, d));
             MarkAsModified(ticket);
         }
-        else if(debugMode)
-            Print(eaName, ": TS modify fail ticket=", IntegerToString(ticket),
+        else Print(eaName, ": TS modify fail ticket=", IntegerToString(ticket),
                   " err=", IntegerToString(GetLastError()));
     }
     
@@ -555,7 +550,7 @@ void ProcessExternalSLUpdates()
 
     int sep = StringFind(cmd, "|NEW_SL:");
     if(StringFind(cmd, "GID:") != 0 || sep < 0) {
-      if(debugMode) Print(eaName, "Not a SL modify command: ", cmd);
+      Print(eaName, "Not a SL modify command: ", cmd);
       return;
     }
     int gid      = (int)StrToInteger(StringSubstr(cmd, 4, sep-4));
@@ -565,7 +560,7 @@ void ProcessExternalSLUpdates()
     for(int i=0; i<total; i++)
     {
         if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
-            if(debugMode) Print(eaName, ": ext SL order select failed at index ", IntegerToString(i));
+            Print(eaName, ": ext SL order select failed at index ", IntegerToString(i));
             continue;
         }
         if(OrderMagicNumber() != MAGIC_NUMBER) {
@@ -578,7 +573,7 @@ void ProcessExternalSLUpdates()
         }
         double op = OrderOpenPrice();
         double tp = OrderTakeProfit();
-        if(!OrderModify(OrderTicket(), op, newSL, tp, 0, clrGold) && debugMode)
+        if(!OrderModify(OrderTicket(), op, newSL, tp, 0, clrGold))
             Print(eaName, ": ext SL update fail GID=", IntegerToString(gid),
                   " err=", IntegerToString(GetLastError()));
     }
@@ -648,7 +643,7 @@ bool CheckStopLevel(string symbol, int orderType,
          // For sell orders, SL must be above the ask price
          valid = (sl > ask && sl - ask >= minStopLevelDist);
     else valid = false;
-    if(!valid && debugMode)
+    if(!valid)
         Print(eaName, ": invalid SL ", DoubleToString(sl, digits));
     return(valid);
 }
@@ -664,14 +659,12 @@ bool CheckFreezeLevel(string symbol,
     double freezeDist= freezePts * MarketInfo(symbol, MODE_POINT);
     if(ask <= bid || ask <= 0 || bid <= 0)
     {
-        if(debugMode)
-            Print(eaName, ": price freeze err");
+        Print(eaName, ": price freeze err");
         return(false);
     }
     if(MathAbs(openPrice-ask) < freezeDist || MathAbs(openPrice-bid) < freezeDist)
     {
-        if(debugMode)
-            Print(eaName, ": freeze violation");
+        Print(eaName, ": freeze violation");
         return(false);
     }
     return(true);
