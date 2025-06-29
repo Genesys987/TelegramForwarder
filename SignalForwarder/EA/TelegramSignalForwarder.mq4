@@ -155,26 +155,33 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
     }
     
     // Move file to temp to avoid reprocessing
-    if(!FileMove(gSignalFile, 0, gTempFile, FILE_REWRITE))
-        return(false);
+    if(!FileMove(gSignalFile, 0, gTempFile, FILE_REWRITE)) {
+      Print(eaName, ": Failed to move signal file to temp");
+      return(false);
+    }
 
     int tfh = FileOpen(gTempFile, FILE_READ | FILE_TXT | FILE_ANSI);
     if(tfh == INVALID_HANDLE)
     {
         FileDelete(gTempFile);
+        Print(eaName, ": Failed to open temp file for reading");
         return(false);
     }
     string line = FileReadString(tfh);
     FileClose(tfh);
     FileDelete(gTempFile);
 
-    if(StringLen(line) == 0 || StringFind(line, "PROCESSED") >= 0)
+    if(StringLen(line) == 0 || StringFind(line, "PROCESSED") >= 0) {
+        Print(eaName, ": Empty or already processed signal line, skipping");
         return(false);
+    }
 
     // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3|SL|LOT|GID:<id>
     string parts[];
-    if(StringSplit(line, '|', parts) < 8)
+    if(StringSplit(line, '|', parts) < 8) {
+        Print(eaName, ": Invalid signal format, expected 8 parts but got ", IntegerToString(ArraySize(parts)));
         return(false);
+    }
 
     // 0) Extract and validate timestamp (first part, no prefix)
     string timestampStr = parts[0];
@@ -188,21 +195,31 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
 
     // 1) Signal type
     signalType = ToUpperCase(Trim(parts[1]));
-    if(signalType != "BUY" && signalType != "SELL")
+    if(signalType != "BUY" && signalType != "SELL") {
+        Print(eaName, ": Invalid signal type '", signalType, "', expected BUY or SELL");
         return(false);
+    }
 
     // 2) Symbol validation
     symbol = Trim(parts[2]) + symbolPostfix;
-    if(MarketInfo(symbol, MODE_TIME) == 0)
+    if(MarketInfo(symbol, MODE_TIME) == 0) {
+        Print(eaName, ": Invalid symbol '", symbol, "', skipping");
         return(false);
+    }
 
     // 3) Entry price
-    if(!IsValidDouble(parts[3])) return(false);
+    if(!IsValidDouble(parts[3])) {
+        Print(eaName, ": Invalid entry price '", parts[3], "', skipping");
+        return(false);
+    }
     entryPrice = NormalizeDouble(StrToDouble(parts[3]), MarketInfo(symbol, MODE_DIGITS));
 
     // 4) TP levels
     string tpsArr[];
-    if(StringSplit(parts[4], ',', tpsArr) < 3) return(false);
+    if(StringSplit(parts[4], ',', tpsArr) < 3) {
+        Print(eaName, ": Invalid TP levels '", parts[4], "', skipping");
+        return(false);
+    }
     tp1 = NormalizeDouble(StrToDouble(tpsArr[0]), MarketInfo(symbol, MODE_DIGITS));
     tp2 = NormalizeDouble(StrToDouble(tpsArr[1]), MarketInfo(symbol, MODE_DIGITS));
     tp3 = NormalizeDouble(StrToDouble(tpsArr[2]), MarketInfo(symbol, MODE_DIGITS));
@@ -216,17 +233,25 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
         if(b2 < 0) break;
         rawSL = StringSubstr(rawSL, 0, b1) + StringSubstr(rawSL, b2+1);
     }
-    if(!IsValidDouble(rawSL)) return(false);
+    if(!IsValidDouble(rawSL)) {
+        Print(eaName, ": Invalid stop loss '", rawSL, "', skipping");
+        return(false);
+    }
     stopLoss = NormalizeDouble(StrToDouble(rawSL), MarketInfo(symbol, MODE_DIGITS));
 
     // 6) Group ID
     string gidPart = parts[6];
-    if(StringFind(gidPart, "GID:") != 0) return(false);
+    if(StringFind(gidPart, "GID:") != 0) {
+        Print(eaName, ": Invalid group ID format '", gidPart, "', skipping");
+        return(false);
+    }
     groupId = (int)StrToInteger(StringSubstr(gidPart, 4));
-    if(groupId <= 0) return(false);
+    if(groupId <= 0) {
+        Print(eaName, ": Invalid group ID '", IntegerToString(groupId), "', skipping");
+        return(false);
+    }
 
-    if(debugMode)
-        Print(eaName, ": Parsed signal GID=", IntegerToString(groupId));
+    Print(eaName, ": Parsed signal GID=", IntegerToString(groupId));
 
     return(true);
 }
@@ -241,9 +266,18 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL)
     for(int i=0; i<OrdersTotal(); i++)
     {
         
-        if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
-        if(OrderMagicNumber() != MAGIC_NUMBER) continue;
-        if(OrderSymbol() != symbol || OrderType() != orderType) continue;
+        if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+          if (debugMode) Print(eaName, ": Failed to select order at index ", IntegerToString(i), " - error=", IntegerToString(GetLastError()));
+          continue;
+        }
+        if(OrderMagicNumber() != MAGIC_NUMBER) {
+          if (debugMode) Print(eaName, ": Ignoring order at index ", IntegerToString(i), " - wrong magic number");
+          continue;
+        }
+        if(OrderSymbol() != symbol || OrderType() != orderType) {
+          if (debugMode) Print(eaName, ": Ignoring order at index ", IntegerToString(i), " - symbol/type mismatch");
+          continue;
+        }
 
         double currSL = OrderStopLoss();
         if(MathAbs(currSL - newSL) > SL_MODIFY_THRESHOLD)
@@ -342,11 +376,9 @@ void SendOrders(string signalType, string symbol,
         tps[j] = NormalizeDouble(tps[j], digits);
     }
 
-    if(debugMode) {
-        Print(eaName, ": Sending orders for GID=", IntegerToString(groupId),
-              " Missed TP1=", missedTP1 ? "Yes" : "No",
-              " Using SL=", DoubleToString(rawSL, digits));
-    }
+    Print(eaName, ": Sending orders for GID=", IntegerToString(groupId),
+          " Missed TP1=", missedTP1 ? "Yes" : "No",
+          " Using SL=", DoubleToString(rawSL, digits));
 
     int slippage = 5;
     color cols[3] = { clrBlue, clrGreen, clrRed };
@@ -358,7 +390,7 @@ void SendOrders(string signalType, string symbol,
         int ticket = OrderSend(symbol, orderType, fixedLotSize, price, slippage,
                                rawSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
                                
-        if(ticket < 0 && debugMode) {
+        if(ticket < 0) {
             Print("Error creating ticket", GetLastError());
         }
         
@@ -366,14 +398,12 @@ void SendOrders(string signalType, string symbol,
         {
             RefreshRates();
             // retry with fallback SL
-            if(debugMode)
-                Print(eaName, ": Retrying with fallback SL=", DoubleToString(fallbackSL, digits));
+            Print(eaName, ": Retrying with fallback SL=", DoubleToString(fallbackSL, digits));
             ticket = OrderSend(symbol, orderType, fixedLotSize, price, slippage,
                                fallbackSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
         }
         
-        if(debugMode)
-            Print(eaName, ": Order[", IntegerToString(k), "] ticket=", IntegerToString(ticket));
+        Print(eaName, ": Order[", IntegerToString(k), "] ticket=", IntegerToString(ticket));
     }
 }
 
@@ -383,49 +413,95 @@ void SendOrders(string signalType, string symbol,
 void HandleTrailingStops()
 {
     datetime now = TimeCurrent();
-    if(now - lastTrailingScan < trailingCheckIntervalSec) return;
+    if(now - lastTrailingScan < trailingCheckIntervalSec) 
+    {
+        if(debugMode) Print(eaName, ": TS scan skipped - interval not reached");
+        return;
+    }
     lastTrailingScan = now;
 
-    if(debugMode) Print(eaName, ": TS scan start");
-
     int historyTotal = OrdersHistoryTotal();
+    if(debugMode) Print(eaName, ": TS checking ", IntegerToString(historyTotal), " history orders");
+
     for(int i=historyTotal-1; i>=0; i--)
     {
-        if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
-        if(OrderMagicNumber() != MAGIC_NUMBER) continue;
+        if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) 
+        {
+            Print(eaName, ": TS history order select failed at index ", IntegerToString(i));
+            continue;
+        }
+        if(OrderMagicNumber() != MAGIC_NUMBER) 
+        {
+            if(debugMode) Print(eaName, ": TS skipping history order - wrong magic number: ", IntegerToString(OrderMagicNumber()));
+            continue;
+        }
         double closeP = OrderClosePrice();
         double tp       = OrderTakeProfit();
         double tol      = triggerTolerancePips * MarketInfo(OrderSymbol(), MODE_POINT);
         bool  triggered = (OrderType() == OP_BUY || OrderType() == OP_BUYLIMIT)
                           ? (closeP >= tp - tol)
                           : (closeP <= tp + tol);
-        if(!triggered) continue;
+        if(!triggered) 
+        {
+            if(debugMode) Print(eaName, ": TS order not triggered ticket ", IntegerToString(OrderTicket()), " - closeP=", DoubleToString(closeP, 5), 
+                     " tp=", DoubleToString(tp, 5), " tol=", DoubleToString(tol, 5));
+            continue;
+        }
         int gid; double sl;
         if(ParseOrderComment(OrderComment(), gid, sl))
+        {
+            if(debugMode) Print(eaName, ": TS adding triggered group: ", IntegerToString(gid));
             AddTriggeredGroup(gid);
+        }
+        else if(debugMode) 
+            Print(eaName, ": TS failed to parse comment: ", OrderComment());
     }
 
     if(triggeredCount == 0)
     {
-        if(debugMode) Print(eaName, ": no TS triggers");
+        if(debugMode) Print(eaName, ": no TS triggers found");
         return;
     }
 
+    if(debugMode) Print(eaName, ": TS found ", IntegerToString(triggeredCount), " triggered groups");
+
     int openTotal = OrdersTotal();
+    if(debugMode) Print(eaName, ": TS checking ", IntegerToString(openTotal), " open orders");
+    
     for(int m=0; m<openTotal; m++)
     {
-        if(!OrderSelect(m, SELECT_BY_POS, MODE_TRADES)) continue;
-        if(OrderMagicNumber() != MAGIC_NUMBER) continue;
+        if(!OrderSelect(m, SELECT_BY_POS, MODE_TRADES)) 
+        {
+            Print(eaName, ": TS open order select failed at index ", IntegerToString(m));
+            continue;
+        }
+        if(OrderMagicNumber() != MAGIC_NUMBER) 
+        {
+            if(debugMode) Print(eaName, ": TS skipping open order - wrong magic number: ", IntegerToString(OrderMagicNumber()));
+            continue;
+        }
         int ticket = OrderTicket();
-        if(HasBeenModified(ticket)) continue;
+        if(HasBeenModified(ticket)) 
+        {
+            if(debugMode) Print(eaName, ": TS skipping ticket ", IntegerToString(ticket), " - already modified");
+            continue;
+        }
 
         int gid; double sl;
-        if(!ParseOrderComment(OrderComment(), gid, sl)) continue;
+        if(!ParseOrderComment(OrderComment(), gid, sl)) 
+        {
+            if(debugMode) Print(eaName, ": TS failed to parse comment for ticket ", IntegerToString(ticket), ": ", OrderComment());
+            continue;
+        }
 
         bool belongs = false;
         for(int n=0; n<triggeredCount; n++)
             if(triggeredGroups[n] == gid) { belongs = true; break; }
-        if(!belongs) continue;
+        if(!belongs) 
+        {
+            if(debugMode) Print(eaName, ": TS ticket ", IntegerToString(ticket), " GID ", IntegerToString(gid), " not in triggered groups");
+            continue;
+        }
 
         double openP = OrderOpenPrice();
         int d       = MarketInfo(OrderSymbol(), MODE_DIGITS);
@@ -434,14 +510,21 @@ void HandleTrailingStops()
         double bid   = MarketInfo(OrderSymbol(), MODE_BID);
         if(!CheckFreezeLevel(OrderSymbol(), openP, ask, bid) ||
            !CheckStopLevel (OrderSymbol(), OrderType(), newSL, ask, bid))
+        {
+            Print(eaName, ": TS ticket ", IntegerToString(ticket), " failed freeze/stop level checks");
             continue;
+        }
 
         if(OrderModify(ticket, openP, newSL, OrderTakeProfit(), 0, clrMagenta))
+        {
+            Print(eaName, ": TS successfully modified ticket ", IntegerToString(ticket), " to SL=", DoubleToString(newSL, d));
             MarkAsModified(ticket);
-        else if(debugMode)
-            Print(eaName, ": TS modify fail ticket=", IntegerToString(ticket),
+        }
+        else Print(eaName, ": TS modify fail ticket=", IntegerToString(ticket),
                   " err=", IntegerToString(GetLastError()));
     }
+    
+    if(debugMode) Print(eaName, ": TS scan complete");
 }
 
 //+------------------------------------------------------------------+
@@ -457,19 +540,31 @@ void ProcessExternalSLUpdates()
     FileDelete(gExternalSLFile);
 
     int sep = StringFind(cmd, "|NEW_SL:");
-    if(StringFind(cmd, "GID:") != 0 || sep < 0) return;
+    if(StringFind(cmd, "GID:") != 0 || sep < 0) {
+      Print(eaName, "Not a SL modify command: ", cmd);
+      return;
+    }
     int gid      = (int)StrToInteger(StringSubstr(cmd, 4, sep-4));
     double newSL = StrToDouble(StringSubstr(cmd, sep+8));
 
     int total = OrdersTotal();
     for(int i=0; i<total; i++)
     {
-        if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
-        if(OrderMagicNumber() != MAGIC_NUMBER) continue;
-        if(StringFind(OrderComment(), "GID:" + IntegerToString(gid)) < 0) continue;
+        if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+            Print(eaName, ": ext SL order select failed at index ", IntegerToString(i));
+            continue;
+        }
+        if(OrderMagicNumber() != MAGIC_NUMBER) {
+            if(debugMode) Print(eaName, ": Ignoring order at index ", IntegerToString(i), " - wrong magic number");
+            continue;
+        }
+        if(StringFind(OrderComment(), "GID:" + IntegerToString(gid)) < 0) {
+            if(debugMode) Print(eaName, ": Ignoring order at index ", IntegerToString(i), " - GID mismatch");
+            continue;
+        }
         double op = OrderOpenPrice();
         double tp = OrderTakeProfit();
-        if(!OrderModify(OrderTicket(), op, newSL, tp, 0, clrGold) && debugMode)
+        if(!OrderModify(OrderTicket(), op, newSL, tp, 0, clrGold))
             Print(eaName, ": ext SL update fail GID=", IntegerToString(gid),
                   " err=", IntegerToString(GetLastError()));
     }
@@ -482,7 +577,10 @@ bool ParseOrderComment(string comment, int &groupId, double &signalSL)
 {
     int p1 = StringFind(comment, "GID:");
     int p2 = StringFind(comment, "|SL:");
-    if(p1 != 0 || p2 < 0) return(false);
+    if(p1 != 0 || p2 < 0) {
+        if(debugMode) Print(eaName, ": Invalid comment format, no GID and SL found: ", comment);
+        return(false);
+    }
     groupId  = StrToInteger(StringSubstr(comment, 4, p2-4));
     signalSL = StrToDouble(StringSubstr(comment, p2+4));
     return(groupId > 0);
@@ -536,7 +634,7 @@ bool CheckStopLevel(string symbol, int orderType,
          // For sell orders, SL must be above the ask price
          valid = (sl > ask && sl - ask >= minStopLevelDist);
     else valid = false;
-    if(!valid && debugMode)
+    if(!valid)
         Print(eaName, ": invalid SL ", DoubleToString(sl, digits));
     return(valid);
 }
@@ -552,14 +650,12 @@ bool CheckFreezeLevel(string symbol,
     double freezeDist= freezePts * MarketInfo(symbol, MODE_POINT);
     if(ask <= bid || ask <= 0 || bid <= 0)
     {
-        if(debugMode)
-            Print(eaName, ": price freeze err");
+        Print(eaName, ": price freeze err");
         return(false);
     }
     if(MathAbs(openPrice-ask) < freezeDist || MathAbs(openPrice-bid) < freezeDist)
     {
-        if(debugMode)
-            Print(eaName, ": freeze violation");
+        Print(eaName, ": freeze violation");
         return(false);
     }
     return(true);
