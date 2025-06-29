@@ -7,7 +7,6 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import getMT4DataFolderId
 from stoploss_update import extract_price_from_text
-from risk_manager import calculate_lot_size
 
 
 class TestConfigFunctions(unittest.TestCase):
@@ -135,127 +134,6 @@ class TestStoplossUpdateFunctions(unittest.TestCase):
         text = "SL to 2148.0 or maybe 2150.0"
         result = extract_price_from_text(text)
         self.assertEqual(result, "2148.0")
-
-
-class TestRiskManagerFunctions(unittest.TestCase):
-    """Test pure functions from risk_manager.py"""
-    
-    @patch('risk_manager.USE_RISK_MANAGEMENT', False)
-    @patch('risk_manager.FIXED_LOT_SIZE', 0.02)
-    @patch('builtins.print')
-    def test_calculate_lot_size_fixed_mode(self, mock_print):
-        """Test calculate_lot_size when risk management is disabled"""
-        result = calculate_lot_size("XAUUSD", 2150.0, 2140.0)
-        self.assertEqual(result, 0.02)
-    
-    @patch('risk_manager.USE_RISK_MANAGEMENT', True)
-    @patch('risk_manager.FIXED_LOT_SIZE', 0.02)
-    @patch('risk_manager.ACCOUNT_BALANCE', 1000.0)
-    @patch('risk_manager.RISK_PERCENTAGE', 2.0)
-    @patch('risk_manager.DEFAULT_PIP_VALUE_PER_LOT', 10.0)
-    @patch('risk_manager.SYMBOL_PIP_SIZES', {"XAUUSD": 0.01, "DEFAULT": 0.0001})
-    @patch('risk_manager.DEFAULT_PIP_SIZE', 0.0001)
-    @patch('builtins.print')
-    def test_calculate_lot_size_risk_management_gold(self, mock_print):
-        """Test calculate_lot_size with risk management for XAUUSD"""
-        # Account: $1000, Risk: 2% = $20
-        # Entry: 2150, SL: 2140, Distance: 10 price units
-        # Pip size for gold: 0.01, Distance in pips: 10/0.01 = 1000 pips
-        # Pip value per lot: $10
-        # Lot size: $20 / (1000 pips * $10) = 0.002 -> rounded to 0.00
-        # Since calculated lot is 0.00 (zero), it should return fixed lot size
-        result = calculate_lot_size("XAUUSD", 2150.0, 2140.0)
-        self.assertEqual(result, 0.02)  # Returns fixed lot size because calculated is 0.00
-    
-    @patch('risk_manager.USE_RISK_MANAGEMENT', True)
-    @patch('risk_manager.FIXED_LOT_SIZE', 0.02)
-    @patch('risk_manager.ACCOUNT_BALANCE', 10000.0)
-    @patch('risk_manager.RISK_PERCENTAGE', 1.0)
-    @patch('risk_manager.DEFAULT_PIP_VALUE_PER_LOT', 10.0)
-    @patch('risk_manager.SYMBOL_PIP_SIZES', {"EURUSD": 0.0001, "DEFAULT": 0.0001})
-    @patch('risk_manager.DEFAULT_PIP_SIZE', 0.0001)
-    @patch('builtins.print')
-    def test_calculate_lot_size_risk_management_forex(self, mock_print):
-        """Test calculate_lot_size with risk management for EURUSD"""
-        # Account: $10000, Risk: 1% = $100
-        # Entry: 1.1000, SL: 1.0950, Distance: 0.0050
-        # Pip size for EUR/USD: 0.0001, Distance in pips: 0.0050/0.0001 = 50 pips
-        # Pip value per lot: $10
-        # Lot size: $100 / (50 pips * $10) = 0.2
-        result = calculate_lot_size("EURUSD", 1.1000, 1.0950)
-        self.assertEqual(result, 0.20)
-    
-    @patch('risk_manager.USE_RISK_MANAGEMENT', True)
-    @patch('risk_manager.FIXED_LOT_SIZE', 0.02)
-    @patch('builtins.print')
-    def test_calculate_lot_size_missing_entry_price(self, mock_print):
-        """Test calculate_lot_size with missing entry price"""
-        result = calculate_lot_size("XAUUSD", None, 2140.0)  # type: ignore
-        self.assertEqual(result, 0.02)  # Should return fixed lot size
-    
-    @patch('risk_manager.USE_RISK_MANAGEMENT', True)
-    @patch('risk_manager.FIXED_LOT_SIZE', 0.02)
-    @patch('builtins.print')
-    def test_calculate_lot_size_missing_stop_loss(self, mock_print):
-        """Test calculate_lot_size with missing stop loss"""
-        result = calculate_lot_size("XAUUSD", 2150.0, None)  # type: ignore
-        self.assertEqual(result, 0.02)  # Should return fixed lot size
-    
-    @patch('risk_manager.USE_RISK_MANAGEMENT', True)
-    @patch('risk_manager.FIXED_LOT_SIZE', 0.02)
-    @patch('risk_manager.ACCOUNT_BALANCE', 0.0)
-    @patch('builtins.print')
-    def test_calculate_lot_size_zero_account_balance(self, mock_print):
-        """Test calculate_lot_size with zero account balance"""
-        result = calculate_lot_size("XAUUSD", 2150.0, 2140.0)
-        self.assertEqual(result, 0.02)  # Should return fixed lot size
-    
-    @patch('risk_manager.USE_RISK_MANAGEMENT', True)
-    @patch('risk_manager.FIXED_LOT_SIZE', 0.02)
-    @patch('risk_manager.ACCOUNT_BALANCE', 1000.0)
-    @patch('risk_manager.RISK_PERCENTAGE', 0.0)
-    @patch('builtins.print')
-    def test_calculate_lot_size_zero_risk_percentage(self, mock_print):
-        """Test calculate_lot_size with zero risk percentage"""
-        result = calculate_lot_size("XAUUSD", 2150.0, 2140.0)
-        self.assertEqual(result, 0.02)  # Should return fixed lot size
-    
-    @patch('risk_manager.USE_RISK_MANAGEMENT', True)
-    @patch('risk_manager.FIXED_LOT_SIZE', 0.02)
-    @patch('risk_manager.ACCOUNT_BALANCE', 1000.0)
-    @patch('risk_manager.RISK_PERCENTAGE', 2.0)
-    @patch('builtins.print')
-    def test_calculate_lot_size_same_entry_and_sl(self, mock_print):
-        """Test calculate_lot_size when entry price equals stop loss"""
-        result = calculate_lot_size("XAUUSD", 2150.0, 2150.0)
-        self.assertEqual(result, 0.02)  # Should return fixed lot size
-    
-    @patch('risk_manager.USE_RISK_MANAGEMENT', True)
-    @patch('risk_manager.FIXED_LOT_SIZE', 0.02)
-    @patch('risk_manager.ACCOUNT_BALANCE', 1000.0)
-    @patch('risk_manager.RISK_PERCENTAGE', 2.0)
-    @patch('risk_manager.DEFAULT_PIP_VALUE_PER_LOT', 10.0)
-    @patch('risk_manager.SYMBOL_PIP_SIZES', {"TESTPAIR": 0.0, "DEFAULT": 0.0001})
-    @patch('risk_manager.DEFAULT_PIP_SIZE', 0.0001)
-    @patch('builtins.print')
-    def test_calculate_lot_size_zero_pip_size(self, mock_print):
-        """Test calculate_lot_size with zero pip size"""
-        result = calculate_lot_size("TESTPAIR", 2150.0, 2140.0)
-        self.assertEqual(result, 0.02)  # Should return fixed lot size
-    
-    @patch('risk_manager.USE_RISK_MANAGEMENT', True)
-    @patch('risk_manager.FIXED_LOT_SIZE', 0.02)
-    @patch('risk_manager.ACCOUNT_BALANCE', 1000.0)
-    @patch('risk_manager.RISK_PERCENTAGE', 2.0)
-    @patch('risk_manager.DEFAULT_PIP_VALUE_PER_LOT', 0.0)
-    @patch('risk_manager.SYMBOL_PIP_SIZES', {"XAUUSD": 0.01, "DEFAULT": 0.0001})
-    @patch('risk_manager.DEFAULT_PIP_SIZE', 0.0001)
-    @patch('builtins.print')
-    def test_calculate_lot_size_zero_pip_value(self, mock_print):
-        """Test calculate_lot_size with zero pip value per lot"""
-        result = calculate_lot_size("XAUUSD", 2150.0, 2140.0)
-        self.assertEqual(result, 0.02)  # Should return fixed lot size
-
 
 class TestQueueManagerLogic(unittest.TestCase):
     """Test logic functions that don't require file I/O"""

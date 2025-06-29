@@ -2,9 +2,9 @@
 
 import asyncio
 import re
-import time
 import json # GID map perzisztenciához
 from datetime import datetime, timezone
+from config import FIXED_LOT_SIZE
 from telethon import TelegramClient, events
 import traceback
 import os
@@ -21,8 +21,6 @@ except ImportError as e:
 # --- Feldolgozó és segéd modulok importálása ---
 try: from signal_parser import parse_signal
 except ImportError: print("Hiba: signal_parser.py/parse_signal hiányzik."); exit()
-try: from risk_manager import calculate_lot_size
-except ImportError: print("Hiba: risk_manager.py/calculate_lot_size hiányzik."); exit()
 try: from queue_manager import add_signal_to_queue
 except ImportError: print("Hiba: queue_manager.py/add_signal_to_queue hiányzik."); exit()
 try: from stoploss_update import process_stoploss_reply
@@ -96,12 +94,8 @@ async def process_new_standard_signal(message_text: str, message_id: int, messag
         print(f"   Figyelmeztetés: Nincs üzenet dátum, jelenlegi időt használjuk")
         timestamp = int(datetime.now(timezone.utc).timestamp())
         signal_data["timestamp_utc"] = timestamp
-    
-    try:
-        lot_size = calculate_lot_size(signal_data.get("symbol"), signal_data.get("entry"), signal_data.get("stop_loss"))
-        signal_data["lot_size"] = lot_size # Hozzáadjuk a dict-hez
-    except Exception as e: print(f"   Hiba lot számításkor: {e}"); return None
 
+    signal_data["lot_size"] = FIXED_LOT_SIZE
     group_id = get_next_group_id() # Generáljuk az ÚJ GID-t
     signal_data["group_id"] = group_id # Hozzáadjuk a dict-hez
     print(f"   Új GroupID: {group_id}")
