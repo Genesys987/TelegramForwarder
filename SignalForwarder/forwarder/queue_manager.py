@@ -16,7 +16,7 @@ def add_signal_to_queue(signal_data: dict) -> bool:
     Feladata, hogy a 'signal_data' dict tartalmából elkészítse azt a sort,
     amit a queue-fájlba (MT4_QUEUE_FILE_PATH) fűz hozzá.
     A paraméterekből létrehoz egy 'message' stringet:
-      "{timestamp_utc}|{signal_type}|{symbol}|{entry}|{tp1,tp2,tp3}|{stop_loss}|{lot_size}|GID:{group_id}"
+      "{timestamp_utc}|{signal_type}|{symbol}|{entry}|{tp1,tp2,tp3}|{stop_loss}|GID:{group_id}"
 
     Kötelező kulcsok a 'signal_data'-ban:
       - timestamp_utc: int (UTC timestamp in milliseconds)
@@ -25,7 +25,6 @@ def add_signal_to_queue(signal_data: dict) -> bool:
       - entry: float
       - take_profits: list (>=3 elem), pl. [3219,3217,3215]
       - stop_loss: float
-      - lot_size: float
       - group_id: int  (Python generálja)
 
     Visszatér:
@@ -35,7 +34,7 @@ def add_signal_to_queue(signal_data: dict) -> bool:
     try:
         # 1) Alap ellenőrzés
         required_keys = ["timestamp_utc", "signal_type", "symbol", "entry", "take_profits",
-                         "stop_loss", "lot_size", "group_id"]
+                         "stop_loss", "group_id"]
         if not all(key in signal_data for key in required_keys):
             print(f"❌ [QueueAdd] Hiányzó kulcsok. Van: {list(signal_data.keys())}, Kellene: {required_keys}")
             return False
@@ -55,7 +54,7 @@ def add_signal_to_queue(signal_data: dict) -> bool:
         # 4) Sor összerakása timestamp-pel kezdve (prefix nélkül)
         tp_str = ",".join(str(tp) for tp in tps)
         message = (f"{timestamp}|{signal_data['signal_type']}|{signal_data['symbol']}|{signal_data['entry']}|"
-                   f"{tp_str}|{signal_data['stop_loss']}|{signal_data['lot_size']}|"
+                   f"{tp_str}|{signal_data['stop_loss']}|"
                    f"GID:{signal_data['group_id']}\n")
 
         # 5) I/O művelet: Hozzáfűzés az összes queue-fájlhoz

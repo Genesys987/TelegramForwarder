@@ -1,7 +1,6 @@
 # signal_processor.py
 
 from signal_parser import parse_signal
-from risk_manager import calculate_lot_size
 from queue_manager import add_signal_to_queue
 
 def process_signal(text: str):
@@ -22,9 +21,6 @@ def process_signal(text: str):
     take_profits = parsed["take_profits"]
     stop_loss = parsed["stop_loss"]
 
-    # Lot méret kiszámítása
-    lot_size = calculate_lot_size(symbol, entry_price, stop_loss)
-
     # Végleges signal_data
     signal_data = {
         "signal_type": signal_type,
@@ -32,7 +28,6 @@ def process_signal(text: str):
         "entry": entry_price,
         "take_profits": take_profits,
         "stop_loss": stop_loss,
-        "lot_size": lot_size
     }
 
     # Várólistához adás

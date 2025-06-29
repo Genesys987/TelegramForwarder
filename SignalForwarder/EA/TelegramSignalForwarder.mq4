@@ -15,6 +15,7 @@ extern int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC i
 extern int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
 extern string symbolPostfix           = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
 extern int    limitOrderTolerancePips  = 5;     // Tolerance in pips for limit orders (-1 to use market orders)
+extern double fixedLotSize              = 0.02;  // Default lot size for orders
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -42,13 +43,12 @@ string   eaName               = "TelegramSignalForwarder";
 //|--- Function Prototypes                                          |
 //+------------------------------------------------------------------+
 bool    ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
-                       double &stopLoss, double &lotSize,
+                       double &stopLoss,
                        double &tp1, double &tp2, double &tp3,
                        int &groupId);
 void    UpdateExistingOrdersSL(string symbol, int orderType, double newSL);
 void    SendOrders(string signalType, string symbol,
-                         double entryPrice, double stopLoss,
-                         double lotSize, double tp1, double tp2, double tp3,
+                         double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
                          int groupId);
 int     GetOrderType(string signalType);
 void    HandleTrailingStops();
@@ -108,19 +108,18 @@ int deinit()
 int start()
 {
     string signalType, symbol;
-    double entryPrice, stopLoss, lotSize, tp1, tp2, tp3;
+    double entryPrice, stopLoss, tp1, tp2, tp3;
     int    groupId;
 
     if(IsTradeAllowed() && IsConnected() && !IsStopped())
     {
         // Process new signal
         if(ReadSignalFile(signalType, symbol, entryPrice,
-                          stopLoss, lotSize, tp1, tp2, tp3, groupId))
+                          stopLoss, tp1, tp2, tp3, groupId))
         {
             UpdateExistingOrdersSL(symbol, signalType, stopLoss);
             SendOrders(signalType, symbol,
-                             entryPrice, stopLoss,
-                             lotSize, tp1, tp2, tp3,
+                             entryPrice, stopLoss, tp1, tp2, tp3,
                              groupId);
         }
         // Apply trailing stop logic
@@ -136,7 +135,7 @@ int start()
 //| ReadSignalFile: Parses a signal line from file                   |
 //+------------------------------------------------------------------+
 bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
-                    double &stopLoss, double &lotSize,
+                    double &stopLoss,
                     double &tp1, double &tp2, double &tp3,
                     int &groupId)
 {
@@ -240,15 +239,8 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
     }
     stopLoss = NormalizeDouble(StrToDouble(rawSL), MarketInfo(symbol, MODE_DIGITS));
 
-    // 6) Lot size
-    if(!IsValidDouble(parts[6])) {
-        Print(eaName, ": Invalid lot size '", parts[6], "', skipping");
-        return(false);
-    }
-    lotSize = NormalizeDouble(StrToDouble(parts[6]), 2);
-
-    // 7) Group ID
-    string gidPart = parts[7];
+    // 6) Group ID
+    string gidPart = parts[6];
     if(StringFind(gidPart, "GID:") != 0) {
         Print(eaName, ": Invalid group ID format '", gidPart, "', skipping");
         return(false);
@@ -320,8 +312,7 @@ int GetOrderType(string signalType)
 //| SendOrders: Place three market or limit orders with SL & TP        |
 //+------------------------------------------------------------------+
 void SendOrders(string signalType, string symbol,
-                      double entryPrice, double stopLoss,
-                      double lotSize, double tp1, double tp2, double tp3,
+                      double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
                       int groupId)
 {
     int orderType = GetOrderType(signalType);
@@ -396,7 +387,7 @@ void SendOrders(string signalType, string symbol,
     {
         RefreshRates();
         string comment = "GID:" + IntegerToString(groupId) + "|SL:" + DoubleToString(rawSL, digits);
-        int ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
+        int ticket = OrderSend(symbol, orderType, fixedLotSize, price, slippage,
                                rawSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
                                
         if(ticket < 0) {
@@ -408,7 +399,7 @@ void SendOrders(string signalType, string symbol,
             RefreshRates();
             // retry with fallback SL
             Print(eaName, ": Retrying with fallback SL=", DoubleToString(fallbackSL, digits));
-            ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
+            ticket = OrderSend(symbol, orderType, fixedLotSize, price, slippage,
                                fallbackSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
         }
         
