@@ -14,7 +14,7 @@ extern int    triggerTolerancePips     = 5;     // Pips tolerance for trailing s
 extern int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC in minutes (e.g., UTC+2 = 120)
 extern int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
 extern string symbolPostfix           = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
-extern int    limitOrderTolerancePips  = 5;     // Tolerance in pips for limit orders (-1 to use market orders)
+extern bool   useLimitOrders           = true;  // Use limit orders at middle between entry and TP1
 extern double fixedLotSize              = 0.02;  // Default lot size for orders
 
 //+------------------------------------------------------------------+
@@ -312,11 +312,12 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL)
 //+------------------------------------------------------------------+
 //| GetOrderType: Determine order type based on signal and settings |
 //+------------------------------------------------------------------+
-int GetOrderType(string signalType)
+int GetOrderType(string signalType, double entry, double tp1)
 {
     bool shouldBuy = (signalType == "BUY");
-    bool useLimitOrders = (limitOrderTolerancePips >= 0);
-    if (useLimitOrders) {
+    double midPrice = (entry + tp1) / 2.0; // Midpoint for limit order logic
+    bool shouldUseLimitOrders = useLimitOrders && (shouldBuy ? entry > midPrice : entry < midPrice);
+    if (shouldUseLimitOrders) {
         return (shouldBuy) ? OP_BUYLIMIT : OP_SELLLIMIT;
     } else {
         return (shouldBuy) ? OP_BUY : OP_SELL;
@@ -330,7 +331,7 @@ void SendOrders(string signalType, string symbol,
                       double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
                       int groupId)
 {
-    int orderType = GetOrderType(signalType);
+    int orderType = GetOrderType(signalType, entryPrice, tp1);
 
     int digits    = MarketInfo(symbol, MODE_DIGITS);
     double point  = MarketInfo(symbol, MODE_POINT);
@@ -340,16 +341,14 @@ void SendOrders(string signalType, string symbol,
     double ask = MarketInfo(symbol, MODE_ASK);
     double bid = MarketInfo(symbol, MODE_BID);
     double price;
-    bool shouldUseLimitOrders = (limitOrderTolerancePips >= 0);
     bool shouldBuy = signalType == "BUY";
-    if (shouldUseLimitOrders) {
-        // For limit orders, use entry price adjusted by tolerance
-        double tolerance = limitOrderTolerancePips * point;
-        // tolerance means, for buy orders we tolerate a higher entry price, for sell orders a lower entry price
-        price = NormalizeDouble((shouldBuy) ? entryPrice + tolerance : entryPrice - tolerance, digits);
+    double midPrice = (entryPrice + tp1) / 2.0; // Midpoint for limit order logic
+    bool shouldUseLimitOrders = useLimitOrders && (shouldBuy ? entryPrice > midPrice : entryPrice < midPrice);
+
+    if(shouldUseLimitOrders) {
+        price = midPrice;
     } else {
-        // For market orders, use current ask/bid
-        price = (shouldBuy) ? ask : bid;
+        price = shouldBuy ? ask : bid;
     }
     price = NormalizeDouble(price, digits);
 
