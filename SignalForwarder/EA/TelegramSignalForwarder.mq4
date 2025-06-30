@@ -144,9 +144,9 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
   string line = "";
   if (StringLen(nextSignal) == 0)
   {
-      if(!FileExists(gSignalFile)) return(false);
       if(fh == -1) 
       {
+          if(!FileExists(gSignalFile)) return(false);
           fh = FileOpen(gSignalFile, FILE_READ | FILE_TXT | FILE_ANSI);
           Print(eaName, ": Opening signal file ", gSignalFile);
           if(fh == INVALID_HANDLE) {
@@ -160,6 +160,11 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
           Print(eaName, ": Failed to open temp file for reading");
           return(false);
       }
+      if(IsTesting() && FileIsEnding(fh))
+      {
+          FileClose(fh);
+          return(false);
+      }
       line = FileReadString(fh);
       if(debugMode)
       {
@@ -171,10 +176,11 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
           fh = -1;
           FileDelete(gSignalFile);
       }
+  } else {
+    line = nextSignal;
   }
 
-    if(StringLen(line) == 0 || StringFind(line, "PROCESSED") >= 0) {
-        Print(eaName, ": Empty or already processed signal line, skipping");
+    if(StringLen(line) == 0) {
         return(false);
     }
 
@@ -198,8 +204,11 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
         else
         {
             nextSignal = line; // Store for next call in testing mode
+            return(false);
         }
     }
+    
+    nextSignal = "";
 
     // 1) Signal type
     signalType = ToUpperCase(Trim(parts[1]));
@@ -269,11 +278,9 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
 //+------------------------------------------------------------------+
 void UpdateExistingOrdersSL(string symbol, string signalType, double newSL)
 {
-    int orderType = GetOrderType(signalType);
-    
     for(int i=0; i<OrdersTotal(); i++)
     {
-        
+
         if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
           if (debugMode) Print(eaName, ": Failed to select order at index ", IntegerToString(i), " - error=", IntegerToString(GetLastError()));
           continue;
@@ -282,7 +289,7 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL)
           if (debugMode) Print(eaName, ": Ignoring order at index ", IntegerToString(i), " - wrong magic number");
           continue;
         }
-        if(OrderSymbol() != symbol || OrderType() != orderType) {
+        if(OrderSymbol() != symbol || OrderType() != (signalType == "BUY" ? OP_BUY : OP_SELL)) {
           if (debugMode) Print(eaName, ": Ignoring order at index ", IntegerToString(i), " - symbol/type mismatch");
           continue;
         }
