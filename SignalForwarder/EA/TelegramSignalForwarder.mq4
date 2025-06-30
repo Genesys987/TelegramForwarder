@@ -310,29 +310,12 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL)
 }
 
 //+------------------------------------------------------------------+
-//| GetOrderType: Determine order type based on signal and settings |
-//+------------------------------------------------------------------+
-int GetOrderType(string signalType, double entry, double tp1)
-{
-    bool shouldBuy = (signalType == "BUY");
-    double midPrice = (entry + tp1) / 2.0; // Midpoint for limit order logic
-    bool shouldUseLimitOrders = useLimitOrders && (shouldBuy ? entry > midPrice : entry < midPrice);
-    if (shouldUseLimitOrders) {
-        return (shouldBuy) ? OP_BUYLIMIT : OP_SELLLIMIT;
-    } else {
-        return (shouldBuy) ? OP_BUY : OP_SELL;
-    }
-}
-
-//+------------------------------------------------------------------+
 //| SendOrders: Place three market or limit orders with SL & TP        |
 //+------------------------------------------------------------------+
 void SendOrders(string signalType, string symbol,
                       double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
                       int groupId)
 {
-    int orderType = GetOrderType(signalType, entryPrice, tp1);
-
     int digits    = MarketInfo(symbol, MODE_DIGITS);
     double point  = MarketInfo(symbol, MODE_POINT);
     int stopLevel = MarketInfo(symbol, MODE_STOPLEVEL);
@@ -343,12 +326,15 @@ void SendOrders(string signalType, string symbol,
     double price;
     bool shouldBuy = signalType == "BUY";
     double midPrice = (entryPrice + tp1) / 2.0; // Midpoint for limit order logic
-    bool shouldUseLimitOrders = useLimitOrders && (shouldBuy ? entryPrice > midPrice : entryPrice < midPrice);
+    bool shouldUseLimitOrders = useLimitOrders && (shouldBuy ? ask > midPrice : bid < midPrice);
 
+    int orderType;
     if(shouldUseLimitOrders) {
         price = midPrice;
+        orderType = (shouldBuy) ? OP_BUYLIMIT : OP_SELLLIMIT;
     } else {
         price = shouldBuy ? ask : bid;
+        orderType = (shouldBuy) ? OP_BUY : OP_SELL;
     }
     price = NormalizeDouble(price, digits);
 
