@@ -77,7 +77,7 @@ def parse_signal(text: str):
             match_symbol_type = re.match(r'^([\w\.\/\-]+)\s+(BUY|SELL)\s+FROM\s+([\d\/\.]+)', line, re.IGNORECASE)
             if match_symbol_type:
                 raw_symbol = match_symbol_type.group(1).upper()
-                signal["symbol"] = raw_symbol  # Keep original symbol for this format
+                signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
                 signal["signal_type"] = match_symbol_type.group(2).upper()
                 # Also capture the entry price from the FROM clause
                 entry_text = match_symbol_type.group(3)
