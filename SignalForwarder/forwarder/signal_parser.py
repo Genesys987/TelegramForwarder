@@ -1,18 +1,5 @@
 import re
 
-def remove_emojis(text):
-    """Remove emojis from text using regex"""
-    # Pattern to match emoji characters
-    emoji_pattern = re.compile("["
-                               u"\U0001F600-\U0001F64F"  # emoticons
-                               u"\U0001F300-\U0001F5FF"  # symbols & pictographs
-                               u"\U0001F680-\U0001F6FF"  # transport & map symbols
-                               u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
-                               u"\U00002702-\U000027B0"
-                               u"\U000024C2-\U0001F251"
-                               "]+", flags=re.UNICODE)
-    return emoji_pattern.sub(r'', text)
-
 # Dictionary of common symbol mappings
 symbol_mappings = {
     'GOLD': 'XAUUSD'
@@ -60,10 +47,7 @@ def parse_signal(text: str):
     """
     if not text: 
         return None # Handle empty input
-    
-    # Remove emojis from the message before parsing
-    text = remove_emojis(text)
-    
+
     lines = text.splitlines()
     signal = {}
     take_profits = []  # Collect all TPs, will be sorted later
