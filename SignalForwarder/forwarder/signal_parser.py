@@ -1,33 +1,33 @@
 import re
 
-def remove_emojis(text):
-    """Remove emojis from text using regex"""
-    # Pattern to match emoji characters
-    emoji_pattern = re.compile("["
-                               u"\U0001F600-\U0001F64F"  # emoticons
-                               u"\U0001F300-\U0001F5FF"  # symbols & pictographs
-                               u"\U0001F680-\U0001F6FF"  # transport & map symbols
-                               u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
-                               u"\U00002702-\U000027B0"
-                               u"\U000024C2-\U0001F251"
-                               "]+", flags=re.UNICODE)
-    return emoji_pattern.sub(r'', text)
-
 # Dictionary of common symbol mappings
 symbol_mappings = {
-    'GOLD': 'XAUUSD',
-    'XAUUSD': 'XAUUSD',
-    'BTCUSD': 'BTCUSD',
-    'EURUSD': 'EURUSD',
-    'GBPUSD': 'GBPUSD',
-    'USDJPY': 'USDJPY',
-    'AUDUSD': 'AUDUSD',
-    'USDCAD': 'USDCAD',
-    'NZDUSD': 'NZDUSD',
-    'USDCHF': 'USDCHF',
-    'SILVER': 'XAGUSD',
-    'XAGUSD': 'XAGUSD'
+    'GOLD': 'XAUUSD'
 }
+
+def parse_entry_price(entry_text, signal_type):
+    """
+    Parse entry price from text, handling range formats like '3313/3315'
+    
+    Args:
+        entry_text: The entry price text to parse
+        signal_type: 'BUY' or 'SELL' to determine which price to use from ranges
+    
+    Returns:
+        Parsed entry price as float or original text if parsing fails
+    """
+    if '/' in entry_text:
+        split = entry_text.split('/')
+        # keep the higher of range (sell) or lower (buy)
+        if signal_type == "SELL":
+            return max(float(split[0]), float(split[1]))
+        else:
+            return min(float(split[0]), float(split[1]))
+    else:
+        try:
+            return float(entry_text)
+        except ValueError:
+            return entry_text
 
 def parse_signal(text: str):
     """
@@ -47,10 +47,7 @@ def parse_signal(text: str):
     """
     if not text: 
         return None # Handle empty input
-    
-    # Remove emojis from the message before parsing
-    text = remove_emojis(text)
-    
+
     lines = text.splitlines()
     signal = {}
     take_profits = []  # Collect all TPs, will be sorted later
@@ -64,36 +61,27 @@ def parse_signal(text: str):
 
         # Signal Type and Symbol parsing - handle multiple formats
         if not signal.get("signal_type"):
-            # Format 1: "BUY BTCUSD" or "SELL GOLD"
-            match_type_symbol = re.match(r'^(BUY|SELL)\s+([\w\.\/\-]+)', line, re.IGNORECASE)
+            # Format 1: "BUY BTCUSD" or "SELL GOLD" or "BUY CHFJPY 180.430"
+            match_type_symbol = re.match(r'^(BUY|SELL)\s+([\w\.\/\-]+)\s*([\d\/\.]*)', line, re.IGNORECASE)
             if match_type_symbol:
                 signal["signal_type"] = match_type_symbol.group(1).upper()
                 raw_symbol = match_type_symbol.group(2).upper()
                 # Map symbol if it exists in our mappings, otherwise use as-is
                 signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                # Capture the entry price
+                entry_text = match_type_symbol.group(3)
+                signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
                 continue
             
             # Format 2: "GOLD SELL FROM 3313/3315" or "SYMBOL BUY FROM price"
             match_symbol_type = re.match(r'^([\w\.\/\-]+)\s+(BUY|SELL)\s+FROM\s+([\d\/\.]+)', line, re.IGNORECASE)
             if match_symbol_type:
                 raw_symbol = match_symbol_type.group(1).upper()
-                signal["symbol"] = raw_symbol  # Keep original symbol for this format
+                signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
                 signal["signal_type"] = match_symbol_type.group(2).upper()
                 # Also capture the entry price from the FROM clause
                 entry_text = match_symbol_type.group(3)
-                # If it contains a range (like 3313/3315), keep as string
-                if '/' in entry_text:
-                    split = entry_text.split('/')
-                    # keep the higher of range (sell) or lower (buy)
-                    if signal["signal_type"] == "SELL":
-                        signal["entry"] = max(float(split[0]), float(split[1]))
-                    else:
-                        signal["entry"] = min(float(split[0]), float(split[1]))
-                else:
-                    try:
-                        signal["entry"] = float(entry_text)
-                    except ValueError:
-                        signal["entry"] = entry_text
+                signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
                 continue
 
         # Entry Price parsing
@@ -102,19 +90,12 @@ def parse_signal(text: str):
             m = re.search(r'ENTRY\s*(?:at)?\s*([\d\/\.]+)', line, re.IGNORECASE)
             if m:
                 entry_text = m.group(1)
-                # If it contains a range (like 3313/3315), keep as string
-                if '/' in entry_text:
-                    signal["entry"] = entry_text
-                else:
-                    try:
-                        signal["entry"] = float(entry_text)
-                    except ValueError:
-                        signal["entry"] = entry_text
+                signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
                 continue
 
         # Take Profits parsing - flexible, any line with TP
         # Look for any TP pattern (TP, Take Profit, etc.) followed by a number
-        tp_match = re.search(r'(?:TAKE\s*PROFIT|TP)\s*(?:\d+\s+)?(?:at\s+)?([\d\.]+)', line, re.IGNORECASE)
+        tp_match = re.search(r'(?:TAKE\s*PROFIT|TP)\s*(?:\d+:?\s+)?(?:at\s+)?([\d\.]+)', line, re.IGNORECASE)
         if tp_match:
             try:
                 tp_value = float(tp_match.group(1))
@@ -126,7 +107,7 @@ def parse_signal(text: str):
         # Stop Loss parsing
         if not signal.get("stop_loss"):
             # Allow "Stop loss", "Stoploss", "SL"
-            sl_pattern = r'(?:STOP\s*LOSS|SL)\s*(?:at)?\s*([\d\.]+)'
+            sl_pattern = r'(?:STOP\s*LOSS|SL):?\s*(?:at)?\s*([\d\.]+)'
             m = re.search(sl_pattern, line, re.IGNORECASE)
             if m:
                 try:
