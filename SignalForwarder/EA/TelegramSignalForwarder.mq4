@@ -176,10 +176,10 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
         return(false);
     }
 
-    // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3|SL|LOT|GID:<id>
+    // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3|SL|GID:<id>
     string parts[];
-    if(StringSplit(line, '|', parts) < 8) {
-        Print(eaName, ": Invalid signal format, expected 8 parts but got ", IntegerToString(ArraySize(parts)));
+    if(StringSplit(line, '|', parts) < 7) {
+        Print(eaName, ": Invalid signal format, expected 7 parts but got ", IntegerToString(ArraySize(parts)));
         return(false);
     }
 
@@ -413,11 +413,8 @@ void SendOrders(string signalType, string symbol,
 void HandleTrailingStops()
 {
     datetime now = TimeCurrent();
-    if(now - lastTrailingScan < trailingCheckIntervalSec) 
-    {
-        if(debugMode) Print(eaName, ": TS scan skipped - interval not reached");
-        return;
-    }
+    if(now - lastTrailingScan < trailingCheckIntervalSec) return;
+    
     lastTrailingScan = now;
 
     int historyTotal = OrdersHistoryTotal();
