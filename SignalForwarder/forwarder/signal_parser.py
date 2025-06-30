@@ -15,18 +15,7 @@ def remove_emojis(text):
 
 # Dictionary of common symbol mappings
 symbol_mappings = {
-    'GOLD': 'XAUUSD',
-    'XAUUSD': 'XAUUSD',
-    'BTCUSD': 'BTCUSD',
-    'EURUSD': 'EURUSD',
-    'GBPUSD': 'GBPUSD',
-    'USDJPY': 'USDJPY',
-    'AUDUSD': 'AUDUSD',
-    'USDCAD': 'USDCAD',
-    'NZDUSD': 'NZDUSD',
-    'USDCHF': 'USDCHF',
-    'SILVER': 'XAGUSD',
-    'XAGUSD': 'XAGUSD'
+    'GOLD': 'XAUUSD'
 }
 
 def parse_entry_price(entry_text, signal_type):
