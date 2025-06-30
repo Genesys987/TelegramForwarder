@@ -64,13 +64,28 @@ def parse_signal(text: str):
 
         # Signal Type and Symbol parsing - handle multiple formats
         if not signal.get("signal_type"):
-            # Format 1: "BUY BTCUSD" or "SELL GOLD"
-            match_type_symbol = re.match(r'^(BUY|SELL)\s+([\w\.\/\-]+)', line, re.IGNORECASE)
+            # Format 1: "BUY BTCUSD" or "SELL GOLD" or "BUY CHFJPY 180.430"
+            match_type_symbol = re.match(r'^(BUY|SELL)\s+([\w\.\/\-]+)\s*([\d\/\.]*)', line, re.IGNORECASE)
             if match_type_symbol:
                 signal["signal_type"] = match_type_symbol.group(1).upper()
                 raw_symbol = match_type_symbol.group(2).upper()
                 # Map symbol if it exists in our mappings, otherwise use as-is
                 signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                # Capture the entry price
+                entry_text = match_type_symbol.group(3)
+                # If it contains a range (like 3313/3315), keep as string
+                if '/' in entry_text:
+                    split = entry_text.split('/')
+                    # keep the higher of range (sell) or lower (buy)
+                    if signal["signal_type"] == "SELL":
+                        signal["entry"] = max(float(split[0]), float(split[1]))
+                    else:
+                        signal["entry"] = min(float(split[0]), float(split[1]))
+                else:
+                    try:
+                        signal["entry"] = float(entry_text)
+                    except ValueError:
+                        signal["entry"] = entry_text
                 continue
             
             # Format 2: "GOLD SELL FROM 3313/3315" or "SYMBOL BUY FROM price"
@@ -114,7 +129,7 @@ def parse_signal(text: str):
 
         # Take Profits parsing - flexible, any line with TP
         # Look for any TP pattern (TP, Take Profit, etc.) followed by a number
-        tp_match = re.search(r'(?:TAKE\s*PROFIT|TP)\s*(?:\d+\s+)?(?:at\s+)?([\d\.]+)', line, re.IGNORECASE)
+        tp_match = re.search(r'(?:TAKE\s*PROFIT|TP)\s*(?:\d+:?\s+)?(?:at\s+)?([\d\.]+)', line, re.IGNORECASE)
         if tp_match:
             try:
                 tp_value = float(tp_match.group(1))
@@ -126,7 +141,7 @@ def parse_signal(text: str):
         # Stop Loss parsing
         if not signal.get("stop_loss"):
             # Allow "Stop loss", "Stoploss", "SL"
-            sl_pattern = r'(?:STOP\s*LOSS|SL)\s*(?:at)?\s*([\d\.]+)'
+            sl_pattern = r'(?:STOP\s*LOSS|SL):?\s*(?:at)?\s*([\d\.]+)'
             m = re.search(sl_pattern, line, re.IGNORECASE)
             if m:
                 try:
