@@ -38,6 +38,8 @@ int      modifiedTickets[MAX_MODIFIED_TICKETS]; // Array of tickets modified by 
 int      modifiedCount       = 0;
 datetime lastTrailingScan     = 0;       // Timestamp of last TS scan
 string   eaName               = "TelegramSignalForwarder";
+int      fh = -1;                  // File handle for reading signals
+string   nextSignal = "";
 
 //+------------------------------------------------------------------+
 //|--- Function Prototypes                                          |
@@ -139,37 +141,37 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
                     double &tp1, double &tp2, double &tp3,
                     int &groupId)
 {
-    if(!FileExists(gSignalFile))
-        return(false);
+  string line = "";
+  if (StringLen(nextSignal) == 0)
+  {
+      if(!FileExists(gSignalFile)) return(false);
+      if(fh == -1) 
+      {
+          fh = FileOpen(gSignalFile, FILE_READ | FILE_TXT | FILE_ANSI);
+          Print(eaName, ": Opening signal file ", gSignalFile);
+          if(fh == INVALID_HANDLE) {
+              Print(eaName, ": Failed to open signal file");
+              return(false);
+          }
+      }
 
-    // Debug: show raw input
-    if(debugMode)
-    {
-        int fh = FileOpen(gSignalFile, FILE_READ | FILE_TXT | FILE_ANSI);
-        if(fh != INVALID_HANDLE)
-        {
-            string raw = FileReadString(fh);
-            FileClose(fh);
-            Print(eaName, ": Raw signal= [", raw, "]");
-        }
-    }
-    
-    // Move file to temp to avoid reprocessing
-    if(!FileMove(gSignalFile, 0, gTempFile, FILE_REWRITE)) {
-      Print(eaName, ": Failed to move signal file to temp");
-      return(false);
-    }
-
-    int tfh = FileOpen(gTempFile, FILE_READ | FILE_TXT | FILE_ANSI);
-    if(tfh == INVALID_HANDLE)
-    {
-        FileDelete(gTempFile);
-        Print(eaName, ": Failed to open temp file for reading");
-        return(false);
-    }
-    string line = FileReadString(tfh);
-    FileClose(tfh);
-    FileDelete(gTempFile);
+      if(fh == INVALID_HANDLE)
+      {
+          Print(eaName, ": Failed to open temp file for reading");
+          return(false);
+      }
+      line = FileReadString(fh);
+      if(debugMode)
+      {
+          Print(eaName, ": Read signal line: [", line, "]");
+      }
+      if(!IsTesting())
+      {
+          FileClose(fh);
+          fh = -1;
+          FileDelete(gSignalFile);
+      }
+  }
 
     if(StringLen(line) == 0 || StringFind(line, "PROCESSED") >= 0) {
         Print(eaName, ": Empty or already processed signal line, skipping");
@@ -189,8 +191,14 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
     
     if(IsSignalTooOld(signalTimestamp))
     {
-        Print(eaName, ": Signal too old, skipping. Timestamp=", IntegerToString(signalTimestamp));
-        return(false);
+      if (!IsTesting())
+        {
+            Print(eaName, ": Signal too old, skipping. Timestamp=", IntegerToString(signalTimestamp));
+        }
+        else
+        {
+            nextSignal = line; // Store for next call in testing mode
+        }
     }
 
     // 1) Signal type
@@ -540,11 +548,17 @@ void HandleTrailingStops()
 void ProcessExternalSLUpdates()
 {
     if(!FileExists(gExternalSLFile)) return;
-    int fh = FileOpen(gExternalSLFile, FILE_READ|FILE_TXT|FILE_ANSI);
+    if(fh == -1)
+    {
+      fh = FileOpen(gExternalSLFile, FILE_READ|FILE_TXT|FILE_ANSI);
+    }
     if(fh == INVALID_HANDLE) return;
     string cmd = FileReadString(fh);
-    FileClose(fh);
-    FileDelete(gExternalSLFile);
+    if(!IsTesting()) {
+      FileClose(fh);
+      fh = -1;
+      FileDelete(gExternalSLFile);
+    }
 
     int sep = StringFind(cmd, "|NEW_SL:");
     if(StringFind(cmd, "GID:") != 0 || sep < 0) {
@@ -685,6 +699,12 @@ bool IsSignalTooOld(long signalTimestamp)
     int ageSeconds = (int)(utcTime - signalTime);
     int ageMinutes = ageSeconds / 60;
     
+    if(IsTesting() && ageMinutes < 0)
+    {
+        // In testing mode, allow negative age (future signals)
+        return(true);
+    }
+    
     if(debugMode)
         Print(eaName, ": Signal age check - UTC now: ", TimeToString(utcTime), 
               ", Signal time: ", TimeToString(signalTime), 
@@ -698,10 +718,10 @@ bool IsSignalTooOld(long signalTimestamp)
 //+------------------------------------------------------------------+
 bool FileExists(string filename)
 {
-    int fh = FileOpen(filename, FILE_READ | FILE_TXT | FILE_ANSI);
-    if(fh != INVALID_HANDLE)
+    int tfh = FileOpen(filename, FILE_READ | FILE_TXT | FILE_ANSI);
+    if(tfh != INVALID_HANDLE)
     {
-        FileClose(fh);
+        FileClose(tfh);
         return(true);
     }
     return(false);
