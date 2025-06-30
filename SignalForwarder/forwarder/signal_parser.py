@@ -29,6 +29,30 @@ symbol_mappings = {
     'XAGUSD': 'XAGUSD'
 }
 
+def parse_entry_price(entry_text, signal_type):
+    """
+    Parse entry price from text, handling range formats like '3313/3315'
+    
+    Args:
+        entry_text: The entry price text to parse
+        signal_type: 'BUY' or 'SELL' to determine which price to use from ranges
+    
+    Returns:
+        Parsed entry price as float or original text if parsing fails
+    """
+    if '/' in entry_text:
+        split = entry_text.split('/')
+        # keep the higher of range (sell) or lower (buy)
+        if signal_type == "SELL":
+            return max(float(split[0]), float(split[1]))
+        else:
+            return min(float(split[0]), float(split[1]))
+    else:
+        try:
+            return float(entry_text)
+        except ValueError:
+            return entry_text
+
 def parse_signal(text: str):
     """
     Parses signal text into a dictionary. Handles known formats.
@@ -73,19 +97,7 @@ def parse_signal(text: str):
                 signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
                 # Capture the entry price
                 entry_text = match_type_symbol.group(3)
-                # If it contains a range (like 3313/3315), keep as string
-                if '/' in entry_text:
-                    split = entry_text.split('/')
-                    # keep the higher of range (sell) or lower (buy)
-                    if signal["signal_type"] == "SELL":
-                        signal["entry"] = max(float(split[0]), float(split[1]))
-                    else:
-                        signal["entry"] = min(float(split[0]), float(split[1]))
-                else:
-                    try:
-                        signal["entry"] = float(entry_text)
-                    except ValueError:
-                        signal["entry"] = entry_text
+                signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
                 continue
             
             # Format 2: "GOLD SELL FROM 3313/3315" or "SYMBOL BUY FROM price"
@@ -96,19 +108,7 @@ def parse_signal(text: str):
                 signal["signal_type"] = match_symbol_type.group(2).upper()
                 # Also capture the entry price from the FROM clause
                 entry_text = match_symbol_type.group(3)
-                # If it contains a range (like 3313/3315), keep as string
-                if '/' in entry_text:
-                    split = entry_text.split('/')
-                    # keep the higher of range (sell) or lower (buy)
-                    if signal["signal_type"] == "SELL":
-                        signal["entry"] = max(float(split[0]), float(split[1]))
-                    else:
-                        signal["entry"] = min(float(split[0]), float(split[1]))
-                else:
-                    try:
-                        signal["entry"] = float(entry_text)
-                    except ValueError:
-                        signal["entry"] = entry_text
+                signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
                 continue
 
         # Entry Price parsing
@@ -117,14 +117,7 @@ def parse_signal(text: str):
             m = re.search(r'ENTRY\s*(?:at)?\s*([\d\/\.]+)', line, re.IGNORECASE)
             if m:
                 entry_text = m.group(1)
-                # If it contains a range (like 3313/3315), keep as string
-                if '/' in entry_text:
-                    signal["entry"] = entry_text
-                else:
-                    try:
-                        signal["entry"] = float(entry_text)
-                    except ValueError:
-                        signal["entry"] = entry_text
+                signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
                 continue
 
         # Take Profits parsing - flexible, any line with TP

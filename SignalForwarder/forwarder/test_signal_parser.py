@@ -38,7 +38,7 @@ class TestSignalParser(unittest.TestCase):
     def test_parse_signal_gold_sell_format(self):
         """Test parsing GOLD SELL signal with entry range and multiple TPs"""
         signal_text = """
-        GOLD SELL FROM 3313/3315
+        GOLD SELL FROM 3313/3315.3
         
         TP 3310
         TP 3308
@@ -60,7 +60,7 @@ class TestSignalParser(unittest.TestCase):
         # Test values
         self.assertEqual(result["signal_type"], "SELL")
         self.assertEqual(result["symbol"], "XAUUSD")  # GOLD maps to XAUUSD
-        self.assertEqual(result["entry"], 3315.0)  # because it's a SELL, we take the higher of the range
+        self.assertEqual(result["entry"], 3315.3)  # because it's a SELL, we take the higher of the range
         self.assertEqual(result["take_profits"], [3310, 3308, 3305, 3303, 3300])
         self.assertEqual(result["stop_loss"], 3323)
 
