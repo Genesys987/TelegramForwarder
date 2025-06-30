@@ -409,7 +409,7 @@ void SendOrders(string signalType, string symbol,
                                rawSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
                                
         if(ticket < 0) {
-            Print("Error creating ticket", GetLastError());
+            Print(eaName, ": Error creating order[", IntegerToString(k), "] ticket=", IntegerToString(ticket), " error=", IntegerToString(GetLastError()));
         }
         
         if(ticket < 0 && GetLastError() == ERR_INVALID_STOPS)
