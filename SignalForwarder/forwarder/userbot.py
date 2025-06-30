@@ -113,17 +113,22 @@ async def run_userbot():
     try: await client.start(); print("Sikeres csatlakozás Telethon kliensként.")
     except Exception as e: print(f"Hiba kliens indításakor: {e}"); return
 
+    # Fill entity cache with channel IDs
+    await client.get_dialogs()
     joined_chats_entity = []
     if not INVITE_LINKS: print("Figyelmeztetés: Nincsenek csatornák megadva.")
     else:
-        for link in INVITE_LINKS:
+        for link_or_channel_id in INVITE_LINKS:
             try:
-                print(f"Csatlakozás ehhez: {link}...")
-                entity = await client.get_entity(link)
+                print(f"Csatlakozás ehhez: {link_or_channel_id}...")
+                # Convert to int if digits only, otherwise keep as string
+                if link_or_channel_id.isdigit():
+                  link_or_channel_id = int(link_or_channel_id)
+                entity = await client.get_entity(link_or_channel_id)
                 title = getattr(entity, 'title', f"ID: {entity.id}")
                 print(f"✅ Figyelés beállítva erre: {title}")
                 joined_chats_entity.append(entity)
-            except Exception as e: print(f"❌ Hiba csatorna kezelésekor ({link}): {e}")
+            except Exception as e: print(f"❌ Hiba csatorna kezelésekor ({link_or_channel_id}): {e}")
     if not joined_chats_entity: 
         print("Figyelmeztetés: Nem figyelünk csatornákat.")
         quit()
