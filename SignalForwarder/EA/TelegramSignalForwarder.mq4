@@ -387,6 +387,16 @@ void SendOrders(string signalType, string symbol,
     {
         RefreshRates();
         string comment = "GID:" + IntegerToString(groupId) + "|SL:" + DoubleToString(rawSL, digits);
+    
+        Print(eaName, ": Order[", IntegerToString(k), "] parameters: ",
+        "Symbol=", symbol,
+        " Type=", IntegerToString(orderType),
+        " Lots=", DoubleToString(fixedLotSize, 2),
+        " Price=", DoubleToString(price, digits),
+        " SL=", DoubleToString(rawSL, digits),
+        " TP=", DoubleToString(tps[k], digits),
+        " Comment=", comment);
+    
         int ticket = OrderSend(symbol, orderType, fixedLotSize, price, slippage,
                                rawSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
                                
