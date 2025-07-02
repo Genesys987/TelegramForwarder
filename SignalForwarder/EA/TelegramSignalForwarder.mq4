@@ -15,7 +15,9 @@ extern int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC i
 extern int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
 extern string symbolPostfix           = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
 extern bool   useLimitOrders           = true;  // Use limit orders at middle between entry and TP1
-extern double fixedLotSize              = 0.02;  // Default lot size for orders
+extern double fixedLotSize              = 0.02;  // Default lot size for FX orders
+extern double fixedLotSizeBitcoin       = 0.02;  // Default lot size for Bitcoin orders
+extern double fixedLotSizeGold          = 0.02;  // Default lot size for Gold orders
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -326,6 +328,9 @@ void SendOrders(string signalType, string symbol,
     double price;
     bool shouldBuy = signalType == "BUY";
     double midPrice = (entryPrice + tp1) / 2.0; // Midpoint for limit order logic
+    // mid price is halfway between entry and TP1
+    // between entry and mid price, market orders are used
+    // between mid price and TP1, limit orders are used for the mid price
     bool shouldUseLimitOrders = useLimitOrders && (shouldBuy ? ask > midPrice : bid < midPrice);
 
     int orderType;
@@ -382,6 +387,8 @@ void SendOrders(string signalType, string symbol,
 
     int slippage = 5;
     color cols[3] = { clrBlue, clrGreen, clrRed };
+    double lotSize = (symbol == "BTCUSD") ? fixedLotSizeBitcoin :
+                        (symbol == "XAUUSD") ? fixedLotSizeGold : fixedLotSize;
 
     for(int k=0; k<3; k++)
     {
@@ -391,13 +398,13 @@ void SendOrders(string signalType, string symbol,
         Print(eaName, ": Order[", IntegerToString(k), "] parameters: ",
         "Symbol=", symbol,
         " Type=", IntegerToString(orderType),
-        " Lots=", DoubleToString(fixedLotSize, 2),
+        " Lots=", DoubleToString(lotSize, 2),
         " Price=", DoubleToString(price, digits),
         " SL=", DoubleToString(rawSL, digits),
         " TP=", DoubleToString(tps[k], digits),
         " Comment=", comment);
-    
-        int ticket = OrderSend(symbol, orderType, fixedLotSize, price, slippage,
+
+        int ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
                                rawSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
                                
         if(ticket < 0) {
