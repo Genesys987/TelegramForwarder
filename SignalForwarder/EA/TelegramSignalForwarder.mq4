@@ -348,7 +348,7 @@ void SendOrders(string signalType, string symbol,
 
     // Determine which SL to use
     double rawSL, fallbackSL;
-    if(!shouldUseLimitOrders && missedTP1) {
+    if(missedTP1) {
         // Use entry price as SL if we've missed TP1
         rawSL = NormalizeDouble(entryPrice, digits);
         fallbackSL = rawSL; // No fallback needed since we're using entry
