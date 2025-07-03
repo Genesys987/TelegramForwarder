@@ -50,7 +50,7 @@ bool    ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
                        double &stopLoss,
                        double &tp1, double &tp2, double &tp3,
                        int &groupId, string &channelName);
-void    UpdateExistingOrdersSL(string symbol, int orderType, double newSL);
+void    UpdateExistingOrdersSL(string symbol, string signalType, double newSL, string channelName);
 void    SendOrders(string signalType, string symbol,
                          double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
                          int groupId, string channelName);
@@ -58,6 +58,7 @@ int     GetOrderType(string signalType);
 void    HandleTrailingStops();
 void    ProcessExternalSLUpdates();
 bool    ParseOrderComment(string comment, int &groupId, double &signalSL);
+bool    ParseOrderCommentFull(string comment, int &groupId, double &signalSL, string &channelName);
 bool    HasBeenModified(int ticket);
 void    MarkAsModified(int ticket);
 void    AddTriggeredGroup(int groupId);
@@ -124,7 +125,7 @@ int start()
             if(debugMode)
                 Print(eaName, ": Processing signal from channel '", channelName, "' - GID=", IntegerToString(groupId));
                 
-            UpdateExistingOrdersSL(symbol, signalType, stopLoss);
+            UpdateExistingOrdersSL(symbol, signalType, stopLoss, channelName);
             SendOrders(signalType, symbol,
                              entryPrice, stopLoss, tp1, tp2, tp3,
                              groupId, channelName);
@@ -287,13 +288,14 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
 }
 
 //+------------------------------------------------------------------+
-//| UpdateExistingOrdersSL: Update SL of existing orders            |
+//| UpdateExistingOrdersSL: Update SL of existing orders from same channel |
 //+------------------------------------------------------------------+
-void UpdateExistingOrdersSL(string symbol, string signalType, double newSL)
+void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, string channelName)
 {
+    int targetOrderType = (signalType == "BUY") ? OP_BUY : OP_SELL;
+    
     for(int i=0; i<OrdersTotal(); i++)
     {
-
         if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
           if (debugMode) Print(eaName, ": Failed to select order at index ", IntegerToString(i), " - error=", IntegerToString(GetLastError()));
           continue;
@@ -302,9 +304,25 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL)
           if (debugMode) Print(eaName, ": Ignoring order at index ", IntegerToString(i), " - wrong magic number");
           continue;
         }
-        if(OrderSymbol() != symbol || OrderType() != (signalType == "BUY" ? OP_BUY : OP_SELL)) {
+        if(OrderSymbol() != symbol || OrderType() != targetOrderType) {
           if (debugMode) Print(eaName, ": Ignoring order at index ", IntegerToString(i), " - symbol/type mismatch");
           continue;
+        }
+
+        // Parse the order's comment to get channel information
+        int orderGid;
+        double orderSL;
+        string orderChannelName;
+        if(!ParseOrderCommentFull(OrderComment(), orderGid, orderSL, orderChannelName)) {
+            if (debugMode) Print(eaName, ": Failed to parse order comment for ticket ", IntegerToString(OrderTicket()), ": ", OrderComment());
+            continue;
+        }
+
+        // Only update SL if the order is from the same channel
+        if(orderChannelName != channelName) {
+            if (debugMode) Print(eaName, ": Ignoring order ticket ", IntegerToString(OrderTicket()), 
+                                " - different channel (order='", orderChannelName, "', signal='", channelName, "')");
+            continue;
         }
 
         double currSL = OrderStopLoss();
@@ -314,10 +332,16 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL)
             double tp    = OrderTakeProfit();
             bool ok = OrderModify(OrderTicket(), openP, newSL, tp, 0, clrBlue);
             if(ok)
-                Print(eaName, ": Updated SL for ticket=", IntegerToString(OrderTicket()));
+                Print(eaName, ": Updated SL for ticket=", IntegerToString(OrderTicket()), 
+                      " from channel '", channelName, "' (", DoubleToString(currSL, MarketInfo(symbol, MODE_DIGITS)), 
+                      " -> ", DoubleToString(newSL, MarketInfo(symbol, MODE_DIGITS)), ")");
             else
                 Print(eaName, ": SL update failed ticket=", IntegerToString(OrderTicket()),
                       " err=", IntegerToString(GetLastError()));
+        } else {
+            if (debugMode) Print(eaName, ": SL change too small for ticket ", IntegerToString(OrderTicket()), 
+                                " - current=", DoubleToString(currSL, MarketInfo(symbol, MODE_DIGITS)), 
+                                " new=", DoubleToString(newSL, MarketInfo(symbol, MODE_DIGITS)));
         }
     }
 }
@@ -607,6 +631,15 @@ void ProcessExternalSLUpdates()
 //+------------------------------------------------------------------+
 bool ParseOrderComment(string comment, int &groupId, double &signalSL)
 {
+    string channelName = "";
+    return ParseOrderCommentFull(comment, groupId, signalSL, channelName);
+}
+
+//+------------------------------------------------------------------+
+//| ParseOrderCommentFull: extracts GID, SL and channel from comment|
+//+------------------------------------------------------------------+
+bool ParseOrderCommentFull(string comment, int &groupId, double &signalSL, string &channelName)
+{
     // New format: GID:1234|CHANNELNAME|SL:1.2345
     // Old format: GID:1234|SL:1.2345 (for backward compatibility)
     
@@ -636,9 +669,17 @@ bool ParseOrderComment(string comment, int &groupId, double &signalSL)
         // Try old format where SL comes right after first pipe
         if(StringSubstr(comment, firstPipe, 3) == "|SL") {
             slPos = firstPipe;
+            channelName = "LEGACY"; // Old format
         } else {
             if(debugMode) Print(eaName, ": No SL found in comment: ", comment);
             return(false);
+        }
+    } else {
+        // New format - extract channel name
+        if(slPos > firstPipe + 1) {
+            channelName = StringSubstr(comment, firstPipe+1, slPos-firstPipe-1);
+        } else {
+            channelName = "UNKNOWN";
         }
     }
     
@@ -646,13 +687,9 @@ bool ParseOrderComment(string comment, int &groupId, double &signalSL)
     signalSL = StrToDouble(StringSubstr(comment, slPos+4));
     
     if(debugMode) {
-        string channelPart = "";
-        if(slPos > firstPipe + 1) {
-            // New format with channel name
-            channelPart = StringSubstr(comment, firstPipe+1, slPos-firstPipe-1);
-            Print(eaName, ": Parsed comment - GID:", IntegerToString(groupId), " Channel:", channelPart, " SL:", DoubleToString(signalSL, 5));
+        if(StringLen(channelName) > 0 && channelName != "LEGACY") {
+            Print(eaName, ": Parsed comment - GID:", IntegerToString(groupId), " Channel:", channelName, " SL:", DoubleToString(signalSL, 5));
         } else {
-            // Old format
             Print(eaName, ": Parsed comment (legacy) - GID:", IntegerToString(groupId), " SL:", DoubleToString(signalSL, 5));
         }
     }
