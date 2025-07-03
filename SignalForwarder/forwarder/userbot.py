@@ -124,7 +124,16 @@ async def run_userbot():
     except Exception as e: print(f"Hiba kliens indításakor: {e}"); return
 
     # Fill entity cache with channel IDs
-    await client.get_dialogs()
+    dialogs = await client.get_dialogs()
+    with open("channels.txt", "w", encoding='utf-8') as f:
+        for dialog in dialogs:
+            if dialog.is_channel:
+                entity = dialog.entity
+                if hasattr(entity, 'id') and hasattr(entity, 'title'):
+                    f.write(f"{entity.id} - {entity.title}\n")
+                else:
+                    f.write(f"{entity.id} - (Nincs cím)\n")
+    print("Csatorna cache kiírva 'channels.txt'-be.")
     joined_chats_entity = []
     if not INVITE_LINKS: print("Figyelmeztetés: Nincsenek csatornák megadva.")
     else:

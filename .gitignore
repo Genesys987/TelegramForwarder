@@ -6,5 +6,6 @@ userbot_session.session-journal
 signals_queue*.txt
 message_gid_map.json
 last_group_id.txt
+channels.txt
 
 __pycache__/
