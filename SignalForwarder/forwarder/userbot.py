@@ -122,8 +122,8 @@ async def run_userbot():
             try:
                 print(f"Csatlakozás ehhez: {link_or_channel_id}...")
                 # Convert to int if digits only, otherwise keep as string
-                if link_or_channel_id.isdigit():
-                  link_or_channel_id = int(link_or_channel_id)
+                if re.match(r'^[\d-]+$', link_or_channel_id):
+                    link_or_channel_id = int(link_or_channel_id)
                 entity = await client.get_entity(link_or_channel_id)
                 title = getattr(entity, 'title', f"ID: {entity.id}")
                 print(f"✅ Figyelés beállítva erre: {title}")
