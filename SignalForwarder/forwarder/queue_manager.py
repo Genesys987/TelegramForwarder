@@ -16,7 +16,7 @@ def add_signal_to_queue(signal_data: dict) -> bool:
     Feladata, hogy a 'signal_data' dict tartalmából elkészítse azt a sort,
     amit a queue-fájlba (MT4_QUEUE_FILE_PATH) fűz hozzá.
     A paraméterekből létrehoz egy 'message' stringet:
-      "{timestamp_utc}|{signal_type}|{symbol}|{entry}|{tp1,tp2,tp3}|{stop_loss}|GID:{group_id}"
+      "{timestamp_utc}|{signal_type}|{symbol}|{entry}|{tp1,tp2,tp3}|{stop_loss}|GID:{group_id}|{channel_name}"
 
     Kötelező kulcsok a 'signal_data'-ban:
       - timestamp_utc: int (UTC timestamp in milliseconds)
@@ -26,6 +26,7 @@ def add_signal_to_queue(signal_data: dict) -> bool:
       - take_profits: list (>=3 elem), pl. [3219,3217,3215]
       - stop_loss: float
       - group_id: int  (Python generálja)
+      - channel_name: str (tisztított csatorna név)
 
     Visszatér:
       True, ha sikeres
@@ -34,7 +35,7 @@ def add_signal_to_queue(signal_data: dict) -> bool:
     try:
         # 1) Alap ellenőrzés
         required_keys = ["timestamp_utc", "signal_type", "symbol", "entry", "take_profits",
-                         "stop_loss", "group_id"]
+                         "stop_loss", "group_id", "channel_name"]
         if not all(key in signal_data for key in required_keys):
             print(f"❌ [QueueAdd] Hiányzó kulcsok. Van: {list(signal_data.keys())}, Kellene: {required_keys}")
             return False
@@ -53,9 +54,12 @@ def add_signal_to_queue(signal_data: dict) -> bool:
 
         # 4) Sor összerakása timestamp-pel kezdve (prefix nélkül)
         tp_str = ",".join(str(tp) for tp in tps)
+        channel_name = signal_data.get("channel_name", "UNKNOWN")
         message = (f"{timestamp}|{signal_data['signal_type']}|{signal_data['symbol']}|{signal_data['entry']}|"
                    f"{tp_str}|{signal_data['stop_loss']}|"
-                   f"GID:{signal_data['group_id']}\n")
+                   f"GID:{signal_data['group_id']}|{channel_name}\n")
+
+        print(f"🔄 [QueueAdd] Signal formázva csatorna névvel '{channel_name}': GID:{signal_data['group_id']}")
 
         # 5) I/O művelet: Hozzáfűzés az összes queue-fájlhoz
         for queue_path in MT4_QUEUE_FILE_PATHS:

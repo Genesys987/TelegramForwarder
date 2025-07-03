@@ -49,11 +49,11 @@ string   nextSignal = "";
 bool    ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
                        double &stopLoss,
                        double &tp1, double &tp2, double &tp3,
-                       int &groupId);
+                       int &groupId, string &channelName);
 void    UpdateExistingOrdersSL(string symbol, int orderType, double newSL);
 void    SendOrders(string signalType, string symbol,
                          double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
-                         int groupId);
+                         int groupId, string channelName);
 int     GetOrderType(string signalType);
 void    HandleTrailingStops();
 void    ProcessExternalSLUpdates();
@@ -111,7 +111,7 @@ int deinit()
 //+------------------------------------------------------------------+
 int start()
 {
-    string signalType, symbol;
+    string signalType, symbol, channelName;
     double entryPrice, stopLoss, tp1, tp2, tp3;
     int    groupId;
 
@@ -119,12 +119,15 @@ int start()
     {
         // Process new signal
         if(ReadSignalFile(signalType, symbol, entryPrice,
-                          stopLoss, tp1, tp2, tp3, groupId))
+                          stopLoss, tp1, tp2, tp3, groupId, channelName))
         {
+            if(debugMode)
+                Print(eaName, ": Processing signal from channel '", channelName, "' - GID=", IntegerToString(groupId));
+                
             UpdateExistingOrdersSL(symbol, signalType, stopLoss);
             SendOrders(signalType, symbol,
                              entryPrice, stopLoss, tp1, tp2, tp3,
-                             groupId);
+                             groupId, channelName);
         }
         // Apply trailing stop logic
         HandleTrailingStops();
@@ -141,7 +144,7 @@ int start()
 bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
                     double &stopLoss,
                     double &tp1, double &tp2, double &tp3,
-                    int &groupId)
+                    int &groupId, string &channelName)
 {
   string line = "";
   if (StringLen(nextSignal) == 0)
@@ -186,10 +189,10 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
         return(false);
     }
 
-    // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3|SL|GID:<id>
+    // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3|SL|GID:<id>|CHANNEL_NAME
     string parts[];
-    if(StringSplit(line, '|', parts) < 7) {
-        Print(eaName, ": Invalid signal format, expected 7 parts but got ", IntegerToString(ArraySize(parts)));
+    if(StringSplit(line, '|', parts) < 8) {
+        Print(eaName, ": Invalid signal format, expected 8 parts but got ", IntegerToString(ArraySize(parts)));
         return(false);
     }
 
@@ -270,7 +273,15 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
         return(false);
     }
 
-    Print(eaName, ": Parsed signal GID=", IntegerToString(groupId));
+    // 7) Channel Name (new field)
+    if(ArraySize(parts) >= 8) {
+        channelName = Trim(parts[7]);
+        if(StringLen(channelName) == 0) channelName = "UNKNOWN";
+    } else {
+        channelName = "LEGACY"; // For backward compatibility with old signals
+    }
+
+    Print(eaName, ": Parsed signal GID=", IntegerToString(groupId), " from channel '", channelName, "'");
 
     return(true);
 }
@@ -316,7 +327,7 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL)
 //+------------------------------------------------------------------+
 void SendOrders(string signalType, string symbol,
                       double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
-                      int groupId)
+                      int groupId, string channelName)
 {
     int digits    = MarketInfo(symbol, MODE_DIGITS);
     double point  = MarketInfo(symbol, MODE_POINT);
@@ -382,6 +393,7 @@ void SendOrders(string signalType, string symbol,
     }
 
     Print(eaName, ": Sending orders for GID=", IntegerToString(groupId),
+          " from channel '", channelName, "'",
           " Missed TP1=", missedTP1 ? "Yes" : "No",
           " Using SL=", DoubleToString(rawSL, digits));
 
@@ -393,7 +405,7 @@ void SendOrders(string signalType, string symbol,
     for(int k=0; k<3; k++)
     {
         RefreshRates();
-        string comment = "GID:" + IntegerToString(groupId) + "|SL:" + DoubleToString(rawSL, digits);
+        string comment = "GID:" + IntegerToString(groupId) + "|" + channelName + "|SL:" + DoubleToString(rawSL, digits);
     
         Print(eaName, ": Order[", IntegerToString(k), "] parameters: ",
         "Symbol=", symbol,
@@ -595,15 +607,57 @@ void ProcessExternalSLUpdates()
 //+------------------------------------------------------------------+
 bool ParseOrderComment(string comment, int &groupId, double &signalSL)
 {
+    // New format: GID:1234|CHANNELNAME|SL:1.2345
+    // Old format: GID:1234|SL:1.2345 (for backward compatibility)
+    
     int p1 = StringFind(comment, "GID:");
-    int p2 = StringFind(comment, "|SL:");
-    if(p1 != 0 || p2 < 0) {
-        if(debugMode) Print(eaName, ": Invalid comment format, no GID and SL found: ", comment);
+    if(p1 != 0) {
+        if(debugMode) Print(eaName, ": Invalid comment format, no GID found: ", comment);
         return(false);
     }
-    groupId  = StrToInteger(StringSubstr(comment, 4, p2-4));
-    signalSL = StrToDouble(StringSubstr(comment, p2+4));
-    return(groupId > 0);
+    
+    // Find first pipe after GID
+    int firstPipe = StringFind(comment, "|", 4);
+    if(firstPipe < 0) {
+        if(debugMode) Print(eaName, ": Invalid comment format, no pipe separator found: ", comment);
+        return(false);
+    }
+    
+    // Extract GID
+    groupId = StrToInteger(StringSubstr(comment, 4, firstPipe-4));
+    if(groupId <= 0) {
+        if(debugMode) Print(eaName, ": Invalid GID in comment: ", comment);
+        return(false);
+    }
+    
+    // Look for SL: either immediately after first pipe (old format) or after second pipe (new format)
+    int slPos = StringFind(comment, "|SL:", firstPipe);
+    if(slPos < 0) {
+        // Try old format where SL comes right after first pipe
+        if(StringSubstr(comment, firstPipe, 3) == "|SL") {
+            slPos = firstPipe;
+        } else {
+            if(debugMode) Print(eaName, ": No SL found in comment: ", comment);
+            return(false);
+        }
+    }
+    
+    // Extract SL value
+    signalSL = StrToDouble(StringSubstr(comment, slPos+4));
+    
+    if(debugMode) {
+        string channelPart = "";
+        if(slPos > firstPipe + 1) {
+            // New format with channel name
+            channelPart = StringSubstr(comment, firstPipe+1, slPos-firstPipe-1);
+            Print(eaName, ": Parsed comment - GID:", IntegerToString(groupId), " Channel:", channelPart, " SL:", DoubleToString(signalSL, 5));
+        } else {
+            // Old format
+            Print(eaName, ": Parsed comment (legacy) - GID:", IntegerToString(groupId), " SL:", DoubleToString(signalSL, 5));
+        }
+    }
+    
+    return(true);
 }
 
 //+------------------------------------------------------------------+
