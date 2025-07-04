@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from telethon import TelegramClient, events
 import traceback
 import os
+from telethon.tl.types import PeerChannel
 
 # --- Configuration ---
 try:
@@ -130,7 +131,11 @@ async def run_userbot():
             if dialog.is_channel:
                 entity = dialog.entity
                 if hasattr(entity, 'id') and hasattr(entity, 'title'):
-                    f.write(f"{entity.id} - {entity.title}\n")
+                    access_hash = getattr(entity, 'access_hash', None)
+                    if access_hash is not None:
+                        f.write(f"{entity.id} - {entity.title} - access_hash: {access_hash}\n")
+                    else:
+                        f.write(f"{entity.id} - {entity.title} - access_hash: None\n")
                 else:
                     f.write(f"{entity.id} - (Nincs cím)\n")
     print("Csatorna cache kiírva 'channels.txt'-be.")
