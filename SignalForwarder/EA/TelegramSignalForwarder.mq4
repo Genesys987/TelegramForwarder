@@ -47,11 +47,11 @@ string   eaName               = "TelegramSignalForwarder";
 bool    ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
                        double &stopLoss,
                        double &tp1, double &tp2, double &tp3,
-                       int &groupId);
+                       int &groupId, string &channelName);
 void    UpdateExistingOrdersSL(string symbol, int orderType, double newSL);
 void    SendOrders(string signalType, string symbol,
                          double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
-                         int groupId);
+                         int groupId, string channelName);
 int     GetOrderType(string signalType);
 void    HandleTrailingStops();
 void    ProcessExternalSLUpdates();
@@ -113,7 +113,7 @@ int deinit()
 //+------------------------------------------------------------------+
 int start()
 {
-    string signalType, symbol;
+    string signalType, symbol, channelName;
     double entryPrice, stopLoss, tp1, tp2, tp3;
     int    groupId;
 
@@ -121,12 +121,12 @@ int start()
     {
         // Process new signal
         if(ReadSignalFile(signalType, symbol, entryPrice,
-                          stopLoss, tp1, tp2, tp3, groupId))
+                          stopLoss, tp1, tp2, tp3, groupId, channelName))
         {
             UpdateExistingOrdersSL(symbol, signalType, stopLoss);
             SendOrders(signalType, symbol,
                              entryPrice, stopLoss, tp1, tp2, tp3,
-                             groupId);
+                             groupId, channelName);
         }
         // Apply trailing stop logic
         HandleTrailingStops();
@@ -143,7 +143,7 @@ int start()
 bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
                     double &stopLoss,
                     double &tp1, double &tp2, double &tp3,
-                    int &groupId)
+                    int &groupId, string &channelName)
 {
     if(!FileExists(gSignalFile))
         return(false);
@@ -182,10 +182,10 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
         return(false);
     }
 
-    // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3|SL|GID:<id>
+    // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3|SL|GID:<id>|CHANNEL_NAME
     string parts[];
-    if(StringSplit(line, '|', parts) < 7) {
-        Print(eaName, ": Invalid signal format, expected 7 parts but got ", IntegerToString(ArraySize(parts)));
+    if(StringSplit(line, '|', parts) < 8) {
+        Print(eaName, ": Invalid signal format, expected 8 parts but got ", IntegerToString(ArraySize(parts)));
         return(false);
     }
 
@@ -257,7 +257,13 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
         return(false);
     }
 
-    Print(eaName, ": Parsed signal GID=", IntegerToString(groupId));
+    // 7) Channel Name
+    channelName = Trim(parts[7]);
+    if(StringLen(channelName) == 0) {
+        channelName = "Unknown"; // Default channel name if empty
+    }
+
+    Print(eaName, ": Parsed signal GID=", IntegerToString(groupId), " Channel=", channelName);
 
     return(true);
 }
@@ -319,7 +325,7 @@ int GetOrderType(string signalType)
 //+------------------------------------------------------------------+
 void SendOrders(string signalType, string symbol,
                       double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
-                      int groupId)
+                      int groupId, string channelName)
 {
     int orderType = GetOrderType(signalType);
 
@@ -392,7 +398,7 @@ void SendOrders(string signalType, string symbol,
     for(int k=0; k<3; k++)
     {
         RefreshRates();
-        string comment = "GID:" + IntegerToString(groupId) + "|SL:" + DoubleToString(rawSL, digits) + 
+        string comment = channelName + "|GID:" + IntegerToString(groupId) + "|SL:" + DoubleToString(rawSL, digits) + 
                         "|TP1:" + DoubleToString(tps[0], digits) + "|TP2:" + DoubleToString(tps[1], digits);
     
         Print(eaName, ": Order[", IntegerToString(k), "] parameters: ",
@@ -724,12 +730,17 @@ bool ParseOrderComment(string comment, int &groupId, double &signalSL)
     int p2 = StringFind(comment, "|SL:");
     int p3 = StringFind(comment, "|TP1:");
     
-    if(p1 != 0 || p2 < 0 || p3 < 0) {
+    if(p1 < 0 || p2 < 0 || p3 < 0) {
         if(debugMode) Print(eaName, ": Invalid comment format: ", comment);
         return(false);
     }
     
-    groupId  = StrToInteger(StringSubstr(comment, 4, p2-4));
+    // GID érték kinyerése (rugalmasabb módon)
+    int gidStart = p1 + 4;
+    int gidEnd = StringFind(comment, "|", gidStart);
+    if(gidEnd < 0) gidEnd = StringLen(comment);
+    
+    groupId  = StrToInteger(StringSubstr(comment, gidStart, gidEnd - gidStart));
     signalSL = StrToDouble(StringSubstr(comment, p2+4, p3-p2-4));
     return(groupId > 0);
 }
@@ -744,12 +755,17 @@ bool ParseOrderCommentExtended(string comment, int &groupId, double &signalSL, d
     int p3 = StringFind(comment, "|TP1:");
     int p4 = StringFind(comment, "|TP2:");
     
-    if(p1 != 0 || p2 < 0 || p3 < 0 || p4 < 0) {
+    if(p1 < 0 || p2 < 0 || p3 < 0 || p4 < 0) {
         if(debugMode) Print(eaName, ": Invalid extended comment format: ", comment);
         return(false);
     }
     
-    groupId  = StrToInteger(StringSubstr(comment, 4, p2-4));
+    // GID érték kinyerése (rugalmasabb módon)
+    int gidStart = p1 + 4;
+    int gidEnd = StringFind(comment, "|", gidStart);
+    if(gidEnd < 0) gidEnd = StringLen(comment);
+    
+    groupId  = StrToInteger(StringSubstr(comment, gidStart, gidEnd - gidStart));
     signalSL = StrToDouble(StringSubstr(comment, p2+4, p3-p2-4));
     tp1      = StrToDouble(StringSubstr(comment, p3+5, p4-p3-5));
     tp2      = StrToDouble(StringSubstr(comment, p4+5));
