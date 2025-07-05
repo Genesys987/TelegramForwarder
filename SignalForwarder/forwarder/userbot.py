@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from telethon import TelegramClient, events
 import traceback
 import os
+from telethon.tl.types import PeerChannel
 
 # --- Configuration ---
 try:
@@ -71,11 +72,21 @@ client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 
 # --- Fő Feldolgozó Függvények ---
 
-async def process_new_standard_signal(message_text: str, message_id: int, message_date):
+async def process_new_standard_signal(message_text: str, message_id: int, message_date, channel_name: str = None):
     """Parse-ol, lot-ot számol, GID-t generál, map-et tárol, queue-hoz ad, timestamp-et ad hozzá."""
-    print(f"   Standard szignál feldolgozása (ID: {message_id})...")
+    print(f"   Standard szignál feldolgozása (ID: {message_id}) csatornából: {channel_name or 'UNKNOWN'}...")
     signal_data = parse_signal(message_text)
     if not signal_data: print(f"   Szignál parse sikertelen."); return None
+    
+    # Add cleaned channel name to signal data
+    if channel_name:
+        from signal_parser import clean_channel_name
+        clean_name = clean_channel_name(channel_name)
+        signal_data["channel_name"] = clean_name
+        print(f"   Csatorna név hozzáadva: '{channel_name}' -> '{clean_name}'")
+    else:
+        signal_data["channel_name"] = "UNKNOWN"
+        print(f"   Figyelmeztetés: Nincs csatorna név, 'UNKNOWN' használata")
     
     # Extract UTC timestamp in milliseconds
     if message_date:
@@ -114,7 +125,20 @@ async def run_userbot():
     except Exception as e: print(f"Hiba kliens indításakor: {e}"); return
 
     # Fill entity cache with channel IDs
-    await client.get_dialogs()
+    dialogs = await client.get_dialogs()
+    with open("channels.txt", "w", encoding='utf-8') as f:
+        for dialog in dialogs:
+            if dialog.is_channel:
+                entity = dialog.entity
+                if hasattr(entity, 'id') and hasattr(entity, 'title'):
+                    access_hash = getattr(entity, 'access_hash', None)
+                    if access_hash is not None:
+                        f.write(f"{entity.id} - {entity.title} - access_hash: {access_hash}\n")
+                    else:
+                        f.write(f"{entity.id} - {entity.title} - access_hash: None\n")
+                else:
+                    f.write(f"{entity.id} - (Nincs cím)\n")
+    print("Csatorna cache kiírva 'channels.txt'-be.")
     joined_chats_entity = []
     if not INVITE_LINKS: print("Figyelmeztetés: Nincsenek csatornák megadva.")
     else:
@@ -122,8 +146,8 @@ async def run_userbot():
             try:
                 print(f"Csatlakozás ehhez: {link_or_channel_id}...")
                 # Convert to int if digits only, otherwise keep as string
-                if link_or_channel_id.isdigit():
-                  link_or_channel_id = int(link_or_channel_id)
+                if re.match(r'^[\d-]+$', link_or_channel_id):
+                    link_or_channel_id = int(link_or_channel_id)
                 entity = await client.get_entity(link_or_channel_id)
                 title = getattr(entity, 'title', f"ID: {entity.id}")
                 print(f"✅ Figyelés beállítva erre: {title}")
@@ -137,7 +161,7 @@ async def run_userbot():
     @client.on(events.NewMessage(chats=joined_chats_entity))
     async def new_message_handler(event):
         message = event.message; message_text = message.text; message_id = message.id
-        chat_title = getattr(event.chat, 'title', None) or getattr(event.chat, 'username', None) or event.chat_id
+        chat_title = getattr(event.chat, 'title', None) or getattr(event.chat, 'username', None) or str(event.chat_id)
         if not message_text: return
         print(f"📩 Új üzenet innen: '{chat_title}' (ID: {message_id})")
 
@@ -165,8 +189,10 @@ async def run_userbot():
 
         # === Standard szignál feldolgozás ===
         else:
-            try: await process_new_standard_signal(message_text, message_id, message.date)
-            except Exception as e: print(f"   Hiba process_new_standard_signal hívásakor: {e}"); traceback.print_exc()
+            try: 
+                await process_new_standard_signal(message_text, message_id, message.date, chat_title)
+            except Exception as e: 
+                print(f"   Hiba process_new_standard_signal hívásakor: {e}"); traceback.print_exc()
 
     print("🟢 Userbot elindult. Várakozás...")
     await client.run_until_disconnected()

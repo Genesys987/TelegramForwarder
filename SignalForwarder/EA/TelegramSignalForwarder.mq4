@@ -14,8 +14,10 @@ extern int    triggerTolerancePips     = 5;     // Pips tolerance for trailing s
 extern int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC in minutes (e.g., UTC+2 = 120)
 extern int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
 extern string symbolPostfix           = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
-extern int    limitOrderTolerancePips  = 5;     // Tolerance in pips for limit orders (-1 to use market orders)
-extern double fixedLotSize              = 0.02;  // Default lot size for orders
+extern bool   useLimitOrders           = true;  // Use limit orders at middle between entry and TP1
+extern double fixedLotSize              = 0.02;  // Default lot size for FX orders
+extern double fixedLotSizeBitcoin       = 0.02;  // Default lot size for Bitcoin orders
+extern double fixedLotSizeGold          = 0.02;  // Default lot size for Gold orders
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -40,6 +42,8 @@ int      modifiedTickets[MAX_MODIFIED_TICKETS]; // Array of tickets modified by 
 int      modifiedCount       = 0;
 datetime lastTrailingScan     = 0;       // Timestamp of last TS scan
 string   eaName               = "TelegramSignalForwarder";
+int      fh = -1;                  // File handle for reading signals
+string   nextSignal = "";
 
 //+------------------------------------------------------------------+
 //|--- Function Prototypes                                          |
@@ -48,7 +52,8 @@ bool    ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
                        double &stopLoss,
                        double &tp1, double &tp2, double &tp3,
                        int &groupId, string &channelName);
-void    UpdateExistingOrdersSL(string symbol, int orderType, double newSL);
+
+void    UpdateExistingOrdersSL(string symbol, string signalType, double newSL, string channelName);
 void    SendOrders(string signalType, string symbol,
                          double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
                          int groupId, string channelName);
@@ -56,7 +61,7 @@ int     GetOrderType(string signalType);
 void    HandleTrailingStops();
 void    ProcessExternalSLUpdates();
 bool    ParseOrderComment(string comment, int &groupId, double &signalSL);
-bool    ParseOrderCommentExtended(string comment, int &groupId, double &signalSL, double &tp1, double &tp2);
+bool    ParseOrderCommentFull(string comment, int &groupId, double &signalSL, double &tp1, double &tp2, string &channelName);
 bool    HasBeenModified(int ticket);
 void    MarkAsModified(int ticket);
 void    AddTriggeredGroup(int groupId);
@@ -123,7 +128,10 @@ int start()
         if(ReadSignalFile(signalType, symbol, entryPrice,
                           stopLoss, tp1, tp2, tp3, groupId, channelName))
         {
-            UpdateExistingOrdersSL(symbol, signalType, stopLoss);
+            if(debugMode)
+                Print(eaName, ": Processing signal from channel '", channelName, "' - GID=", IntegerToString(groupId));
+                
+            UpdateExistingOrdersSL(symbol, signalType, stopLoss, channelName);
             SendOrders(signalType, symbol,
                              entryPrice, stopLoss, tp1, tp2, tp3,
                              groupId, channelName);
@@ -145,40 +153,46 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
                     double &tp1, double &tp2, double &tp3,
                     int &groupId, string &channelName)
 {
-    if(!FileExists(gSignalFile))
-        return(false);
+  string line = "";
+  if (StringLen(nextSignal) == 0)
+  {
+      if(fh == -1) 
+      {
+          if(!FileExists(gSignalFile)) return(false);
+          fh = FileOpen(gSignalFile, FILE_READ | FILE_TXT | FILE_ANSI);
+          Print(eaName, ": Opening signal file ", gSignalFile);
+          if(fh == INVALID_HANDLE) {
+              Print(eaName, ": Failed to open signal file");
+              return(false);
+          }
+      }
 
-    // Debug: show raw input
-    if(debugMode)
-    {
-        int fh = FileOpen(gSignalFile, FILE_READ | FILE_TXT | FILE_ANSI);
-        if(fh != INVALID_HANDLE)
-        {
-            string raw = FileReadString(fh);
-            FileClose(fh);
-            Print(eaName, ": Raw signal= [", raw, "]");
-        }
-    }
-    
-    // Move file to temp to avoid reprocessing
-    if(!FileMove(gSignalFile, 0, gTempFile, FILE_REWRITE)) {
-      Print(eaName, ": Failed to move signal file to temp");
-      return(false);
-    }
+      if(fh == INVALID_HANDLE)
+      {
+          Print(eaName, ": Failed to open temp file for reading");
+          return(false);
+      }
+      if(IsTesting() && FileIsEnding(fh))
+      {
+          FileClose(fh);
+          return(false);
+      }
+      line = FileReadString(fh);
+      if(debugMode)
+      {
+          Print(eaName, ": Read signal line: [", line, "]");
+      }
+      if(!IsTesting())
+      {
+          FileClose(fh);
+          fh = -1;
+          FileDelete(gSignalFile);
+      }
+  } else {
+    line = nextSignal;
+  }
 
-    int tfh = FileOpen(gTempFile, FILE_READ | FILE_TXT | FILE_ANSI);
-    if(tfh == INVALID_HANDLE)
-    {
-        FileDelete(gTempFile);
-        Print(eaName, ": Failed to open temp file for reading");
-        return(false);
-    }
-    string line = FileReadString(tfh);
-    FileClose(tfh);
-    FileDelete(gTempFile);
-
-    if(StringLen(line) == 0 || StringFind(line, "PROCESSED") >= 0) {
-        Print(eaName, ": Empty or already processed signal line, skipping");
+    if(StringLen(line) == 0) {
         return(false);
     }
 
@@ -195,9 +209,18 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
     
     if(IsSignalTooOld(signalTimestamp))
     {
-        Print(eaName, ": Signal too old, skipping. Timestamp=", IntegerToString(signalTimestamp));
-        return(false);
+      if (!IsTesting())
+        {
+            Print(eaName, ": Signal too old, skipping. Timestamp=", IntegerToString(signalTimestamp));
+        }
+        else
+        {
+            nextSignal = line; // Store for next call in testing mode
+            return(false);
+        }
     }
+    
+    nextSignal = "";
 
     // 1) Signal type
     signalType = ToUpperCase(Trim(parts[1]));
@@ -257,27 +280,28 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
         return(false);
     }
 
-    // 7) Channel Name
-    channelName = Trim(parts[7]);
-    if(StringLen(channelName) == 0) {
-        channelName = "Unknown"; // Default channel name if empty
+    // 7) Channel Name (new field)
+    if(ArraySize(parts) >= 8) {
+        channelName = Trim(parts[7]);
+        if(StringLen(channelName) == 0) channelName = "UNKNOWN";
+    } else {
+        channelName = "LEGACY"; // For backward compatibility with old signals
     }
 
-    Print(eaName, ": Parsed signal GID=", IntegerToString(groupId), " Channel=", channelName);
+    Print(eaName, ": Parsed signal GID=", IntegerToString(groupId), " from channel '", channelName, "'");
 
     return(true);
 }
 
 //+------------------------------------------------------------------+
-//| UpdateExistingOrdersSL: Update SL of existing orders            |
+//| UpdateExistingOrdersSL: Update SL of existing orders from same channel |
 //+------------------------------------------------------------------+
-void UpdateExistingOrdersSL(string symbol, string signalType, double newSL)
+void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, string channelName)
 {
-    int orderType = GetOrderType(signalType);
+    int targetOrderType = (signalType == "BUY") ? OP_BUY : OP_SELL;
     
     for(int i=0; i<OrdersTotal(); i++)
     {
-        
         if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
           if (debugMode) Print(eaName, ": Failed to select order at index ", IntegerToString(i), " - error=", IntegerToString(GetLastError()));
           continue;
@@ -286,9 +310,25 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL)
           if (debugMode) Print(eaName, ": Ignoring order at index ", IntegerToString(i), " - wrong magic number");
           continue;
         }
-        if(OrderSymbol() != symbol || OrderType() != orderType) {
+        if(OrderSymbol() != symbol || OrderType() != targetOrderType) {
           if (debugMode) Print(eaName, ": Ignoring order at index ", IntegerToString(i), " - symbol/type mismatch");
           continue;
+        }
+
+        // Parse the order's comment to get channel information
+        int orderGid;
+        double orderSL;
+        string orderChannelName;
+        if(!ParseOrderCommentFull(OrderComment(), orderGid, orderSL, orderChannelName)) {
+            if (debugMode) Print(eaName, ": Failed to parse order comment for ticket ", IntegerToString(OrderTicket()), ": ", OrderComment());
+            continue;
+        }
+
+        // Only update SL if the order is from the same channel
+        if(orderChannelName != channelName) {
+            if (debugMode) Print(eaName, ": Ignoring order ticket ", IntegerToString(OrderTicket()), 
+                                " - different channel (order='", orderChannelName, "', signal='", channelName, "')");
+            continue;
         }
 
         double currSL = OrderStopLoss();
@@ -298,25 +338,17 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL)
             double tp    = OrderTakeProfit();
             bool ok = OrderModify(OrderTicket(), openP, newSL, tp, 0, clrBlue);
             if(ok)
-                Print(eaName, ": Updated SL for ticket=", IntegerToString(OrderTicket()));
+                Print(eaName, ": Updated SL for ticket=", IntegerToString(OrderTicket()), 
+                      " from channel '", channelName, "' (", DoubleToString(currSL, MarketInfo(symbol, MODE_DIGITS)), 
+                      " -> ", DoubleToString(newSL, MarketInfo(symbol, MODE_DIGITS)), ")");
             else
                 Print(eaName, ": SL update failed ticket=", IntegerToString(OrderTicket()),
                       " err=", IntegerToString(GetLastError()));
+        } else {
+            if (debugMode) Print(eaName, ": SL change too small for ticket ", IntegerToString(OrderTicket()), 
+                                " - current=", DoubleToString(currSL, MarketInfo(symbol, MODE_DIGITS)), 
+                                " new=", DoubleToString(newSL, MarketInfo(symbol, MODE_DIGITS)));
         }
-    }
-}
-
-//+------------------------------------------------------------------+
-//| GetOrderType: Determine order type based on signal and settings |
-//+------------------------------------------------------------------+
-int GetOrderType(string signalType)
-{
-    bool shouldBuy = (signalType == "BUY");
-    bool useLimitOrders = (limitOrderTolerancePips >= 0);
-    if (useLimitOrders) {
-        return (shouldBuy) ? OP_BUYLIMIT : OP_SELLLIMIT;
-    } else {
-        return (shouldBuy) ? OP_BUY : OP_SELL;
     }
 }
 
@@ -327,8 +359,6 @@ void SendOrders(string signalType, string symbol,
                       double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
                       int groupId, string channelName)
 {
-    int orderType = GetOrderType(signalType);
-
     int digits    = MarketInfo(symbol, MODE_DIGITS);
     double point  = MarketInfo(symbol, MODE_POINT);
     int stopLevel = MarketInfo(symbol, MODE_STOPLEVEL);
@@ -337,16 +367,20 @@ void SendOrders(string signalType, string symbol,
     double ask = MarketInfo(symbol, MODE_ASK);
     double bid = MarketInfo(symbol, MODE_BID);
     double price;
-    bool shouldUseLimitOrders = (limitOrderTolerancePips >= 0);
     bool shouldBuy = signalType == "BUY";
-    if (shouldUseLimitOrders) {
-        // For limit orders, use entry price adjusted by tolerance
-        double tolerance = limitOrderTolerancePips * point;
-        // tolerance means, for buy orders we tolerate a higher entry price, for sell orders a lower entry price
-        price = NormalizeDouble((shouldBuy) ? entryPrice + tolerance : entryPrice - tolerance, digits);
+    double midPrice = (entryPrice + tp1) / 2.0; // Midpoint for limit order logic
+    // mid price is halfway between entry and TP1
+    // between entry and mid price, market orders are used
+    // between mid price and TP1, limit orders are used for the mid price
+    bool shouldUseLimitOrders = useLimitOrders && (shouldBuy ? ask > midPrice : bid < midPrice);
+
+    int orderType;
+    if(shouldUseLimitOrders) {
+        price = midPrice;
+        orderType = (shouldBuy) ? OP_BUYLIMIT : OP_SELLLIMIT;
     } else {
-        // For market orders, use current ask/bid
-        price = (shouldBuy) ? ask : bid;
+        price = shouldBuy ? ask : bid;
+        orderType = (shouldBuy) ? OP_BUY : OP_SELL;
     }
     price = NormalizeDouble(price, digits);
 
@@ -355,7 +389,7 @@ void SendOrders(string signalType, string symbol,
 
     // Determine which SL to use
     double rawSL, fallbackSL;
-    if(!shouldUseLimitOrders && missedTP1) {
+    if(missedTP1) {
         // Use entry price as SL if we've missed TP1
         rawSL = NormalizeDouble(entryPrice, digits);
         fallbackSL = rawSL; // No fallback needed since we're using entry
@@ -389,11 +423,14 @@ void SendOrders(string signalType, string symbol,
     }
 
     Print(eaName, ": Sending orders for GID=", IntegerToString(groupId),
+          " from channel '", channelName, "'",
           " Missed TP1=", missedTP1 ? "Yes" : "No",
           " Using SL=", DoubleToString(rawSL, digits));
 
     int slippage = 5;
     color cols[3] = { clrBlue, clrGreen, clrRed };
+    double lotSize = (symbol == "BTCUSD") ? fixedLotSizeBitcoin :
+                        (symbol == "XAUUSD") ? fixedLotSizeGold : fixedLotSize;
 
     for(int k=0; k<3; k++)
     {
@@ -404,17 +441,17 @@ void SendOrders(string signalType, string symbol,
         Print(eaName, ": Order[", IntegerToString(k), "] parameters: ",
         "Symbol=", symbol,
         " Type=", IntegerToString(orderType),
-        " Lots=", DoubleToString(fixedLotSize, 2),
+        " Lots=", DoubleToString(lotSize, 2),
         " Price=", DoubleToString(price, digits),
         " SL=", DoubleToString(rawSL, digits),
         " TP=", DoubleToString(tps[k], digits),
         " Comment=", comment);
-    
-        int ticket = OrderSend(symbol, orderType, fixedLotSize, price, slippage,
+
+        int ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
                                rawSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
                                
         if(ticket < 0) {
-            Print("Error creating ticket", GetLastError());
+            Print(eaName, ": Error creating order[", IntegerToString(k), "] ticket=", IntegerToString(ticket), " error=", IntegerToString(GetLastError()));
         }
         
         if(ticket < 0 && GetLastError() == ERR_INVALID_STOPS)
@@ -684,11 +721,17 @@ void HandleTrailingStops()
 void ProcessExternalSLUpdates()
 {
     if(!FileExists(gExternalSLFile)) return;
-    int fh = FileOpen(gExternalSLFile, FILE_READ|FILE_TXT|FILE_ANSI);
+    if(fh == -1)
+    {
+      fh = FileOpen(gExternalSLFile, FILE_READ|FILE_TXT|FILE_ANSI);
+    }
     if(fh == INVALID_HANDLE) return;
     string cmd = FileReadString(fh);
-    FileClose(fh);
-    FileDelete(gExternalSLFile);
+    if(!IsTesting()) {
+      FileClose(fh);
+      fh = -1;
+      FileDelete(gExternalSLFile);
+    }
 
     int sep = StringFind(cmd, "|NEW_SL:");
     if(StringFind(cmd, "GID:") != 0 || sep < 0) {
@@ -726,6 +769,18 @@ void ProcessExternalSLUpdates()
 //+------------------------------------------------------------------+
 bool ParseOrderComment(string comment, int &groupId, double &signalSL)
 {
+    string channelName = "";
+    return ParseOrderCommentFull(comment, groupId, signalSL, channelName);
+}
+
+//+------------------------------------------------------------------+
+//| ParseOrderCommentFull: extracts GID, SL and channel from comment|
+//+------------------------------------------------------------------+
+bool ParseOrderCommentFull(string comment, int &groupId, double &signalSL, string &channelName)
+{
+    // New format: GID:1234|CHANNELNAME|SL:1.2345
+    // Old format: GID:1234|SL:1.2345 (for backward compatibility)
+    
     int p1 = StringFind(comment, "GID:");
     int p2 = StringFind(comment, "|SL:");
     int p3 = StringFind(comment, "|TP1:");
@@ -771,6 +826,7 @@ bool ParseOrderCommentExtended(string comment, int &groupId, double &signalSL, d
     tp2      = StrToDouble(StringSubstr(comment, p4+5));
     
     return(groupId > 0);
+
 }
 
 //+------------------------------------------------------------------+
@@ -876,6 +932,12 @@ bool IsSignalTooOld(long signalTimestamp)
     int ageSeconds = (int)(utcTime - signalTime);
     int ageMinutes = ageSeconds / 60;
     
+    if(IsTesting() && ageMinutes < 0)
+    {
+        // In testing mode, allow negative age (future signals)
+        return(true);
+    }
+    
     if(debugMode)
         Print(eaName, ": Signal age check - UTC now: ", TimeToString(utcTime), 
               ", Signal time: ", TimeToString(signalTime), 
@@ -889,10 +951,10 @@ bool IsSignalTooOld(long signalTimestamp)
 //+------------------------------------------------------------------+
 bool FileExists(string filename)
 {
-    int fh = FileOpen(filename, FILE_READ | FILE_TXT | FILE_ANSI);
-    if(fh != INVALID_HANDLE)
+    int tfh = FileOpen(filename, FILE_READ | FILE_TXT | FILE_ANSI);
+    if(tfh != INVALID_HANDLE)
     {
-        FileClose(fh);
+        FileClose(tfh);
         return(true);
     }
     return(false);
