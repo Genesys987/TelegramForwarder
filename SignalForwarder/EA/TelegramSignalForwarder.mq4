@@ -32,9 +32,18 @@ static string gTempFile       = "processing.txt";     // Temp file to avoid re-r
 static string gExternalSLFile = "stoploss_update.txt";// External SL updates
 
 //+------------------------------------------------------------------+
+//|--- Triggered Group Structure                                    |
+//+------------------------------------------------------------------+
+struct TriggeredGroup {
+    int gid;
+    int triggeredTPLevel;  // Which TP level was triggered (1-6)
+    datetime triggerTime;  // When it was triggered
+};
+
+//+------------------------------------------------------------------+
 //|--- Global State Variables                                       |
 //+------------------------------------------------------------------+
-int      triggeredGroups[MAX_GROUPS];    // Array of group IDs that triggered TS
+TriggeredGroup triggeredGroups[MAX_GROUPS];    // Array of triggered groups with TP levels
 int      triggeredCount      = 0;
 int      modifiedTickets[MAX_MODIFIED_TICKETS]; // Array of tickets modified by TS
 int      modifiedCount       = 0;
@@ -47,21 +56,23 @@ string   nextSignal = "";
 //|--- Function Prototypes                                          |
 //+------------------------------------------------------------------+
 bool    ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
-                       double &stopLoss,
-                       double &tp1, double &tp2, double &tp3,
+                       double &stopLoss, double &tpLevels[],
                        int &groupId, string &channelName);
 void    UpdateExistingOrdersSL(string symbol, string signalType, double newSL, string channelName);
 void    SendOrders(string signalType, string symbol,
-                         double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
+                         double entryPrice, double stopLoss, double &tpLevels[],
                          int groupId, string channelName);
 int     GetOrderType(string signalType);
-void    HandleTrailingStops();
+void    HandleTrailingStopsDynamic();
 void    ProcessExternalSLUpdates();
 bool    ParseOrderComment(string comment, int &groupId, double &signalSL);
 bool    ParseOrderCommentFull(string comment, int &groupId, double &signalSL, string &channelName);
+bool    ParseOrderCommentDynamic(string comment, int &groupId, double &signalSL, 
+                                 string &channelName, double &tpLevels[]);
+int     GetHighestTriggeredTP(double closePrice, double &tpLevels[], int orderType, double tolerance);
 bool    HasBeenModified(int ticket);
 void    MarkAsModified(int ticket);
-void    AddTriggeredGroup(int groupId);
+void    AddTriggeredGroup(int groupId, int tpLevel);
 bool    CheckStopLevel(string symbol, int orderType,
                        double sl, double ask, double bid);
 bool    CheckFreezeLevel(string symbol,
@@ -79,8 +90,12 @@ bool    IsValidDouble(string s);
 //+------------------------------------------------------------------+
 int init()
 {
-    // Initialize arrays
-    ArrayInitialize(triggeredGroups, -1);
+    // Initialize triggered groups array
+    for(int i = 0; i < MAX_GROUPS; i++) {
+        triggeredGroups[i].gid = -1;
+        triggeredGroups[i].triggeredTPLevel = 0;
+        triggeredGroups[i].triggerTime = 0;
+    }
     ArrayInitialize(modifiedTickets, -1);
     triggeredCount   = 0;
     modifiedCount    = 0;
@@ -92,7 +107,7 @@ int init()
         eaName = customName;
 
     if(debugMode)
-        Print(eaName, ": Initialized");
+        Print(eaName, ": Initialized with dynamic TP support");
 
     return(0);
 }
@@ -113,25 +128,27 @@ int deinit()
 int start()
 {
     string signalType, symbol, channelName;
-    double entryPrice, stopLoss, tp1, tp2, tp3;
+    double entryPrice, stopLoss;
+    double tpLevels[]; // Dynamic array for TP levels
     int    groupId;
 
     if(IsTradeAllowed() && IsConnected() && !IsStopped())
     {
         // Process new signal
         if(ReadSignalFile(signalType, symbol, entryPrice,
-                          stopLoss, tp1, tp2, tp3, groupId, channelName))
+                          stopLoss, tpLevels, groupId, channelName))
         {
             if(debugMode)
-                Print(eaName, ": Processing signal from channel '", channelName, "' - GID=", IntegerToString(groupId));
+                Print(eaName, ": Processing signal with ", IntegerToString(ArraySize(tpLevels)), 
+                      " TP levels from channel '", channelName, "' - GID=", IntegerToString(groupId));
                 
             UpdateExistingOrdersSL(symbol, signalType, stopLoss, channelName);
             SendOrders(signalType, symbol,
-                             entryPrice, stopLoss, tp1, tp2, tp3,
+                             entryPrice, stopLoss, tpLevels,
                              groupId, channelName);
         }
-        // Apply trailing stop logic
-        HandleTrailingStops();
+        // Apply dynamic trailing stop logic
+        HandleTrailingStopsDynamic();
     }
 
     // Process external SL updates
@@ -143,8 +160,7 @@ int start()
 //| ReadSignalFile: Parses a signal line from file                   |
 //+------------------------------------------------------------------+
 bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
-                    double &stopLoss,
-                    double &tp1, double &tp2, double &tp3,
+                    double &stopLoss, double &tpLevels[],
                     int &groupId, string &channelName)
 {
   string line = "";
@@ -237,15 +253,38 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
     }
     entryPrice = NormalizeDouble(StrToDouble(parts[3]), MarketInfo(symbol, MODE_DIGITS));
 
-    // 4) TP levels
+    // 4) TP levels - dynamic parsing
     string tpsArr[];
-    if(StringSplit(parts[4], ',', tpsArr) < 3) {
-        Print(eaName, ": Invalid TP levels '", parts[4], "', skipping");
+    int tpCount = StringSplit(parts[4], ',', tpsArr);
+    
+    if(tpCount < 1 || tpCount > 6) {
+        Print(eaName, ": Invalid TP count (", IntegerToString(tpCount), "), expected 1-6 levels");
         return(false);
     }
-    tp1 = NormalizeDouble(StrToDouble(tpsArr[0]), MarketInfo(symbol, MODE_DIGITS));
-    tp2 = NormalizeDouble(StrToDouble(tpsArr[1]), MarketInfo(symbol, MODE_DIGITS));
-    tp3 = NormalizeDouble(StrToDouble(tpsArr[2]), MarketInfo(symbol, MODE_DIGITS));
+    
+    // Resize tpLevels array and populate
+    ArrayResize(tpLevels, tpCount);
+    int digits = MarketInfo(symbol, MODE_DIGITS);
+    
+    for(int i = 0; i < tpCount; i++) {
+        if(!IsValidDouble(tpsArr[i])) {
+            Print(eaName, ": Invalid TP", IntegerToString(i+1), " value: '", tpsArr[i], "'");
+            return(false);
+        }
+        
+        tpLevels[i] = NormalizeDouble(StrToDouble(tpsArr[i]), digits);
+        
+        // Validate TP sequence (must be ascending for BUY, descending for SELL)
+        if(i > 0) {
+            bool validSequence = (signalType == "BUY") ? (tpLevels[i] > tpLevels[i-1]) 
+                                                        : (tpLevels[i] < tpLevels[i-1]);
+            if(!validSequence) {
+                Print(eaName, ": Invalid TP sequence at TP", IntegerToString(i+1), 
+                      " - expected ", signalType == "BUY" ? "ascending" : "descending", " order");
+                return(false);
+            }
+        }
+    }
 
     // 5) Stop loss, remove brackets
     string rawSL = parts[5];
@@ -282,7 +321,14 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
         channelName = "LEGACY"; // For backward compatibility with old signals
     }
 
-    Print(eaName, ": Parsed signal GID=", IntegerToString(groupId), " from channel '", channelName, "'");
+    if(debugMode) {
+        string tpDebug = "";
+        for(int i = 0; i < tpCount; i++) {
+            tpDebug += " TP" + IntegerToString(i+1) + ":" + DoubleToString(tpLevels[i], digits);
+        }
+        Print(eaName, ": Parsed ", IntegerToString(tpCount), " TP levels:", tpDebug, 
+              " GID=", IntegerToString(groupId), " from channel '", channelName, "'");
+    }
 
     return(true);
 }
@@ -350,9 +396,15 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, stri
 //| SendOrders: Place three market or limit orders with SL & TP        |
 //+------------------------------------------------------------------+
 void SendOrders(string signalType, string symbol,
-                      double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
+                      double entryPrice, double stopLoss, double &tpLevels[],
                       int groupId, string channelName)
 {
+    int tpCount = ArraySize(tpLevels);
+    if(tpCount == 0) {
+        Print(eaName, ": No TP levels provided, skipping orders");
+        return;
+    }
+
     int digits    = MarketInfo(symbol, MODE_DIGITS);
     double point  = MarketInfo(symbol, MODE_POINT);
     int stopLevel = MarketInfo(symbol, MODE_STOPLEVEL);
@@ -362,10 +414,8 @@ void SendOrders(string signalType, string symbol,
     double bid = MarketInfo(symbol, MODE_BID);
     double price;
     bool shouldBuy = signalType == "BUY";
-    double midPrice = (entryPrice + tp1) / 2.0; // Midpoint for limit order logic
-    // mid price is halfway between entry and TP1
-    // between entry and mid price, market orders are used
-    // between mid price and TP1, limit orders are used for the mid price
+    double midPrice = (entryPrice + tpLevels[0]) / 2.0; // Use TP1 for midpoint calculation
+    
     bool shouldUseLimitOrders = useLimitOrders && (shouldBuy ? ask > midPrice : bid < midPrice);
 
     int orderType;
@@ -379,16 +429,14 @@ void SendOrders(string signalType, string symbol,
     price = NormalizeDouble(price, digits);
 
     // Check if we've missed TP1 already
-    bool missedTP1 = (shouldBuy) ? bid >= tp1 : ask <= tp1;
+    bool missedTP1 = (shouldBuy) ? bid >= tpLevels[0] : ask <= tpLevels[0];
 
     // Determine which SL to use
     double rawSL, fallbackSL;
     if(missedTP1) {
-        // Use entry price as SL if we've missed TP1
         rawSL = NormalizeDouble(entryPrice, digits);
-        fallbackSL = rawSL; // No fallback needed since we're using entry
+        fallbackSL = rawSL;
     } else {
-        // Normal SL logic
         rawSL = NormalizeDouble(stopLoss, digits);
         fallbackSL = (shouldBuy)
                         ? price - MathAbs(entryPrice - stopLoss)
@@ -402,21 +450,16 @@ void SendOrders(string signalType, string symbol,
     if(!shouldBuy && fallbackSL - price < minDist) fallbackSL = price + minDist;
     fallbackSL = NormalizeDouble(fallbackSL, digits);
 
-    double tps[3];
-    tps[0] = tp1;
-    tps[1] = tp2;
-    tps[2] = tp3;
-
-    for(int j=0; j<3; j++)
-    {
-        tps[j] = NormalizeDouble(tps[j], digits);
-        double dist = MathAbs(tps[j] - entryPrice);
+    // Normalize all TP levels and apply minimum distance
+    for(int j = 0; j < tpCount; j++) {
+        tpLevels[j] = NormalizeDouble(tpLevels[j], digits);
+        double dist = MathAbs(tpLevels[j] - entryPrice);
         if(dist < minDist)
-            tps[j] = (shouldBuy) ? price + minDist : price - minDist;
-        tps[j] = NormalizeDouble(tps[j], digits);
+            tpLevels[j] = (shouldBuy) ? price + minDist : price - minDist;
+        tpLevels[j] = NormalizeDouble(tpLevels[j], digits);
     }
 
-    Print(eaName, ": Sending orders for GID=", IntegerToString(groupId),
+    Print(eaName, ": Sending ", IntegerToString(tpCount), " orders for GID=", IntegerToString(groupId),
           " from channel '", channelName, "'",
           " Missed TP1=", missedTP1 ? "Yes" : "No",
           " Using SL=", DoubleToString(rawSL, digits));
@@ -426,155 +469,211 @@ void SendOrders(string signalType, string symbol,
     double lotSize = (symbol == "BTCUSD") ? fixedLotSizeBitcoin :
                         (symbol == "XAUUSD") ? fixedLotSizeGold : fixedLotSize;
 
-    for(int k=0; k<3; k++)
-    {
+    // Create orders for each TP level
+    for(int k = 0; k < tpCount; k++) {
         RefreshRates();
+        
+        // Dynamic comment generation with all TP levels
         string comment = "GID:" + IntegerToString(groupId) + "|" + channelName + "|SL:" + DoubleToString(rawSL, digits);
+        for(int tpIdx = 0; tpIdx < tpCount; tpIdx++) {
+            comment += "|TP" + IntegerToString(tpIdx + 1) + ":" + DoubleToString(tpLevels[tpIdx], digits);
+        }
     
-        Print(eaName, ": Order[", IntegerToString(k), "] parameters: ",
-        "Symbol=", symbol,
-        " Type=", IntegerToString(orderType),
-        " Lots=", DoubleToString(lotSize, 2),
-        " Price=", DoubleToString(price, digits),
-        " SL=", DoubleToString(rawSL, digits),
-        " TP=", DoubleToString(tps[k], digits),
-        " Comment=", comment);
+        Print(eaName, ": Order[", IntegerToString(k+1), "/" , IntegerToString(tpCount), "] parameters: ",
+              "Symbol=", symbol, " Type=", IntegerToString(orderType), " Lots=", DoubleToString(lotSize, 2),
+              " Price=", DoubleToString(price, digits), " SL=", DoubleToString(rawSL, digits),
+              " TP=", DoubleToString(tpLevels[k], digits), " Comment=", comment);
 
+        color orderColor = (k < 3) ? cols[k] : clrBlue; // Use default color for TP4+
         int ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
-                               rawSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
+                               rawSL, tpLevels[k], comment, MAGIC_NUMBER, 0, orderColor);
                                
         if(ticket < 0) {
-            Print(eaName, ": Error creating order[", IntegerToString(k), "] ticket=", IntegerToString(ticket), " error=", IntegerToString(GetLastError()));
+            Print(eaName, ": Error creating order[", IntegerToString(k+1), "] ticket=", IntegerToString(ticket), " error=", IntegerToString(GetLastError()));
+            
+            if(GetLastError() == ERR_INVALID_STOPS) {
+                RefreshRates();
+                Print(eaName, ": Retrying with fallback SL=", DoubleToString(fallbackSL, digits));
+                ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
+                                   fallbackSL, tpLevels[k], comment, MAGIC_NUMBER, 0, orderColor);
+            }
         }
         
-        if(ticket < 0 && GetLastError() == ERR_INVALID_STOPS)
-        {
-            RefreshRates();
-            // retry with fallback SL
-            Print(eaName, ": Retrying with fallback SL=", DoubleToString(fallbackSL, digits));
-            ticket = OrderSend(symbol, orderType, fixedLotSize, price, slippage,
-                               fallbackSL, tps[k], comment, MAGIC_NUMBER, 0, cols[k]);
+        if(ticket >= 0) {
+            Print(eaName, ": Order[", IntegerToString(k+1), "] created - ticket=", IntegerToString(ticket));
         }
-        
-        Print(eaName, ": Order[", IntegerToString(k), "] ticket=", IntegerToString(ticket));
     }
 }
 
 //+------------------------------------------------------------------+
-//| HandleTrailingStops: Refined trailing stop logic                |
+//| HandleTrailingStopsDynamic: Dynamic trailing stop logic         |
 //+------------------------------------------------------------------+
-void HandleTrailingStops()
+void HandleTrailingStopsDynamic()
 {
     datetime now = TimeCurrent();
     if(now - lastTrailingScan < trailingCheckIntervalSec) return;
-    
     lastTrailingScan = now;
 
     int historyTotal = OrdersHistoryTotal();
-    if(debugMode) Print(eaName, ": TS checking ", IntegerToString(historyTotal), " history orders");
+    if(debugMode) Print(eaName, ": Dynamic TS checking ", IntegerToString(historyTotal), " history orders");
 
-    for(int i=historyTotal-1; i>=0; i--)
-    {
-        if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) 
-        {
-            Print(eaName, ": TS history order select failed at index ", IntegerToString(i));
-            continue;
-        }
-        if(OrderMagicNumber() != MAGIC_NUMBER) 
-        {
-            if(debugMode) Print(eaName, ": TS skipping history order - wrong magic number: ", IntegerToString(OrderMagicNumber()));
-            continue;
-        }
-        double closeP = OrderClosePrice();
-        double tp       = OrderTakeProfit();
-        double tol      = triggerTolerancePips * MarketInfo(OrderSymbol(), MODE_POINT);
-        bool  triggered = (OrderType() == OP_BUY || OrderType() == OP_BUYLIMIT)
-                          ? (closeP >= tp - tol)
-                          : (closeP <= tp + tol);
-        if(!triggered) 
-        {
-            if(debugMode) Print(eaName, ": TS order not triggered ticket ", IntegerToString(OrderTicket()), " - closeP=", DoubleToString(closeP, 5), 
-                     " tp=", DoubleToString(tp, 5), " tol=", DoubleToString(tol, 5));
-            continue;
-        }
-        int gid; double sl;
-        if(ParseOrderComment(OrderComment(), gid, sl))
-        {
-            if(debugMode) Print(eaName, ": TS adding triggered group: ", IntegerToString(gid));
-            AddTriggeredGroup(gid);
-        }
-        else if(debugMode) 
-            Print(eaName, ": TS failed to parse comment: ", OrderComment());
+    // Reset triggered groups for this scan
+    triggeredCount = 0;
+    for(int i = 0; i < MAX_GROUPS; i++) {
+        triggeredGroups[i].gid = -1;
+        triggeredGroups[i].triggeredTPLevel = 0;
+        triggeredGroups[i].triggerTime = 0;
     }
 
-    if(triggeredCount == 0)
-    {
-        if(debugMode) Print(eaName, ": no TS triggers found");
+    // Scan history to find triggered TP levels
+    for(int i = historyTotal-1; i >= 0; i--) {
+        if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) {
+            if(debugMode) Print(eaName, ": Dynamic TS history order select failed at index ", IntegerToString(i));
+            continue;
+        }
+        if(OrderMagicNumber() != MAGIC_NUMBER) {
+            if(debugMode) Print(eaName, ": Dynamic TS skipping history order - wrong magic number: ", IntegerToString(OrderMagicNumber()));
+            continue;
+        }
+        
+        double closeP = OrderClosePrice();
+        double tp = OrderTakeProfit();
+        double tol = triggerTolerancePips * MarketInfo(OrderSymbol(), MODE_POINT);
+        
+        bool triggered = (OrderType() == OP_BUY || OrderType() == OP_BUYLIMIT)
+                        ? (closeP >= tp - tol)
+                        : (closeP <= tp + tol);
+        if(!triggered) {
+            if(debugMode) Print(eaName, ": Dynamic TS order not triggered ticket ", IntegerToString(OrderTicket()), 
+                     " - closeP=", DoubleToString(closeP, 5), " tp=", DoubleToString(tp, 5), " tol=", DoubleToString(tol, 5));
+            continue;
+        }
+        
+        int gid;
+        double sl;
+        string channelName;
+        double tpLevels[];
+        
+        if(!ParseOrderCommentDynamic(OrderComment(), gid, sl, channelName, tpLevels)) {
+            if(debugMode) Print(eaName, ": Dynamic TS failed to parse comment: ", OrderComment());
+            continue;
+        }
+        
+        // Determine which TP level was triggered
+        int triggeredTPLevel = GetHighestTriggeredTP(closeP, tpLevels, OrderType(), tol);
+        if(triggeredTPLevel == 0) {
+            if(debugMode) Print(eaName, ": Dynamic TS no specific TP level triggered for ticket ", IntegerToString(OrderTicket()));
+            continue;
+        }
+        
+        if(debugMode) Print(eaName, ": Dynamic TS - GID ", IntegerToString(gid), " triggered TP", IntegerToString(triggeredTPLevel));
+        AddTriggeredGroup(gid, triggeredTPLevel);
+    }
+    
+    if(triggeredCount == 0) {
+        if(debugMode) Print(eaName, ": Dynamic TS - no triggers found");
         return;
     }
-
-    if(debugMode) Print(eaName, ": TS found ", IntegerToString(triggeredCount), " triggered groups");
-
-    int openTotal = OrdersTotal();
-    if(debugMode) Print(eaName, ": TS checking ", IntegerToString(openTotal), " open orders");
     
-    for(int m=0; m<openTotal; m++)
-    {
-        if(!OrderSelect(m, SELECT_BY_POS, MODE_TRADES)) 
-        {
-            Print(eaName, ": TS open order select failed at index ", IntegerToString(m));
+    if(debugMode) Print(eaName, ": Dynamic TS found ", IntegerToString(triggeredCount), " triggered groups");
+    
+    // Process open orders
+    int openTotal = OrdersTotal();
+    for(int m = 0; m < openTotal; m++) {
+        if(!OrderSelect(m, SELECT_BY_POS, MODE_TRADES)) {
+            if(debugMode) Print(eaName, ": Dynamic TS open order select failed at index ", IntegerToString(m));
             continue;
         }
-        if(OrderMagicNumber() != MAGIC_NUMBER) 
-        {
-            if(debugMode) Print(eaName, ": TS skipping open order - wrong magic number: ", IntegerToString(OrderMagicNumber()));
+        if(OrderMagicNumber() != MAGIC_NUMBER) {
+            if(debugMode) Print(eaName, ": Dynamic TS skipping open order - wrong magic number: ", IntegerToString(OrderMagicNumber()));
             continue;
         }
+        
         int ticket = OrderTicket();
-        if(HasBeenModified(ticket)) 
-        {
-            if(debugMode) Print(eaName, ": TS skipping ticket ", IntegerToString(ticket), " - already modified");
+        if(HasBeenModified(ticket)) {
+            if(debugMode) Print(eaName, ": Dynamic TS skipping ticket ", IntegerToString(ticket), " - already modified");
             continue;
         }
-
-        int gid; double sl;
-        if(!ParseOrderComment(OrderComment(), gid, sl)) 
-        {
-            if(debugMode) Print(eaName, ": TS failed to parse comment for ticket ", IntegerToString(ticket), ": ", OrderComment());
+        
+        int gid;
+        double sl;
+        string channelName;
+        double tpLevels[];
+        
+        if(!ParseOrderCommentDynamic(OrderComment(), gid, sl, channelName, tpLevels)) {
+            if(debugMode) Print(eaName, ": Dynamic TS failed to parse comment for ticket ", IntegerToString(ticket), ": ", OrderComment());
             continue;
         }
-
-        bool belongs = false;
-        for(int n=0; n<triggeredCount; n++)
-            if(triggeredGroups[n] == gid) { belongs = true; break; }
-        if(!belongs) 
-        {
-            if(debugMode) Print(eaName, ": TS ticket ", IntegerToString(ticket), " GID ", IntegerToString(gid), " not in triggered groups");
+        
+        // Find if this order belongs to any triggered group
+        int triggeredLevel = 0;
+        for(int n = 0; n < triggeredCount; n++) {
+            if(triggeredGroups[n].gid == gid) {
+                triggeredLevel = triggeredGroups[n].triggeredTPLevel;
+                break;
+            }
+        }
+        
+        if(triggeredLevel == 0) {
+            if(debugMode) Print(eaName, ": Dynamic TS ticket ", IntegerToString(ticket), " GID ", IntegerToString(gid), " not in triggered groups");
             continue;
         }
-
+        
+        // Calculate new SL based on triggered TP level
+        double newSL = 0;
+        double currentSL = OrderStopLoss();
         double openP = OrderOpenPrice();
-        int d       = MarketInfo(OrderSymbol(), MODE_DIGITS);
-        double newSL = NormalizeDouble(openP, d);
-        double ask   = MarketInfo(OrderSymbol(), MODE_ASK);
-        double bid   = MarketInfo(OrderSymbol(), MODE_BID);
-        if(!CheckFreezeLevel(OrderSymbol(), openP, ask, bid) ||
-           !CheckStopLevel (OrderSymbol(), OrderType(), newSL, ask, bid))
-        {
-            Print(eaName, ": TS ticket ", IntegerToString(ticket), " failed freeze/stop level checks");
+        int d = MarketInfo(OrderSymbol(), MODE_DIGITS);
+        
+        if(triggeredLevel == 1) {
+            // TP1 triggered -> move SL to break-even
+            newSL = NormalizeDouble(openP, d);
+            if(debugMode) Print(eaName, ": Dynamic TS TP1 hit for GID ", IntegerToString(gid), ", moving SL to break-even: ", DoubleToString(newSL, d));
+        } else if(triggeredLevel <= ArraySize(tpLevels)) {
+            // TPn triggered -> move SL to TP(n-1)
+            double targetSL = tpLevels[triggeredLevel - 2]; // -2 because: -1 for 0-based array, -1 for previous TP
+            
+            // Only move if current SL is worse than target
+            bool shouldMove = false;
+            if(OrderType() == OP_BUY || OrderType() == OP_BUYLIMIT) {
+                shouldMove = (currentSL < targetSL);
+            } else {
+                shouldMove = (currentSL > targetSL);
+            }
+            
+            if(shouldMove) {
+                newSL = NormalizeDouble(targetSL, d);
+                if(debugMode) Print(eaName, ": Dynamic TS TP", IntegerToString(triggeredLevel), " hit for GID ", IntegerToString(gid), 
+                           ", moving SL to TP", IntegerToString(triggeredLevel-1), ": ", DoubleToString(newSL, d));
+            }
+        }
+        
+        if(newSL <= 0) {
+            if(debugMode) Print(eaName, ": Dynamic TS no SL modification needed for ticket ", IntegerToString(ticket));
             continue;
         }
-
-        if(OrderModify(ticket, openP, newSL, OrderTakeProfit(), 0, clrMagenta))
-        {
-            Print(eaName, ": TS successfully modified ticket ", IntegerToString(ticket), " to SL=", DoubleToString(newSL, d));
-            MarkAsModified(ticket);
+        
+        // Validate and apply new SL
+        double ask = MarketInfo(OrderSymbol(), MODE_ASK);
+        double bid = MarketInfo(OrderSymbol(), MODE_BID);
+        
+        if(!CheckFreezeLevel(OrderSymbol(), openP, ask, bid) ||
+           !CheckStopLevel(OrderSymbol(), OrderType(), newSL, ask, bid)) {
+            Print(eaName, ": Dynamic TS validation failed for ticket ", IntegerToString(ticket));
+            continue;
         }
-        else Print(eaName, ": TS modify fail ticket=", IntegerToString(ticket),
+        
+        if(OrderModify(ticket, openP, newSL, OrderTakeProfit(), 0, clrMagenta)) {
+            Print(eaName, ": Dynamic TS successfully modified ticket ", IntegerToString(ticket), 
+                  " to SL=", DoubleToString(newSL, d), " (TP", IntegerToString(triggeredLevel), " -> TP", IntegerToString(triggeredLevel-1), ")");
+            MarkAsModified(ticket);
+        } else {
+            Print(eaName, ": Dynamic TS modify failed ticket=", IntegerToString(ticket), 
                   " err=", IntegerToString(GetLastError()));
+        }
     }
     
-    if(debugMode) Print(eaName, ": TS scan complete");
+    if(debugMode) Print(eaName, ": Dynamic TS scan complete");
 }
 
 //+------------------------------------------------------------------+
@@ -698,6 +797,147 @@ bool ParseOrderCommentFull(string comment, int &groupId, double &signalSL, strin
 }
 
 //+------------------------------------------------------------------+
+//| ParseOrderCommentDynamic: extracts all TP levels from comment   |
+//+------------------------------------------------------------------+
+bool ParseOrderCommentDynamic(string comment, int &groupId, double &signalSL, 
+                              string &channelName, double &tpLevels[])
+{
+    // Format: GID:1234|CHANNELNAME|SL:1.2345|TP1:1.2400|TP2:1.2500|TP3:1.2600|TP4:1.2700...
+    
+    ArrayResize(tpLevels, 0); // Clear array
+    
+    int p1 = StringFind(comment, "GID:");
+    if(p1 != 0) {
+        if(debugMode) Print(eaName, ": Invalid comment format, no GID found: ", comment);
+        return(false);
+    }
+    
+    int firstPipe = StringFind(comment, "|", 4);
+    if(firstPipe < 0) {
+        if(debugMode) Print(eaName, ": Invalid comment format, no pipe separator found: ", comment);
+        return(false);
+    }
+    
+    // Extract GID
+    groupId = StrToInteger(StringSubstr(comment, 4, firstPipe-4));
+    if(groupId <= 0) {
+        if(debugMode) Print(eaName, ": Invalid GID in comment: ", comment);
+        return(false);
+    }
+    
+    // Find SL position
+    int slPos = StringFind(comment, "|SL:", firstPipe);
+    if(slPos < 0) {
+        if(StringSubstr(comment, firstPipe, 3) == "|SL") {
+            slPos = firstPipe;
+            channelName = "LEGACY";
+        } else {
+            if(debugMode) Print(eaName, ": No SL found in comment: ", comment);
+            return(false);
+        }
+    } else {
+        if(slPos > firstPipe + 1) {
+            channelName = StringSubstr(comment, firstPipe+1, slPos-firstPipe-1);
+        } else {
+            channelName = "UNKNOWN";
+        }
+    }
+    
+    // Extract SL value
+    int slEndPos = StringFind(comment, "|", slPos+4);
+    if(slEndPos < 0) slEndPos = StringLen(comment);
+    signalSL = StrToDouble(StringSubstr(comment, slPos+4, slEndPos-slPos-4));
+    
+    // Extract all TP levels dynamically
+    int searchPos = slEndPos;
+    int tpIndex = 1;
+    
+    while(searchPos < StringLen(comment)) {
+        string tpTag = "|TP" + IntegerToString(tpIndex) + ":";
+        int tpPos = StringFind(comment, tpTag, searchPos);
+        if(tpPos < 0) break; // No more TP levels found
+        
+        int tpEndPos = StringFind(comment, "|", tpPos + StringLen(tpTag));
+        if(tpEndPos < 0) tpEndPos = StringLen(comment);
+        
+        double tpValue = StrToDouble(StringSubstr(comment, tpPos + StringLen(tpTag), tpEndPos - tpPos - StringLen(tpTag)));
+        
+        // Resize array and add TP level
+        int currentSize = ArraySize(tpLevels);
+        ArrayResize(tpLevels, currentSize + 1);
+        tpLevels[currentSize] = tpValue;
+        
+        searchPos = tpEndPos;
+        tpIndex++;
+        
+        if(tpIndex > 6) break; // Safety limit
+    }
+    
+    if(debugMode) {
+        string tpDebug = "";
+        for(int i = 0; i < ArraySize(tpLevels); i++) {
+            tpDebug += " TP" + IntegerToString(i+1) + ":" + DoubleToString(tpLevels[i], 5);
+        }
+        Print(eaName, ": Parsed dynamic comment - GID:", IntegerToString(groupId), " Channel:", channelName, " SL:", DoubleToString(signalSL, 5), tpDebug);
+    }
+    
+    return(true);
+}
+
+//+------------------------------------------------------------------+
+//| GetHighestTriggeredTP: determines which TP level was hit        |
+//+------------------------------------------------------------------+
+int GetHighestTriggeredTP(double closePrice, double &tpLevels[], int orderType, double tolerance)
+{
+    // Returns the highest TP level that was triggered (1-based indexing)
+    // Returns 0 if no TP was triggered
+    
+    int highestTriggered = 0;
+    bool isBuy = (orderType == OP_BUY || orderType == OP_BUYLIMIT);
+    
+    for(int i = 0; i < ArraySize(tpLevels); i++) {
+        bool tpTriggered = isBuy ? (closePrice >= tpLevels[i] - tolerance)
+                                 : (closePrice <= tpLevels[i] + tolerance);
+        if(tpTriggered) {
+            highestTriggered = i + 1; // Convert to 1-based indexing
+        }
+    }
+    
+    if(debugMode && highestTriggered > 0) {
+        Print(eaName, ": Detected TP", IntegerToString(highestTriggered), " trigger - closePrice=", DoubleToString(closePrice, 5), 
+              " targetTP=", DoubleToString(tpLevels[highestTriggered-1], 5), " tolerance=", DoubleToString(tolerance, 5));
+    }
+    
+    return highestTriggered;
+}
+//+------------------------------------------------------------------+
+//| AddTriggeredGroup: add groupId with TP level if not present     |
+//+------------------------------------------------------------------+
+void AddTriggeredGroup(int groupId, int tpLevel)
+{
+    // Check if group already exists - update if higher TP level
+    for(int i = 0; i < triggeredCount; i++) {
+        if(triggeredGroups[i].gid == groupId) {
+            if(triggeredGroups[i].triggeredTPLevel < tpLevel) {
+                triggeredGroups[i].triggeredTPLevel = tpLevel;
+                triggeredGroups[i].triggerTime = TimeCurrent();
+                if(debugMode) Print(eaName, ": Updated triggered group GID ", IntegerToString(groupId), " to TP", IntegerToString(tpLevel));
+            }
+            return;
+        }
+    }
+    
+    // Add new triggered group
+    if(triggeredCount < MAX_GROUPS) {
+        triggeredGroups[triggeredCount].gid = groupId;
+        triggeredGroups[triggeredCount].triggeredTPLevel = tpLevel;
+        triggeredGroups[triggeredCount].triggerTime = TimeCurrent();
+        triggeredCount++;
+        if(debugMode) Print(eaName, ": Added new triggered group GID ", IntegerToString(groupId), " TP", IntegerToString(tpLevel));
+    }
+}
+
+//+------------------------------------------------------------------+
 //| HasBeenModified: checks if ticket was already modified          |
 //+------------------------------------------------------------------+
 bool HasBeenModified(int ticket)
@@ -714,17 +954,6 @@ void MarkAsModified(int ticket)
 {
     if(modifiedCount < MAX_MODIFIED_TICKETS)
         modifiedTickets[modifiedCount++] = ticket;
-}
-
-//+------------------------------------------------------------------+
-//| AddTriggeredGroup: add groupId if not present                   |
-//+------------------------------------------------------------------+
-void AddTriggeredGroup(int groupId)
-{
-    for(int i=0; i<triggeredCount; i++)
-        if(triggeredGroups[i] == groupId) return;
-    if(triggeredCount < MAX_GROUPS)
-        triggeredGroups[triggeredCount++] = groupId;
 }
 
 //+------------------------------------------------------------------+
