@@ -13,10 +13,10 @@ def clean_channel_name(channel_name: str) -> str:
         channel_name: Raw channel name/title that may contain emojis
         
     Returns:
-        Clean channel name with only alphanumeric chars, spaces, and basic punctuation
+        Clean channel name with exactly 4 letters for MT4 comment limit
     """
     if not channel_name or not channel_name.strip():
-        return "UNKNOWN"
+        return "UNKN"
     
     # Remove emojis using regex pattern for most Unicode emoji ranges
     emoji_pattern = re.compile(
@@ -51,14 +51,21 @@ def clean_channel_name(channel_name: str) -> str:
     # Remove extra whitespace
     clean_name = re.sub(r'\s+', ' ', clean_name).strip()
     
-    # Convert to uppercase and limit length
-    clean_name = clean_name.upper()[:20]  # Max 20 characters
+    # Convert to uppercase and extract only alphabetic characters
+    clean_name = clean_name.upper()
+    alpha_only = re.sub(r'[^A-Z]', '', clean_name)
     
-    # If name becomes empty after cleaning, use fallback
-    if not clean_name:
-        clean_name = "CHANNEL"
+    # Take first 4 letters or pad with 'U' if too short
+    if alpha_only:
+        result = alpha_only[:4]
+    else:
+        result = ""
     
-    return clean_name
+    # Ensure exactly 4 characters
+    if len(result) < 4:
+        result = (result + "UNKN")[:4]
+    
+    return result
 
 def parse_entry_price(entry_text, signal_type):
     """
@@ -373,3 +380,152 @@ def parse_signal(text: str):
             
         print(f"Debug: Signal parsing incomplete. Missing or invalid parts: {missing}. Original text: {text[:100]}...")
         return None
+
+def format_mt4_comment(group_id: int, channel_name: str, stop_loss: float, digits: int = 5) -> str:
+    """
+    Format MT4 comment string within 31 character limit.
+    
+    Format: 1234|ABCD|1.2345 (without GID: and SL: prefixes to save space)
+    Where ABCD is the 4-letter channel abbreviation.
+    
+    Args:
+        group_id: Group ID number
+        channel_name: Channel name (will be truncated to 4 letters)
+        stop_loss: Stop loss value
+        digits: Number of decimal places for SL formatting
+        
+    Returns:
+        Formatted comment string within 31 character limit
+    """
+    # Ensure channel name is 4 characters
+    clean_channel = clean_channel_name(channel_name)
+    
+    # Format SL with minimal precision to save space
+    sl_str = f"{stop_loss:.{min(digits, 4)}f}".rstrip('0').rstrip('.')
+    
+    # Build comment: xxxx|ABCD|value (without GID: and SL: prefixes)
+    comment = f"{group_id}|{clean_channel}|{sl_str}"
+    
+    # If comment exceeds 31 chars, reduce SL precision
+    if len(comment) > 31:
+        sl_str = f"{stop_loss:.2f}".rstrip('0').rstrip('.')
+        comment = f"{group_id}|{clean_channel}|{sl_str}"
+    
+    # If still too long, reduce to 1 decimal place
+    if len(comment) > 31:
+        sl_str = f"{stop_loss:.1f}".rstrip('0').rstrip('.')
+        comment = f"{group_id}|{clean_channel}|{sl_str}"
+    
+    # Final truncation if still too long (should not happen with proper formatting)
+    if len(comment) > 31:
+        comment = comment[:31]
+    
+    return comment
+
+# Test function to verify 4-letter channel name formatting
+def test_channel_name_cleaning():
+    """Test cases for channel name cleaning to 4-letter format"""
+    test_cases = [
+        ("🔥 Trading Signals Elite 🚀", "TRAD"),
+        ("CRYPTO MASTER SIGNALS", "CRYP"),
+        ("Gold & Forex VIP", "GOLD"),
+        ("ABC123", "ABCU"),  # ABC + U (padding)
+        ("", "UNKN"),
+        ("x", "XUNK"),
+        ("12345", "UNKN"),
+        ("🎯📊💎 VIP SIGNALS 📊💎🎯", "VIPS"),
+        ("Trading_Channel_Pro", "TRAD"),
+        ("   SPACE   SIGNALS   ", "SPAC"),
+    ]
+    
+    print("Testing channel name cleaning (4-letter format):")
+    for input_name, expected in test_cases:
+        result = clean_channel_name(input_name)
+        status = "✅" if result == expected else "❌"
+        print(f"{status} '{input_name}' -> '{result}' (expected: '{expected}')")
+    
+    # Test MT4 comment formatting
+    print("\nTesting MT4 comment formatting:")
+    test_comments = [
+        (12345, "TRADING SIGNALS", 1.23456, 5),
+        (999, "CRYPTO MASTER", 3456.789, 3),
+        (1, "VIP", 123.0, 2),
+        (999999, "SUPER LONG CHANNEL NAME", 12345.67890, 5),  # Test long values
+        (1, "A", 0.001, 5),  # Test minimal values
+        (12345, "FOREX", 1.123456789, 8),  # Test high precision
+    ]
+    
+    for gid, channel, sl, digits in test_comments:
+        comment = format_mt4_comment(gid, channel, sl, digits)
+        status = "✅" if len(comment) <= 31 else "❌"
+        print(f"{status} GID:{gid}, Channel:'{channel}', SL:{sl} -> '{comment}' (len: {len(comment)})")
+        
+    # Test edge cases for 31-character limit
+    print("\nTesting edge cases for 31-character limit:")
+    edge_cases = [
+        (123456, "TEST", 123456.789, 5),  # Very long numbers
+        (1, "X", 0.000001, 6),  # Very small numbers with high precision
+        (99999, "ABCD", 99999.999, 3),  # Maximum likely values
+        (999999, "LONG", 99999.999, 5),  # Test very long GID
+    ]
+    
+    for gid, channel, sl, digits in edge_cases:
+        comment = format_mt4_comment(gid, channel, sl, digits)
+        status = "✅" if len(comment) <= 31 else "❌"
+        print(f"{status} GID:{gid}, Channel:'{channel}', SL:{sl} -> '{comment}' (len: {len(comment)})")
+        
+    # Test space savings comparison
+    print("\nSpace savings comparison (old vs new format):")
+    old_format_examples = [
+        "GID:12345|TRAD|SL:1.2346",  # Old format
+        "GID:999|CRYP|SL:3456.789",
+        "GID:1|VIPU|SL:123",
+    ]
+    
+    for old in old_format_examples:
+        # Remove GID: and SL: to simulate new format
+        new = old.replace("GID:", "").replace("SL:", "")
+        saved = len(old) - len(new)
+        print(f"Old: '{old}' ({len(old)} chars) -> New: '{new}' ({len(new)} chars) | Saved: {saved} chars")
+        
+def demonstrate_space_savings():
+    """Demonstrate how much space is saved by removing GID: and SL: prefixes"""
+    print("\n" + "="*60)
+    print("SPACE SAVINGS DEMONSTRATION")
+    print("="*60)
+    
+    # Realistic trading scenarios
+    scenarios = [
+        (12345, "FOREX ELITE SIGNALS", 1.23456, 5),
+        (999, "CRYPTO MASTER PRO", 45678.901, 3),
+        (1, "VIP GOLD ALERTS", 2345.67, 4),
+        (567890, "BITCOIN SIGNALS VIP", 98765.432, 2),
+        (9999, "PREMIUM TRADING", 123.456789, 6),
+    ]
+    
+    total_old_chars = 0
+    total_new_chars = 0
+    
+    for gid, channel, sl, digits in scenarios:
+        new_comment = format_mt4_comment(gid, channel, sl, digits)
+        old_comment = f"GID:{gid}|{clean_channel_name(channel)}|SL:{new_comment.split('|')[2]}"
+        
+        saved = len(old_comment) - len(new_comment)
+        total_old_chars += len(old_comment)
+        total_new_chars += len(new_comment)
+        
+        print(f"Channel: {channel[:20]:<20}")
+        print(f"  Old: '{old_comment}' ({len(old_comment)} chars)")
+        print(f"  New: '{new_comment}' ({len(new_comment)} chars)")
+        print(f"  Saved: {saved} characters")
+        print()
+    
+    total_saved = total_old_chars - total_new_chars
+    print(f"TOTAL SAVINGS: {total_saved} characters across {len(scenarios)} comments")
+    print(f"Average savings per comment: {total_saved/len(scenarios):.1f} characters")
+    print(f"Space efficiency: {(total_saved/total_old_chars)*100:.1f}% reduction")
+    print("="*60)
+
+if __name__ == "__main__":
+    test_channel_name_cleaning()
+    demonstrate_space_savings()

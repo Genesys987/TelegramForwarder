@@ -10,6 +10,7 @@ Feladata:
 import os
 import traceback
 from config import MT4_QUEUE_FILE_PATHS, MT4_SIGNAL_FILE_PATHS, getMT4DataFolderId
+from signal_parser import clean_channel_name
 
 def add_signal_to_queue(signal_data: dict) -> bool:
     """
@@ -54,12 +55,13 @@ def add_signal_to_queue(signal_data: dict) -> bool:
 
         # 4) Sor összerakása timestamp-pel kezdve (prefix nélkül)
         tp_str = ",".join(str(tp) for tp in tps)
-        channel_name = signal_data.get("channel_name", "UNKNOWN")
+        raw_channel_name = signal_data.get("channel_name", "UNKNOWN")
+        channel_name = clean_channel_name(raw_channel_name)  # Clean to 4-letter format
         message = (f"{timestamp}|{signal_data['signal_type']}|{signal_data['symbol']}|{signal_data['entry']}|"
                    f"{tp_str}|{signal_data['stop_loss']}|"
                    f"GID:{signal_data['group_id']}|{channel_name}\n")
 
-        print(f"🔄 [QueueAdd] Signal formázva csatorna névvel '{channel_name}': GID:{signal_data['group_id']}")
+        print(f"🔄 [QueueAdd] Signal formázva csatorna névvel '{channel_name}' (eredeti: '{raw_channel_name}'): GID:{signal_data['group_id']}")
 
         # 5) I/O művelet: Hozzáfűzés az összes queue-fájlhoz
         for queue_path in MT4_QUEUE_FILE_PATHS:

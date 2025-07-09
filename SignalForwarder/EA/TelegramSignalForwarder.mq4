@@ -73,6 +73,8 @@ bool    FileExists(string filename);
 string  Trim(string s);
 string  ToUpperCase(string s);
 bool    IsValidDouble(string s);
+string  CleanChannelName(string channelName);
+string  FormatMT4Comment(int groupId, string channelName, double stopLoss, int digits);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -274,12 +276,13 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
         return(false);
     }
 
-    // 7) Channel Name (new field)
+    // 7) Channel Name (new field) - clean and truncate to 4 letters
     if(ArraySize(parts) >= 8) {
-        channelName = Trim(parts[7]);
-        if(StringLen(channelName) == 0) channelName = "UNKNOWN";
+        string rawChannelName = Trim(parts[7]);
+        if(StringLen(rawChannelName) == 0) rawChannelName = "UNKNOWN";
+        channelName = CleanChannelName(rawChannelName);
     } else {
-        channelName = "LEGACY"; // For backward compatibility with old signals
+        channelName = "LEGC"; // For backward compatibility with old signals (4 letters)
     }
 
     Print(eaName, ": Parsed signal GID=", IntegerToString(groupId), " from channel '", channelName, "'");
@@ -429,7 +432,7 @@ void SendOrders(string signalType, string symbol,
     for(int k=0; k<3; k++)
     {
         RefreshRates();
-        string comment = "GID:" + IntegerToString(groupId) + "|" + channelName + "|SL:" + DoubleToString(rawSL, digits);
+        string comment = FormatMT4Comment(groupId, channelName, rawSL, digits);
     
         Print(eaName, ": Order[", IntegerToString(k), "] parameters: ",
         "Symbol=", symbol,
@@ -595,12 +598,28 @@ void ProcessExternalSLUpdates()
       FileDelete(gExternalSLFile);
     }
 
+    // Check for old format (GID:xxxx|NEW_SL:value) and new format (xxxx|NEW_SL:value)
     int sep = StringFind(cmd, "|NEW_SL:");
-    if(StringFind(cmd, "GID:") != 0 || sep < 0) {
-      Print(eaName, "Not a SL modify command: ", cmd);
-      return;
+    int gid;
+    
+    if(StringFind(cmd, "GID:") == 0 && sep > 0) {
+        // Old format: GID:xxxx|NEW_SL:value
+        gid = (int)StrToInteger(StringSubstr(cmd, 4, sep-4));
+    } else {
+        // New format: xxxx|NEW_SL:value
+        if(sep > 0) {
+            gid = (int)StrToInteger(StringSubstr(cmd, 0, sep));
+        } else {
+            Print(eaName, "Not a valid SL modify command: ", cmd);
+            return;
+        }
     }
-    int gid      = (int)StrToInteger(StringSubstr(cmd, 4, sep-4));
+    
+    if(gid <= 0) {
+        Print(eaName, "Invalid GID in SL modify command: ", cmd);
+        return;
+    }
+    
     double newSL = StrToDouble(StringSubstr(cmd, sep+8));
 
     int total = OrdersTotal();
@@ -614,7 +633,20 @@ void ProcessExternalSLUpdates()
             if(debugMode) Print(eaName, ": Ignoring order at index ", IntegerToString(i), " - wrong magic number");
             continue;
         }
-        if(StringFind(OrderComment(), "GID:" + IntegerToString(gid)) < 0) {
+        // Check if order belongs to the GID (handle both old and new formats)
+        string orderComment = OrderComment();
+        bool gidMatch = false;
+        
+        // Check old format: GID:xxxx|...
+        if(StringFind(orderComment, "GID:" + IntegerToString(gid)) >= 0) {
+            gidMatch = true;
+        }
+        // Check new format: xxxx|...
+        else if(StringFind(orderComment, IntegerToString(gid) + "|") == 0) {
+            gidMatch = true;
+        }
+        
+        if(!gidMatch) {
             if(debugMode) Print(eaName, ": Ignoring order at index ", IntegerToString(i), " - GID mismatch");
             continue;
         }
@@ -640,58 +672,94 @@ bool ParseOrderComment(string comment, int &groupId, double &signalSL)
 //+------------------------------------------------------------------+
 bool ParseOrderCommentFull(string comment, int &groupId, double &signalSL, string &channelName)
 {
-    // New format: GID:1234|CHANNELNAME|SL:1.2345
+    // New format: 1234|ABCD|1.2345 (ABCD is 4-letter channel code, no GID: and SL: prefixes)
     // Old format: GID:1234|SL:1.2345 (for backward compatibility)
     
-    int p1 = StringFind(comment, "GID:");
-    if(p1 != 0) {
-        if(debugMode) Print(eaName, ": Invalid comment format, no GID found: ", comment);
-        return(false);
-    }
-    
-    // Find first pipe after GID
-    int firstPipe = StringFind(comment, "|", 4);
-    if(firstPipe < 0) {
-        if(debugMode) Print(eaName, ": Invalid comment format, no pipe separator found: ", comment);
-        return(false);
-    }
-    
-    // Extract GID
-    groupId = StrToInteger(StringSubstr(comment, 4, firstPipe-4));
-    if(groupId <= 0) {
-        if(debugMode) Print(eaName, ": Invalid GID in comment: ", comment);
-        return(false);
-    }
-    
-    // Look for SL: either immediately after first pipe (old format) or after second pipe (new format)
-    int slPos = StringFind(comment, "|SL:", firstPipe);
-    if(slPos < 0) {
-        // Try old format where SL comes right after first pipe
-        if(StringSubstr(comment, firstPipe, 3) == "|SL") {
-            slPos = firstPipe;
-            channelName = "LEGACY"; // Old format
-        } else {
-            if(debugMode) Print(eaName, ": No SL found in comment: ", comment);
+    // Check if it's the old format with GID: prefix
+    if(StringFind(comment, "GID:") == 0) {
+        // Old format handling
+        int p1 = StringFind(comment, "GID:");
+        if(p1 != 0) {
+            if(debugMode) Print(eaName, ": Invalid old comment format, no GID found: ", comment);
             return(false);
         }
-    } else {
-        // New format - extract channel name
-        if(slPos > firstPipe + 1) {
-            channelName = StringSubstr(comment, firstPipe+1, slPos-firstPipe-1);
-        } else {
-            channelName = "UNKNOWN";
+        
+        // Find first pipe after GID
+        int firstPipe = StringFind(comment, "|", 4);
+        if(firstPipe < 0) {
+            if(debugMode) Print(eaName, ": Invalid old comment format, no pipe separator found: ", comment);
+            return(false);
         }
+        
+        // Extract GID
+        groupId = StrToInteger(StringSubstr(comment, 4, firstPipe-4));
+        if(groupId <= 0) {
+            if(debugMode) Print(eaName, ": Invalid GID in old comment: ", comment);
+            return(false);
+        }
+        
+        // Look for SL: either immediately after first pipe (old format) or after second pipe (old new format)
+        int slPos = StringFind(comment, "|SL:", firstPipe);
+        if(slPos < 0) {
+            // Try old format where SL comes right after first pipe
+            if(StringSubstr(comment, firstPipe, 3) == "|SL") {
+                slPos = firstPipe;
+                channelName = "LEGC"; // Old format (4 letters)
+            } else {
+                if(debugMode) Print(eaName, ": No SL found in old comment: ", comment);
+                return(false);
+            }
+        } else {
+            // Old new format - extract channel name (should be 4 letters)
+            if(slPos > firstPipe + 1) {
+                channelName = StringSubstr(comment, firstPipe+1, slPos-firstPipe-1);
+            } else {
+                channelName = "UNKN";
+            }
+        }
+        
+        // Extract SL value
+        signalSL = StrToDouble(StringSubstr(comment, slPos+4));
+        
+        if(debugMode) {
+            Print(eaName, ": Parsed old comment - GID:", IntegerToString(groupId), " Channel:", channelName, " SL:", DoubleToString(signalSL, 5));
+        }
+        
+        return(true);
     }
     
-    // Extract SL value
-    signalSL = StrToDouble(StringSubstr(comment, slPos+4));
+    // New format: 1234|ABCD|1.2345
+    int firstPipe = StringFind(comment, "|");
+    if(firstPipe < 0) {
+        if(debugMode) Print(eaName, ": Invalid new comment format, no first pipe found: ", comment);
+        return(false);
+    }
+    
+    int secondPipe = StringFind(comment, "|", firstPipe + 1);
+    if(secondPipe < 0) {
+        if(debugMode) Print(eaName, ": Invalid new comment format, no second pipe found: ", comment);
+        return(false);
+    }
+    
+    // Extract GID (first part)
+    groupId = StrToInteger(StringSubstr(comment, 0, firstPipe));
+    if(groupId <= 0) {
+        if(debugMode) Print(eaName, ": Invalid GID in new comment: ", comment);
+        return(false);
+    }
+    
+    // Extract channel name (second part, should be 4 letters)
+    channelName = StringSubstr(comment, firstPipe + 1, secondPipe - firstPipe - 1);
+    if(StringLen(channelName) != 4) {
+        if(debugMode) Print(eaName, ": Invalid channel name length in new comment: ", comment);
+        channelName = "UNKN"; // Fallback
+    }
+    
+    // Extract SL value (third part)
+    signalSL = StrToDouble(StringSubstr(comment, secondPipe + 1));
     
     if(debugMode) {
-        if(StringLen(channelName) > 0 && channelName != "LEGACY") {
-            Print(eaName, ": Parsed comment - GID:", IntegerToString(groupId), " Channel:", channelName, " SL:", DoubleToString(signalSL, 5));
-        } else {
-            Print(eaName, ": Parsed comment (legacy) - GID:", IntegerToString(groupId), " SL:", DoubleToString(signalSL, 5));
-        }
+        Print(eaName, ": Parsed new comment - GID:", IntegerToString(groupId), " Channel:", channelName, " SL:", DoubleToString(signalSL, 5));
     }
     
     return(true);
@@ -867,4 +935,67 @@ bool IsValidDouble(string s)
     return(true);
 }
 
+//+------------------------------------------------------------------+
+//| CleanChannelName: Clean and truncate channel name to 4 letters  |
+//+------------------------------------------------------------------+
+string CleanChannelName(string channelName)
+{
+    string result = "";
+    int length = StringLen(channelName);
+    
+    // Handle empty input
+    if(length == 0) return "UNKN";
+    
+    // Convert to uppercase and extract only alphabetic characters
+    for(int i = 0; i < length && StringLen(result) < 4; i++)
+    {
+        int c = StringGetCharacter(channelName, i);
+        if(c >= 'A' && c <= 'Z') result += CharToStr(c);
+        else if(c >= 'a' && c <= 'z') result += CharToStr(c - 32); // Convert to uppercase
+    }
+    
+    // Ensure exactly 4 characters by padding with "UNK"
+    if(StringLen(result) == 0) result = "UNKN";
+    else if(StringLen(result) < 4) result = result + StringSubstr("UNKN", 0, 4 - StringLen(result));
+    
+    return StringSubstr(result, 0, 4);
+}
+
+//+------------------------------------------------------------------+
+//| FormatMT4Comment: Format comment string within 31 char limit    |
+//| New format: 1234|ABCD|1.2345 (saves 7 chars vs old GID:xxx|SL:)|
+//+------------------------------------------------------------------+
+string FormatMT4Comment(int groupId, string channelName, double stopLoss, int digits)
+{
+    // Format: 1234|ABCD|1.2345 (saves 7 chars vs old GID:xxx|SL: format)
+    string cleanChannel = CleanChannelName(channelName);
+    
+    // Format SL with reduced precision to save space
+    string slStr = DoubleToString(stopLoss, MathMin(digits, 4));
+    
+    // Remove trailing zeros
+    while(StringLen(slStr) > 1 && StringGetCharacter(slStr, StringLen(slStr)-1) == '0')
+        slStr = StringSubstr(slStr, 0, StringLen(slStr)-1);
+    if(StringGetCharacter(slStr, StringLen(slStr)-1) == '.')
+        slStr = StringSubstr(slStr, 0, StringLen(slStr)-1);
+    
+    // Build comment: xxxx|ABCD|value (without GID: and SL: prefixes)
+    string comment = IntegerToString(groupId) + "|" + cleanChannel + "|" + slStr;
+    
+    // If still too long, reduce SL precision further
+    if(StringLen(comment) > 31) {
+        slStr = DoubleToString(stopLoss, 2);
+        while(StringLen(slStr) > 1 && StringGetCharacter(slStr, StringLen(slStr)-1) == '0')
+            slStr = StringSubstr(slStr, 0, StringLen(slStr)-1);
+        if(StringGetCharacter(slStr, StringLen(slStr)-1) == '.')
+            slStr = StringSubstr(slStr, 0, StringLen(slStr)-1);
+        comment = IntegerToString(groupId) + "|" + cleanChannel + "|" + slStr;
+    }
+    
+    // Final truncation if needed (should not happen with proper input)
+    if(StringLen(comment) > 31)
+        comment = StringSubstr(comment, 0, 31);
+    
+    return comment;
+}
 //+------------------------------------------------------------------+

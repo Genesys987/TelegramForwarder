@@ -8,6 +8,7 @@ from telethon import TelegramClient, events
 import traceback
 import os
 from telethon.tl.types import PeerChannel
+from signal_parser import clean_channel_name
 
 # --- Configuration ---
 try:
@@ -80,13 +81,12 @@ async def process_new_standard_signal(message_text: str, message_id: int, messag
     
     # Add cleaned channel name to signal data
     if channel_name:
-        from signal_parser import clean_channel_name
         clean_name = clean_channel_name(channel_name)
         signal_data["channel_name"] = clean_name
         print(f"   Csatorna név hozzáadva: '{channel_name}' -> '{clean_name}'")
     else:
-        signal_data["channel_name"] = "UNKNOWN"
-        print(f"   Figyelmeztetés: Nincs csatorna név, 'UNKNOWN' használata")
+        signal_data["channel_name"] = clean_channel_name("UNKNOWN")
+        print(f"   Figyelmeztetés: Nincs csatorna név, 'UNKN' használata")
     
     # Extract UTC timestamp in milliseconds
     if message_date:
