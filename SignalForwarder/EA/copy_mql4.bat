@@ -22,10 +22,8 @@ if not defined MT4_FOLDERS (
     exit /b 1
 )
 
-REM Remove any surrounding quotes from MT4_FOLDERS
-if not "%MT4_FOLDERS:~0,1%"=="\"" goto :noquotes
-set "MT4_FOLDERS=%MT4_FOLDERS:~1,-1%"
-:noquotes
+REM Remove any surrounding quotes from MT4_FOLDERS (works for both quoted and unquoted)
+set "MT4_FOLDERS=%MT4_FOLDERS:"=%"
 
 REM Split MT4_FOLDERS by comma and process each folder
 for %%F in (%MT4_FOLDERS:,= %) do (
@@ -39,14 +37,14 @@ for %%F in (%MT4_FOLDERS:,= %) do (
         if not exist "!EXPERTS_DIR!" (
             mkdir "!EXPERTS_DIR!"
         )
-        echo Copying MQL4 files to !EXPERTS_DIR!
+        echo Copying MQL4 files to !EXPERTS_DIR!"
         for %%G in (*.mq4) do (
             copy "%%G" "!EXPERTS_DIR!\" >nul
             if errorlevel 1 (
-                echo Error: Failed to copy %%G to !EXPERTS_DIR!
+                echo Error: Failed to copy %%G to !EXPERTS_DIR!"
             )
         )
-        echo Successfully copied MQL4 files to !EXPERTS_DIR!
+        echo Successfully copied MQL4 files to !EXPERTS_DIR!"
     )
     endlocal
 )
