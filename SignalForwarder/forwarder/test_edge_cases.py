@@ -61,14 +61,14 @@ class TestEdgeCases(unittest.TestCase):
     def test_extreme_tp_counts(self):
         """Test signals with extreme number of TP levels"""
         # Signal with 1 TP (minimum)
-        signal_1_tp = "BUY EURUSD\\nENTRY 1.1234\\nTP 1.1250\\nSL 1.1200"
+        signal_1_tp = "BUY EURUSD\nENTRY 1.1234\nTP 1.1250\nSL 1.1200".replace("\\n", "\n")
         result = parse_signal(signal_1_tp)
         self.assertIsNotNone(result)
         self.assertEqual(len(result["take_profits"]), 1)
         
         # Signal with many TPs (stress test)
         tp_levels = [f"1.{1250 + i}" for i in range(50)]  # 50 TP levels
-        signal_many_tp = f"BUY EURUSD\\nENTRY 1.1234\\nTP {' '.join(tp_levels)}\\nSL 1.1200"
+        signal_many_tp = f"BUY EURUSD\nENTRY 1.1234\nTP {' '.join(tp_levels)}\nSL 1.1200".replace("\\n", "\n")
         result = parse_signal(signal_many_tp)
         if result:  # Parser might handle this or might not
             self.assertGreater(len(result["take_profits"]), 0)
