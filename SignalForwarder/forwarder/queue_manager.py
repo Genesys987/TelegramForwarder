@@ -41,9 +41,9 @@ def add_signal_to_queue(signal_data: dict) -> bool:
             print(f"❌ [QueueAdd] Hiányzó kulcsok. Van: {list(signal_data.keys())}, Kellene: {required_keys}")
             return False
 
-        # 2) TPs ellenőrzés
+        # 2) TPs ellenőrzés - support any number of TPs (minimum 1)
         tps = signal_data["take_profits"]
-        if not isinstance(tps, list) or len(tps) < 3:
+        if not isinstance(tps, list) or len(tps) < 1:
             print(f"❌ [QueueAdd] Érvénytelen take_profits: {tps}")
             return False
 

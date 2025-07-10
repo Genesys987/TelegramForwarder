@@ -1,0 +1,25 @@
+// Test signal format for the EA
+// This simulates the signal file format that the EA expects
+
+Test Signal:
+1752029178|BUY|XAUUSD|3301.0|3303.0,3305.0,3307.0,3309.0,3311.0|3294.0|GID:1032|DEMO
+
+Expected behavior:
+- Parse 5 TP levels: 3303, 3305, 3307, 3309, 3311
+- Create 5 orders (not 3)
+- Each order uses SL: 3294.0 (not entry price)
+- TP values should be unique for each order
+- Comments should use new format: 1032|DEMO|3294
+
+Changes made:
+1. ReadSignalFile() now parses dynamic TP count
+2. SendOrders() creates orders for each TP level
+3. Fixed SL logic to always use signal SL (not entry price)
+4. Supports up to 20 TP levels
+5. Backward compatibility maintained for 3-TP signals
+
+Key fixes:
+- No more hardcoded 3 orders
+- No more TP repetition
+- Correct SL value usage
+- Dynamic TP handling

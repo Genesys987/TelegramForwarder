@@ -35,7 +35,11 @@ def getMT4DataFolderId(folder_path):
     Takes the first 6 characters of the last folder name.
     Example: /path/to/7D024799C00A011848A10ECEDFE5CBC2 -> 7D0247
     """
-    folder_name = os.path.basename(folder_path.rstrip(os.sep))
+    # Remove trailing separators (both / and \) first, then get basename
+    cleaned_path = folder_path.rstrip("/\\")
+    if not cleaned_path:
+        return ""
+    folder_name = os.path.basename(cleaned_path)
     return folder_name[:6] if len(folder_name) >= 6 else folder_name
 
 # --- Files used for communication ---

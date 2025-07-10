@@ -1,0 +1,130 @@
+/*
+ * CRITICAL LOGIC REVIEW - POTENTIAL ISSUES ANALYSIS
+ * Testing various scenarios to identify problems
+ */
+
+// ========================================
+// TEST SCENARIO 1: Normal 5-TP Signal
+// ========================================
+Signal: "1752029178|BUY|XAUUSD|3301.0|3303.0,3305.0,3307.0,3309.0,3311.0|3294.0|GID:1032|DEMO"
+
+Expected Result:
+- 5 orders created
+- TP: 3303, 3305, 3307, 3309, 3311
+- SL: 3294 for all orders
+
+Potential Issues:
+✅ LOOKS GOOD
+
+// ========================================
+// TEST SCENARIO 2: Traditional 3-TP Signal (Backward Compatibility)
+// ========================================
+Signal: "1752029178|BUY|EURUSD|1.2000|1.2050,1.2100,1.2150|1.1950|GID:1033|FOREX"
+
+Expected Result:
+- 3 orders created
+- TP: 1.2050, 1.2100, 1.2150
+- SL: 1.1950 for all orders
+
+Potential Issues:
+✅ Should work - tpCount=3, creates 3 orders
+
+// ========================================
+// TEST SCENARIO 3: Single TP Signal
+// ========================================
+Signal: "1752029178|SELL|BTCUSD|50000|49500|50500|GID:1034|CRYPTO"
+
+Expected Result:
+- 1 order created
+- TP: 49500
+- SL: 50500
+
+Potential Issues:
+✅ Should work - tpCount=1, creates 1 order
+
+// ========================================
+// TEST SCENARIO 4: Many TPs (10 levels)
+// ========================================
+Signal: "1752029178|BUY|XAUUSD|3300|3310,3320,3330,3340,3350,3360,3370,3380,3390,3400|3290|GID:1035|GOLD"
+
+Expected Result:
+- 10 orders created
+- Different TP for each
+
+Potential Issues:
+⚠️  CONCERN: Lot size calculation - all orders use same lot size
+⚠️  CONCERN: Color array only has 6 colors, will cycle
+⚠️  CONCERN: Too many orders might hit broker limits
+
+// ========================================
+// IDENTIFIED POTENTIAL ISSUES:
+// ========================================
+
+/**
+ * ISSUE 1: Array bounds in ReadSignalFile
+ * - tpLevels[20] is hardcoded but no bounds checking
+ * - What if signal has 25 TPs?
+ */
+
+/**
+ * ISSUE 2: Color array cycling
+ * - Only 6 colors defined: {clrBlue, clrGreen, clrRed, clrYellow, clrMagenta, clrCyan}
+ * - With 10+ TPs, colors will repeat
+ * - Not critical but confusing visually
+ */
+
+/**
+ * ISSUE 3: No validation on TP count
+ * - Should there be a maximum TP limit?
+ * - What about minimum distance between TPs?
+ */
+
+/**
+ * ISSUE 4: Lot size distribution
+ * - All orders use same lot size
+ * - With many TPs, total position size grows linearly
+ * - Risk management issue
+ */
+
+/**
+ * ISSUE 5: Performance with many orders
+ * - OrderSend() called in loop without delay
+ * - Might hit broker rate limits
+ * - Should add small delay between orders?
+ */
+
+/**
+ * ISSUE 6: Backward compatibility edge cases
+ * - What if old 3-TP signal has empty TPs?
+ * - tp2 = tpCount > 1 ? tpLevels[1] : tpLevels[0];
+ * - This creates duplicate TP values for old code compatibility
+ */
+
+/**
+ * ISSUE 7: TP ordering validation
+ * - No validation that TPs are in correct order
+ * - BUY: TPs should be > entry price
+ * - SELL: TPs should be < entry price
+ * - No validation that TPs are sequential
+ */
+
+/**
+ * ISSUE 8: Entry price vs current price logic
+ * - Removed missedTP1 logic entirely
+ * - What about limit vs market order decision?
+ * - midPrice calculation still uses tp1, but might not be tpLevels[0]
+ */
+
+/**
+ * ISSUE 9: Memory management
+ * - tpLevels[20] allocated on stack in start()
+ * - ArrayResize() called in ReadSignalFile()
+ * - Potential memory issues with frequent calls
+ */
+
+/**
+ * ISSUE 10: Error handling
+ * - If one OrderSend() fails, others still execute
+ * - Should there be rollback mechanism?
+ * - Partial fill scenarios not handled
+ */

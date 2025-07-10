@@ -8,6 +8,7 @@ symbol_mappings = {
 def clean_channel_name(channel_name: str) -> str:
     """
     Clean channel name by removing emojis and unwanted characters.
+    Uses simple truncation for consistency with MT4.
     
     Args:
         channel_name: Raw channel name/title that may contain emojis
@@ -55,17 +56,20 @@ def clean_channel_name(channel_name: str) -> str:
     clean_name = clean_name.upper()
     alpha_only = re.sub(r'[^A-Z]', '', clean_name)
     
-    # Take first 4 letters or pad with 'U' if too short
+    # Simple truncation/padding logic to match MT4 exactly
     if alpha_only:
-        result = alpha_only[:4]
+        if len(alpha_only) <= 4:
+            result = alpha_only
+            # Pad with 'X' if needed
+            while len(result) < 4:
+                result += "X"
+        else:
+            # Simple truncation for long names - take first 4 characters
+            result = alpha_only[:4]
     else:
-        result = ""
+        result = "UNKN"
     
-    # Ensure exactly 4 characters
-    if len(result) < 4:
-        result = (result + "UNKN")[:4]
-    
-    return result
+    return result[:4]
 
 def parse_entry_price(entry_text, signal_type):
     """
