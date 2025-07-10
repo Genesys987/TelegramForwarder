@@ -8,15 +8,16 @@ symbol_mappings = {
 def clean_channel_name(channel_name: str) -> str:
     """
     Clean channel name by removing emojis and unwanted characters.
+    Uses simple truncation for consistency with MT4.
     
     Args:
         channel_name: Raw channel name/title that may contain emojis
         
     Returns:
-        Clean channel name with only alphanumeric chars, spaces, and basic punctuation
+        Clean channel name with exactly 4 letters for MT4 comment limit
     """
     if not channel_name or not channel_name.strip():
-        return "UNKNOWN"
+        return "UNKN"
     
     # Remove emojis using regex pattern for most Unicode emoji ranges
     emoji_pattern = re.compile(
@@ -51,14 +52,24 @@ def clean_channel_name(channel_name: str) -> str:
     # Remove extra whitespace
     clean_name = re.sub(r'\s+', ' ', clean_name).strip()
     
-    # Convert to uppercase and limit length
-    clean_name = clean_name.upper()[:20]  # Max 20 characters
+    # Convert to uppercase and extract only alphabetic characters
+    clean_name = clean_name.upper()
+    alpha_only = re.sub(r'[^A-Z]', '', clean_name)
     
-    # If name becomes empty after cleaning, use fallback
-    if not clean_name:
-        clean_name = "CHANNEL"
+    # Simple truncation/padding logic to match MT4 exactly
+    if alpha_only:
+        if len(alpha_only) <= 4:
+            result = alpha_only
+            # Pad with 'X' if needed
+            while len(result) < 4:
+                result += "X"
+        else:
+            # Simple truncation for long names - take first 4 characters
+            result = alpha_only[:4]
+    else:
+        result = "UNKN"
     
-    return clean_name
+    return result[:4]
 
 def parse_entry_price(entry_text, signal_type):
     """
@@ -84,6 +95,120 @@ def parse_entry_price(entry_text, signal_type):
         except ValueError:
             return entry_text
 
+def parse_single_line_signal(text):
+    """
+    Parse a single-line signal where all components are on one line
+    Example: "BUY BTCUSD ENTRY 89300.00 TP 89500.00 SL 88600.00"
+    """
+    text = text.strip()
+    if not text:
+        return None
+    
+    signal = {}
+    take_profits = []
+    
+    # Try different single-line patterns
+    
+    # Pattern 1: Pipe format "BTCUSD | BUY 109500 ❌ Stop Loss 109000 ✅TP1 109700"
+    pipe_pattern = r'([\w\.\/\-]+)\s*\|\s*(BUY|SELL)\s+([\d\/\.]+)'
+    pipe_match = re.search(pipe_pattern, text, re.IGNORECASE)
+    if pipe_match:
+        raw_symbol = pipe_match.group(1).upper()
+        signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+        signal["signal_type"] = pipe_match.group(2).upper()
+        signal["entry"] = parse_entry_price(pipe_match.group(3), signal["signal_type"])
+    
+    # Pattern 2: Regular format "BUY BTCUSD ENTRY 89300.00" or "SELL XAUUSD 3290.5"
+    # Also handle FROM format "GOLD SELL FROM 3313/3315.3" and "XAUUSD BUY 3417"
+    if not signal.get("signal_type"):
+        regular_patterns = [
+            r'([\w\.\/\-]+)\s+(BUY|SELL)\s+FROM\s+([\d\/\.]+)',  # GOLD SELL FROM 3313/3315.3
+            r'([\w\.\/\-]+)\s+(BUY|SELL)\s+([\d\/\.]+)',         # XAUUSD BUY 3417
+            r'(BUY|SELL)\s+([\w\.\/\-]+)(?:\s+ENTRY\s+)?([\d\/\.]+)',  # BUY BTCUSD ENTRY 89300.00
+            r'(BUY|SELL)\s+([\w\.\/\-]+)\s+([\d\/\.]+)',         # SELL XAUUSD 3290.5
+        ]
+        
+        for pattern in regular_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                if 'FROM' in pattern:
+                    # FROM format: SYMBOL BUY/SELL FROM price
+                    raw_symbol = match.group(1).upper()
+                    signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                    signal["signal_type"] = match.group(2).upper()
+                    signal["entry"] = parse_entry_price(match.group(3), signal["signal_type"])
+                elif pattern == r'([\w\.\/\-]+)\s+(BUY|SELL)\s+([\d\/\.]+)':
+                    # SYMBOL BUY/SELL price format: XAUUSD BUY 3417
+                    raw_symbol = match.group(1).upper()
+                    signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                    signal["signal_type"] = match.group(2).upper()
+                    signal["entry"] = parse_entry_price(match.group(3), signal["signal_type"])
+                else:
+                    # Regular format: BUY/SELL SYMBOL price
+                    signal["signal_type"] = match.group(1).upper()
+                    raw_symbol = match.group(2).upper()
+                    signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                    signal["entry"] = parse_entry_price(match.group(3), signal["signal_type"])
+                break
+    
+    # Extract all TP values using multiple patterns
+    tp_patterns = [
+        r'[🤑✅]\s*TP(\d*)\s*:?\s*([\d\.]+)',        # Emoji TP with number capture
+        r'TP(\d+)\s*:?\s*([\d\.]+)',                  # TP1: 3289.0 or TP1 3289.0
+        r'TP\s*:?\s*([\d\.]+)',                       # TP: 89500.00 or TP 89500.00 (no number)
+        r'Take\s+profit\s+(\d+)\s+at\s+([\d\.]+)',   # Take profit 1 at 89500.00
+    ]
+    
+    for tp_pattern in tp_patterns:
+        tp_matches = re.findall(tp_pattern, text, re.IGNORECASE)
+        for tp_match in tp_matches:
+            try:
+                if isinstance(tp_match, tuple):
+                    # If pattern captured both number and value, use the value
+                    tp_value = float(tp_match[-1])  # Last element is the price
+                else:
+                    tp_value = float(tp_match)
+                
+                if tp_value not in take_profits and tp_value > 10:  # Filter out small numbers (likely indices)
+                    take_profits.append(tp_value)
+            except ValueError:
+                continue
+    
+    # Extract SL value using multiple patterns
+    sl_patterns = [
+        r'[🔴❌]\s*(?:SL|Stop\s*Loss)\s*:?\s*([\d\.]+)',  # Emoji SL
+        r'SL\s*:?\s*([\d\.]+)',                           # SL: 88600.00 or SL 88600.00
+        r'Stop\s+loss\s+(?:at\s+)?([\d\.]+)',            # Stop loss at 88600.00
+    ]
+    
+    for sl_pattern in sl_patterns:
+        sl_match = re.search(sl_pattern, text, re.IGNORECASE)
+        if sl_match:
+            try:
+                signal["stop_loss"] = float(sl_match.group(1))
+                break
+            except ValueError:
+                continue
+    
+    # Sort take profits
+    if take_profits:
+        if signal.get("signal_type") == "BUY":
+            take_profits.sort()
+        else:
+            take_profits.sort(reverse=True)
+        signal["take_profits"] = take_profits
+    
+    # Validate essential components
+    if (signal.get("signal_type") and 
+        signal.get("symbol") and 
+        signal.get("entry") is not None and
+        signal.get("take_profits") and
+        len(signal.get("take_profits", [])) > 0 and
+        signal.get("stop_loss") is not None):
+        return signal
+    
+    return None
+
 def parse_signal(text: str):
     """
     Parses signal text into a dictionary. Handles known formats.
@@ -103,6 +228,12 @@ def parse_signal(text: str):
     if not text: 
         return None # Handle empty input
 
+    # First, try to parse as a single line with all components
+    single_line_result = parse_single_line_signal(text)
+    if single_line_result:
+        return single_line_result
+
+    # If single line parsing fails, use multi-line parsing
     lines = text.splitlines()
     signal = {}
     take_profits = []  # Collect all TPs, will be sorted later
@@ -123,9 +254,10 @@ def parse_signal(text: str):
                 raw_symbol = match_type_symbol.group(2).upper()
                 # Map symbol if it exists in our mappings, otherwise use as-is
                 signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                # Capture the entry price
-                entry_text = match_type_symbol.group(3)
-                signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                # Capture the entry price if present
+                entry_text = match_type_symbol.group(3).strip()
+                if entry_text:
+                    signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
                 continue
             
             # Format 2: "GOLD SELL FROM 3313/3315" or "SYMBOL BUY FROM price"
@@ -138,38 +270,79 @@ def parse_signal(text: str):
                 entry_text = match_symbol_type.group(3)
                 signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
                 continue
-
-        # Entry Price parsing
-        if not signal.get("entry"):
-            # Look for ENTRY keyword
-            m = re.search(r'ENTRY\s*(?:at)?\s*([\d\/\.]+)', line, re.IGNORECASE)
-            if m:
-                entry_text = m.group(1)
+            
+            # Format 3: "EURUSD BUY" or "XAUUSD BUY" or "XAUUSD BUY 3417" (symbol first, then type, optional price)
+            match_symbol_type_simple = re.match(r'^([\w\.\/\-]+)\s+(BUY|SELL)(?:\s+([\d\/\.]+))?', line, re.IGNORECASE)
+            if match_symbol_type_simple:
+                raw_symbol = match_symbol_type_simple.group(1).upper()
+                signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal["signal_type"] = match_symbol_type_simple.group(2).upper()
+                # Check if there's an entry price in the same line
+                entry_text = match_symbol_type_simple.group(3)
+                if entry_text:
+                    signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                continue
+            
+            # Format 4: "BTCUSD | BUY 109500" (symbol | type price)
+            match_pipe_format = re.match(r'^([\w\.\/\-]+)\s*\|\s*(BUY|SELL)\s+([\d\/\.]+)', line, re.IGNORECASE)
+            if match_pipe_format:
+                raw_symbol = match_pipe_format.group(1).upper()
+                signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal["signal_type"] = match_pipe_format.group(2).upper()
+                entry_text = match_pipe_format.group(3)
                 signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
                 continue
 
-        # Take Profits parsing - flexible, any line with TP
-        # Look for any TP pattern (TP, Take Profit, etc.) followed by a number
-        tp_match = re.search(r'(?:TAKE\s*PROFIT|TP)\s*(?:\d+:?\s+)?(?:at\s+)?([\d\.]+)', line, re.IGNORECASE)
-        if tp_match:
-            try:
-                tp_value = float(tp_match.group(1))
-                take_profits.append(tp_value)
+        # Entry Price parsing
+        if not signal.get("entry"):
+            # Look for ENTRY keyword with optional colon
+            m = re.search(r'ENTRY\s*:?\s*(?:at\s+)?([\d\/\.]+)', line, re.IGNORECASE)
+            if m:
+                entry_text = m.group(1)
+                signal["entry"] = parse_entry_price(entry_text, signal.get("signal_type", "BUY"))
                 continue
-            except ValueError:
-                print(f"Warning: Invalid number for TP: {tp_match.group(1)}")
 
-        # Stop Loss parsing
-        if not signal.get("stop_loss"):
-            # Allow "Stop loss", "Stoploss", "SL"
-            sl_pattern = r'(?:STOP\s*LOSS|SL):?\s*(?:at)?\s*([\d\.]+)'
-            m = re.search(sl_pattern, line, re.IGNORECASE)
+        # Take Profits parsing - consolidated and improved
+        # Check for various TP patterns in order of specificity
+        tp_patterns = [
+            r'[🤑✅]\s*TP\d*\s*:?\s*([\d\.]+)',               # Emoji TP formats like "🤑TP1: 3289.0" or "✅TP1 109700"
+            r'TP\d+\s*:?\s*([\d\.]+)',                         # "TP1: 3289.0", "TP1 3420", "TP2 3423"
+            r'TP\s*:\s*([\d\.]+)',                             # "TP: 1.1455"
+            r'(?:TAKE\s*PROFIT)\s*\d*\s*(?:at\s+)?([\d\.]+)',  # "Take profit 1 at 89500.00"
+            r'TP\s+([\d\.]+)',                                 # "TP 3364"
+        ]
+        
+        tp_found = False
+        for tp_pattern in tp_patterns:
+            m = re.search(tp_pattern, line, re.IGNORECASE)
             if m:
                 try:
-                    signal["stop_loss"] = float(m.group(1))
-                    continue
+                    tp_value = float(m.group(1))
+                    take_profits.append(tp_value)
+                    tp_found = True
+                    break
                 except ValueError:
-                    print(f"Warning: Invalid number for Stop Loss: {m.group(1)}")
+                    print(f"Warning: Invalid number for TP: {m.group(1)}")
+        
+        if tp_found:
+            continue
+
+        # Stop Loss parsing - enhanced to handle different formats
+        if not signal.get("stop_loss"):
+            sl_patterns = [
+                r'[🔴❌]\s*(?:SL|Stop\s*Loss)\s*:?\s*([\d\.]+)',                # Emoji SL formats
+                r'(?:STOP\s*LOSS|SL)\s*:?\s*(?:at\s+)?([\d\.]+)(?:\s*\([^)]*\))?',  # Regular SL with optional parentheses
+                r'SL\s*:\s*([\d\.]+)',                                          # "SL: 3298.8"
+            ]
+            
+            for sl_pattern in sl_patterns:
+                m = re.search(sl_pattern, line, re.IGNORECASE)
+                if m:
+                    try:
+                        signal["stop_loss"] = float(m.group(1))
+                        break
+                    except ValueError:
+                        print(f"Warning: Invalid number for Stop Loss: {m.group(1)}")
 
     # Sort take profits and add to signal
     if take_profits:
@@ -211,3 +384,44 @@ def parse_signal(text: str):
             
         print(f"Debug: Signal parsing incomplete. Missing or invalid parts: {missing}. Original text: {text[:100]}...")
         return None
+
+def format_mt4_comment(group_id: int, channel_name: str, stop_loss: float, digits: int = 5) -> str:
+    """
+    Format MT4 comment string within 31 character limit.
+    
+    Format: 1234|ABCD|1.2345 (without GID: and SL: prefixes to save space)
+    Where ABCD is the 4-letter channel abbreviation.
+    
+    Args:
+        group_id: Group ID number
+        channel_name: Channel name (will be truncated to 4 letters)
+        stop_loss: Stop loss value
+        digits: Number of decimal places for SL formatting
+        
+    Returns:
+        Formatted comment string within 31 character limit
+    """
+    # Ensure channel name is 4 characters
+    clean_channel = clean_channel_name(channel_name)
+    
+    # Format SL with minimal precision to save space
+    sl_str = f"{stop_loss:.{min(digits, 4)}f}".rstrip('0').rstrip('.')
+    
+    # Build comment: xxxx|ABCD|value (without GID: and SL: prefixes)
+    comment = f"{group_id}|{clean_channel}|{sl_str}"
+    
+    # If comment exceeds 31 chars, reduce SL precision
+    if len(comment) > 31:
+        sl_str = f"{stop_loss:.2f}".rstrip('0').rstrip('.')
+        comment = f"{group_id}|{clean_channel}|{sl_str}"
+    
+    # If still too long, reduce to 1 decimal place
+    if len(comment) > 31:
+        sl_str = f"{stop_loss:.1f}".rstrip('0').rstrip('.')
+        comment = f"{group_id}|{clean_channel}|{sl_str}"
+    
+    # Final truncation if still too long (should not happen with proper formatting)
+    if len(comment) > 31:
+        comment = comment[:31]
+    
+    return comment
