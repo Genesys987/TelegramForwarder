@@ -24,29 +24,27 @@ if not defined MT4_FOLDERS (
 
 REM Split MT4_FOLDERS by comma and process each folder
 set "folders=%MT4_FOLDERS%"
-:nextfolder
-for /f "delims=," %%F in ("!folders!") do (
+for %%F in (%folders:,= %) do (
+    setlocal enabledelayedexpansion
     set "FOLDER=%%F"
     set "FOLDER=!FOLDER: =!"
     if not exist "!FOLDER!" (
         echo Warning: MT4 folder does not exist: !FOLDER!
-        goto aftercopy
-    )
-    set "EXPERTS_DIR=!FOLDER!\MQL4\Experts"
-    if not exist "!EXPERTS_DIR!" (
-        mkdir "!EXPERTS_DIR!"
-    )
-    echo Copying MQL4 files to !EXPERTS_DIR!
-    for %%G in (*.mq4) do (
-        copy "%%G" "!EXPERTS_DIR!\" >nul
-        if errorlevel 1 (
-            echo Error: Failed to copy %%G to !EXPERTS_DIR!
+    ) else (
+        set "EXPERTS_DIR=!FOLDER!\MQL4\Experts"
+        if not exist "!EXPERTS_DIR!" (
+            mkdir "!EXPERTS_DIR!"
         )
+        echo Copying MQL4 files to !EXPERTS_DIR!
+        for %%G in (*.mq4) do (
+            copy "%%G" "!EXPERTS_DIR!\" >nul
+            if errorlevel 1 (
+                echo Error: Failed to copy %%G to !EXPERTS_DIR!
+            )
+        )
+        echo Successfully copied MQL4 files to !EXPERTS_DIR!
     )
-    echo Successfully copied MQL4 files to !EXPERTS_DIR!
-    :aftercopy
-    set "folders=!folders:*%,=!"
-    if not "!folders!"=="" goto nextfolder
+    endlocal
 )
 
 endlocal
