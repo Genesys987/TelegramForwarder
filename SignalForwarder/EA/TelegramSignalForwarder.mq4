@@ -18,6 +18,7 @@ extern bool   useLimitOrders           = true;  // Use limit orders at middle be
 extern double fixedLotSize              = 0.02;  // Default lot size for FX orders
 extern double fixedLotSizeBitcoin       = 0.02;  // Default lot size for Bitcoin orders
 extern double fixedLotSizeGold          = 0.02;  // Default lot size for Gold orders
+extern double limitOrderExpirationSec = -1;   // Limit order expiration time in seconds (-1 to disable)
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -553,9 +554,13 @@ void SendOrders(string signalType, string symbol,
         " Comment=", comment);
 
         int colorIndex = k % 6; // Cycle through available colors
+        datetime expiration = 0;
+        if((orderType == OP_BUYLIMIT || orderType == OP_SELLLIMIT) && limitOrderExpirationSec > 0) {
+            expiration = TimeCurrent() + limitOrderExpirationSec;
+        }
         int ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
-                               rawSL, tpLevels[k], comment, MAGIC_NUMBER, 0, cols[colorIndex]);
-                               
+                               rawSL, tpLevels[k], comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
+                                
         if(ticket < 0) {
             Print(eaName, ": Error creating order[", IntegerToString(k), "] ticket=", IntegerToString(ticket), " error=", IntegerToString(GetLastError()));
         }
@@ -566,7 +571,7 @@ void SendOrders(string signalType, string symbol,
             // retry with fallback SL
             Print(eaName, ": Retrying with fallback SL=", DoubleToString(fallbackSL, digits));
             ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
-                               fallbackSL, tpLevels[k], comment, MAGIC_NUMBER, 0, cols[colorIndex]);
+                               fallbackSL, tpLevels[k], comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
         }
         
         Print(eaName, ": Order[", IntegerToString(k), "] ticket=", IntegerToString(ticket));
