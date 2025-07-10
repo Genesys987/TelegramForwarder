@@ -1,7 +1,14 @@
 # signal_processor.py
 
+import logging
 from signal_parser import parse_signal
 from queue_manager import add_signal_to_queue
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 def process_signal(text: str):
     """
@@ -11,7 +18,7 @@ def process_signal(text: str):
     """
     parsed = parse_signal(text)
     if not parsed:
-        print(f"⚠️ Érvénytelen signal formátum: {text}")
+        logging.warning(f"⚠️ Érvénytelen signal formátum: {text}")
         return
 
     # Kinyerjük az adatokat
@@ -32,4 +39,4 @@ def process_signal(text: str):
 
     # Várólistához adás
     add_signal_to_queue(signal_data)
-    print(f"✅ Signal feldolgozva és queue-ba helyezve: {signal_data}")
+    logging.info(f"✅ Signal feldolgozva és queue-ba helyezve: {signal_data}")
