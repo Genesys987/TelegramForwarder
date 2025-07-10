@@ -12,7 +12,7 @@ if not exist "%ENV_FILE%" (
     exit /b 1
 )
 
-REM Read MT4_FOLDERS from .env
+REM Read MT4_FOLDERS from .env and remove quotes if present
 for /f "usebackq tokens=1,* delims==" %%A in ("%ENV_FILE%") do (
     if /i "%%A"=="MT4_FOLDERS" set "MT4_FOLDERS=%%B"
 )
@@ -22,9 +22,13 @@ if not defined MT4_FOLDERS (
     exit /b 1
 )
 
+REM Remove any surrounding quotes from MT4_FOLDERS
+if not "%MT4_FOLDERS:~0,1%"=="\"" goto :noquotes
+set "MT4_FOLDERS=%MT4_FOLDERS:~1,-1%"
+:noquotes
+
 REM Split MT4_FOLDERS by comma and process each folder
-set "folders=%MT4_FOLDERS%"
-for %%F in (%folders:,= %) do (
+for %%F in (%MT4_FOLDERS:,= %) do (
     setlocal enabledelayedexpansion
     set "FOLDER=%%F"
     set "FOLDER=!FOLDER: =!"
