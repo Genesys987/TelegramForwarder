@@ -26,8 +26,7 @@ REM Remove any surrounding quotes from MT4_FOLDERS (works for both quoted and un
 set "MT4_FOLDERS=%MT4_FOLDERS:"=%"
 
 REM Split MT4_FOLDERS by comma and process each folder
-for %%F in (%MT4_FOLDERS:,= %) do (
-    setlocal enabledelayedexpansion
+for /f "tokens=* delims=" %%F in ('echo %MT4_FOLDERS:,=\n%') do (
     set "FOLDER=%%F"
     set "FOLDER=!FOLDER: =!"
     if not exist "!FOLDER!" (
@@ -46,7 +45,6 @@ for %%F in (%MT4_FOLDERS:,= %) do (
         )
         echo Successfully copied MQL4 files to !EXPERTS_DIR!"
     )
-    endlocal
 )
 
 endlocal
