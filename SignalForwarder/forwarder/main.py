@@ -1,6 +1,7 @@
 # main.py
 
 import asyncio
+import logging
 import time
 import threading
 
@@ -16,6 +17,11 @@ def queue_loop():
         time.sleep(0.5)
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
     # Indítunk egy szálat a queue figyelésre
     t = threading.Thread(target=queue_loop, daemon=True)
     t.start()

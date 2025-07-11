@@ -13,11 +13,7 @@ import logging
 from config import MT4_QUEUE_FILE_PATHS, MT4_SIGNAL_FILE_PATHS, getMT4DataFolderId
 from signal_parser import clean_channel_name
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+logger = logging.getLogger(__name__)
 
 def add_signal_to_queue(signal_data: dict) -> bool:
     """
@@ -45,19 +41,19 @@ def add_signal_to_queue(signal_data: dict) -> bool:
         required_keys = ["timestamp_utc", "signal_type", "symbol", "entry", "take_profits",
                          "stop_loss", "group_id", "channel_name"]
         if not all(key in signal_data for key in required_keys):
-            logging.error(f"❌ [QueueAdd] Hiányzó kulcsok. Van: {list(signal_data.keys())}, Kellene: {required_keys}")
+            logger.error(f"❌ [QueueAdd] Hiányzó kulcsok. Van: {list(signal_data.keys())}, Kellene: {required_keys}")
             return False
 
         # 2) TPs ellenőrzés - support any number of TPs (minimum 1)
         tps = signal_data["take_profits"]
         if not isinstance(tps, list) or len(tps) < 1:
-            logging.error(f"❌ [QueueAdd] Érvénytelen take_profits: {tps}")
+            logger.error(f"❌ [QueueAdd] Érvénytelen take_profits: {tps}")
             return False
 
         # 3) Timestamp ellenőrzés
         timestamp = signal_data["timestamp_utc"]
         if not isinstance(timestamp, int) or timestamp <= 0:
-            logging.error(f"❌ [QueueAdd] Érvénytelen timestamp: {timestamp}")
+            logger.error(f"❌ [QueueAdd] Érvénytelen timestamp: {timestamp}")
             return False
 
         # 4) Sor összerakása timestamp-pel kezdve (prefix nélkül)
@@ -68,21 +64,21 @@ def add_signal_to_queue(signal_data: dict) -> bool:
                    f"{tp_str}|{signal_data['stop_loss']}|"
                    f"GID:{signal_data['group_id']}|{channel_name}\n")
 
-        logging.info(f"🔄 [QueueAdd] Signal formázva csatorna névvel '{channel_name}' (eredeti: '{raw_channel_name}'): GID:{signal_data['group_id']}")
+        logger.info(f"🔄 [QueueAdd] Signal formázva csatorna névvel '{channel_name}' (eredeti: '{raw_channel_name}'): GID:{signal_data['group_id']}")
 
         # 5) I/O művelet: Hozzáfűzés az összes queue-fájlhoz
         for queue_path in MT4_QUEUE_FILE_PATHS:
             try:
                 with open(queue_path, "a", encoding='utf-8') as f:
                     f.write(message)
-                logging.info(f"✅ [QueueAdd] Hozzáadva a queue fájlhoz ('{os.path.basename(queue_path)}'): {message.strip()}")
+                logger.info(f"✅ [QueueAdd] Hozzáadva a queue fájlhoz ('{os.path.basename(queue_path)}'): {message.strip()}")
             except Exception as e:
-                logging.error(f"❌ [QueueAdd] Hiba a queue fájl írásakor ({queue_path}): {e}")
+                logger.error(f"❌ [QueueAdd] Hiba a queue fájl írásakor ({queue_path}): {e}")
                 return False
         return True
 
     except Exception as e:
-        logging.error(f"❌ [QueueAdd] Végzetes hiba: {e}")
+        logger.error(f"❌ [QueueAdd] Végzetes hiba: {e}")
         traceback.print_exc()
         return False
 
@@ -143,7 +139,7 @@ def process_signal_queue() -> None:
                     with open(signal_path, "w", encoding='utf-8') as f:
                         f.write(next_signal)
                 except IOError as e:
-                    logging.error(f"❌ [Queue->EA] Hiba signals.txt írásnál ({signal_path}): {e}")
+                    logger.error(f"❌ [Queue->EA] Hiba signals.txt írásnál ({signal_path}): {e}")
                     continue
 
                 # 6) Töröljük az első érvényes sort a queue-ból
@@ -151,15 +147,15 @@ def process_signal_queue() -> None:
                     with open(queue_path, "w", encoding='utf-8') as f:
                         if first_valid_line_index + 1 < len(lines):
                             f.writelines(lines[first_valid_line_index + 1:])
-                    logging.info(f"📤 [Queue->EA] Szignál -> EA fájl ('{os.path.basename(signal_path)}'): {next_signal}")
+                    logger.info(f"📤 [Queue->EA] Szignál -> EA fájl ('{os.path.basename(signal_path)}'): {next_signal}")
                 except IOError as e:
-                    logging.error(f"❌ [QueueUpdate] Kritikus hiba a queue frissítésnél ({queue_path}): {e}")
+                    logger.error(f"❌ [QueueUpdate] Kritikus hiba a queue frissítésnél ({queue_path}): {e}")
                     continue
                     
             except Exception as e:
-                logging.error(f"❌ [QueueProc] Hiba az {i+1}. MT4 queue feldolgozásakor ({queue_path}): {e}")
+                logger.error(f"❌ [QueueProc] Hiba az {i+1}. MT4 queue feldolgozásakor ({queue_path}): {e}")
                 continue
 
     except Exception as e:
-        logging.error(f"❌ [QueueProc] Általános hiba a queue feldolgozásakor: {e}")
+        logger.error(f"❌ [QueueProc] Általános hiba a queue feldolgozásakor: {e}")
         traceback.print_exc()
