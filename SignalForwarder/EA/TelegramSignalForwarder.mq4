@@ -480,6 +480,23 @@ void SendOrders(string signalType, string symbol,
                       double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
                       int groupId, string channelName, double &tpLevels[], int tpCount)
 {
+    // NEW: Simple check for immediate entry (entry price = 0)
+    if(MathAbs(entryPrice) < 0.001) {
+        RefreshRates();
+        double currentAsk = MarketInfo(symbol, MODE_ASK);
+        double currentBid = MarketInfo(symbol, MODE_BID);
+        
+        // Replace 0 with current market price
+        entryPrice = (signalType == "BUY") ? currentAsk : currentBid;
+        
+        if(debugMode) {
+            Print(eaName, ": IMMEDIATE ENTRY detected - Using market price: ", 
+                  DoubleToString(entryPrice, MarketInfo(symbol, MODE_DIGITS)), 
+                  " for GID=", IntegerToString(groupId));
+        }
+    }
+    
+    // UNCHANGED: All existing logic continues with real entryPrice now
     int digits    = MarketInfo(symbol, MODE_DIGITS);
     double point  = MarketInfo(symbol, MODE_POINT);
     int stopLevel = MarketInfo(symbol, MODE_STOPLEVEL);
