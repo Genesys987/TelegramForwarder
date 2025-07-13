@@ -73,7 +73,7 @@ def clean_channel_name(channel_name: str) -> str:
 
 def parse_entry_price(entry_text, signal_type):
     """
-    Parse entry price from text, handling range formats like '3313/3315'
+    Parse entry price from text, handling range formats like '3334/3337'
     
     Args:
         entry_text: The entry price text to parse
@@ -84,11 +84,19 @@ def parse_entry_price(entry_text, signal_type):
     """
     if '/' in entry_text:
         split = entry_text.split('/')
-        # keep the higher of range (sell) or lower (buy)
-        if signal_type == "SELL":
-            return max(float(split[0]), float(split[1]))
-        else:
-            return min(float(split[0]), float(split[1]))
+        try:
+            # Convert to floats for proper comparison
+            prices = [float(p.strip()) for p in split]
+            
+            # For SELL: use the higher price (better entry for seller)
+            # For BUY: use the lower price (better entry for buyer)
+            if signal_type == "SELL":
+                return max(prices)
+            else:
+                return min(prices)
+        except ValueError:
+            print(f"Warning: Invalid range format: {entry_text}")
+            return entry_text
     else:
         try:
             return float(entry_text)
@@ -278,15 +286,27 @@ def parse_signal(text: str):
 
         # Signal Type and Symbol parsing - handle multiple formats
         if not signal.get("signal_type"):
-            # Format 1: "BUY BTCUSD" or "SELL GOLD" or "BUY CHFJPY 180.430"
+            # Format 1: "BUY BTCUSD" or "SELL GOLD" or "BUY CHFJPY 180.430" or "GOLD SELL 3334/3337"
             match_type_symbol = re.match(r'^(BUY|SELL)\s+([\w\.\/\-]+)\s*([\d\/\.]*)', line, re.IGNORECASE)
             if match_type_symbol:
                 signal["signal_type"] = match_type_symbol.group(1).upper()
                 raw_symbol = match_type_symbol.group(2).upper()
                 # Map symbol if it exists in our mappings, otherwise use as-is
                 signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                # Capture the entry price if present
+                # Capture the entry price if present (including range formats)
                 entry_text = match_type_symbol.group(3).strip()
+                if entry_text:
+                    signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                continue
+            
+            # Format 1b: "SYMBOL SIGNAL_TYPE" or "SYMBOL SIGNAL_TYPE entry_range" (e.g., "GOLD SELL 3334/3337")
+            match_symbol_type_alt = re.match(r'^([\w\.\/\-]+)\s+(BUY|SELL)\s*([\d\/\.]*)', line, re.IGNORECASE)
+            if match_symbol_type_alt:
+                raw_symbol = match_symbol_type_alt.group(1).upper()
+                signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal["signal_type"] = match_symbol_type_alt.group(2).upper()
+                # Capture the entry price if present (including range formats)
+                entry_text = match_symbol_type_alt.group(3).strip()
                 if entry_text:
                     signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
                 continue
@@ -354,6 +374,29 @@ def parse_signal(text: str):
                     break
                 except ValueError:
                     print(f"Warning: Invalid number for TP: {m.group(1)}")
+        
+        # NEW: Check for slash-separated TP values OR single numeric TP (e.g., "3332/3330/3328/3325" or "3340")
+        if not tp_found:
+            # Pattern for line containing only numbers separated by slashes OR single number
+            slash_tp_pattern = r'^([\d\.]+(?:/[\d\.]+)*)$'
+            slash_match = re.match(slash_tp_pattern, line.strip())
+            if slash_match:
+                tp_values_text = slash_match.group(1)
+                if '/' in tp_values_text:
+                    # Multiple TP values separated by slashes
+                    tp_values = tp_values_text.split('/')
+                else:
+                    # Single TP value
+                    tp_values = [tp_values_text]
+                
+                for tp_val in tp_values:
+                    try:
+                        tp_value = float(tp_val.strip())
+                        if tp_value > 10:  # Filter out small numbers
+                            take_profits.append(tp_value)
+                            tp_found = True
+                    except ValueError:
+                        print(f"Warning: Invalid TP value in numeric format: {tp_val}")
         
         if tp_found:
             continue
