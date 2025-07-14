@@ -609,7 +609,6 @@ void HandleTrailingStopsDynamic()
 
     if(debugMode) Print(eaName, ": TS scan starting...");
 
-    // CRITICAL FIX: Reset modified tickets array to prevent duplicate SL updates
     modifiedCount = 0;
     ArrayInitialize(modifiedTickets, -1);
 
@@ -759,7 +758,6 @@ void HandleTrailingStopsDynamic()
     if(debugMode) Print(eaName, ": TS found ", IntegerToString(triggeredCount), " triggered groups");
 
     // PHASE 3: Update SL for remaining open orders based on triggered TPs
-    // CRITICAL: Always process all orders to ensure TP triggers are detected and acted upon
     
     int totalModifications = 0;
     for(int m = 0; m < openTotal; m++)
@@ -839,7 +837,7 @@ void HandleTrailingStopsDynamic()
             continue;
         }
         
-        // Check SL direction - CRITICAL FIX: Improved logic
+        // Check SL direction
         bool isBuyOrder = (OrderType() == OP_BUY || OrderType() == OP_BUYLIMIT);
         if(isBuyOrder) {
             // For BUY orders: new SL must be higher than current SL (or current SL is 0)
@@ -1005,7 +1003,6 @@ bool ParseOrderCommentFull(string comment, int &groupId, double &signalSL, strin
         }
         
         // Look for SL: either immediately after first pipe (old format) or after second pipe (old new format)
-        // CRITICAL FIX: Check for direct |SL: first, then search for |SL: after first pipe
         if(StringSubstr(comment, firstPipe, 4) == "|SL:") {
             // Direct old format: GID:xxxx|SL:yyyy (SL immediately after first pipe)
             channelName = "LEGC"; // Old format default
@@ -1255,7 +1252,6 @@ void MarkAsModified(int ticket)
 //+------------------------------------------------------------------+
 void AddTriggeredGroup(int groupId, int tpLevel)
 {
-    // CRITICAL FIX: Better validation and duplicate prevention
     if(groupId <= 0 || tpLevel <= 0) {
         if(debugMode) Print(eaName, ": Invalid groupId or tpLevel: ", IntegerToString(groupId), "/", IntegerToString(tpLevel));
         return;
