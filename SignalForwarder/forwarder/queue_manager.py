@@ -147,7 +147,7 @@ def process_signal_queue() -> None:
                     with open(queue_path, "w", encoding='utf-8') as f:
                         if first_valid_line_index + 1 < len(lines):
                             f.writelines(lines[first_valid_line_index + 1:])
-                    logger.info(f"📤 [Queue->EA] Szignál -> EA fájl ('{os.path.basename(signal_path)}'): {next_signal}")
+                    logger.info(f"📤 [Queue->EA] Szignál ('{os.path.basename(queue_path)}') -> EA fájl ('{signal_path}'): {next_signal}")
                 except IOError as e:
                     logger.error(f"❌ [QueueUpdate] Kritikus hiba a queue frissítésnél ({queue_path}): {e}")
                     continue
