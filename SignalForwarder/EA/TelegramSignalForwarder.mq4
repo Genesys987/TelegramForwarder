@@ -480,8 +480,8 @@ void SendOrders(string signalType, string symbol,
                       double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
                       int groupId, string channelName, double &tpLevels[], int tpCount)
 {
-    // NEW: Simple check for immediate entry (entry price = 0)
-    if(MathAbs(entryPrice) < 0.001) {
+    // Simple check for immediate entry (entry price = 0)
+    if(entryPrice == 0.0) {
         RefreshRates();
         double currentAsk = MarketInfo(symbol, MODE_ASK);
         double currentBid = MarketInfo(symbol, MODE_BID);
@@ -496,7 +496,6 @@ void SendOrders(string signalType, string symbol,
         }
     }
     
-    // UNCHANGED: All existing logic continues with real entryPrice now
     int digits    = MarketInfo(symbol, MODE_DIGITS);
     double point  = MarketInfo(symbol, MODE_POINT);
     int stopLevel = MarketInfo(symbol, MODE_STOPLEVEL);
@@ -550,7 +549,7 @@ void SendOrders(string signalType, string symbol,
           " Using SL=", DoubleToString(rawSL, digits),
           " TP Count=", IntegerToString(tpCount));
 
-    int slippage = 5;
+    int slippage = 20;
     color cols[6] = { clrBlue, clrGreen, clrRed, clrYellow, clrMagenta, clrCyan };
     double lotSize = (symbol == "BTCUSD") ? fixedLotSizeBitcoin :
                         (symbol == "XAUUSD") ? fixedLotSizeGold : fixedLotSize;
@@ -559,6 +558,9 @@ void SendOrders(string signalType, string symbol,
     for(int k=0; k<tpCount; k++)
     {
         RefreshRates();
+        ask = MarketInfo(symbol, MODE_ASK);
+        bid = MarketInfo(symbol, MODE_BID);
+        price = (shouldBuy) ? ask : bid;
         string comment = FormatMT4Comment(groupId, channelName, rawSL, digits);
     
         Print(eaName, ": Order[", IntegerToString(k), "] parameters: ",
@@ -585,7 +587,6 @@ void SendOrders(string signalType, string symbol,
         if(ticket < 0 && GetLastError() == ERR_INVALID_STOPS)
         {
             RefreshRates();
-            // retry with fallback SL
             Print(eaName, ": Retrying with fallback SL=", DoubleToString(fallbackSL, digits));
             ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
                                fallbackSL, tpLevels[k], comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
@@ -597,8 +598,6 @@ void SendOrders(string signalType, string symbol,
 
 //+------------------------------------------------------------------+
 //| HandleTrailingStopsDynamic: Robust trailing stop logic         |
-//+------------------------------------------------------------------+
-//| HandleTrailingStopsDynamic: FIXED robust trailing stop logic   |
 //+------------------------------------------------------------------+
 void HandleTrailingStopsDynamic()
 {
