@@ -69,7 +69,7 @@ def add_signal_to_queue(signal_data: dict) -> bool:
         
         # Write to local signals archive file
         current_date = datetime.now().strftime("%Y%m%d")
-        archive_path = os.path.join(os.getcwd(), f"signals_archive_{current_date}.txt")
+        archive_path = os.path.join(os.getcwd(), "logs", f"signals_archive_{current_date}.txt")
         try:
             with open(archive_path, "a", encoding='utf-8') as f:
                 f.write(message)

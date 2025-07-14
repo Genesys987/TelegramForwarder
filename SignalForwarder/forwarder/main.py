@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from logging.handlers import TimedRotatingFileHandler
 import time
 import threading
 
@@ -17,10 +18,17 @@ def queue_loop():
         time.sleep(0.5)
 
 if __name__ == "__main__":
+    log_handler = TimedRotatingFileHandler("logs/forwarder_log.txt", when="midnight")
+    log_handler.suffix = "%Y-%m-%d"
+    log_handler.setFormatter(logging.Formatter(
+        '%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    ))
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s [%(levelname)s] %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        datefmt='%Y-%m-%d %H:%M:%S',
+        handlers=[log_handler, logging.StreamHandler()]
     )
     logging.getLogger('telethon').setLevel(level=logging.WARNING)
     # Indítunk egy szálat a queue figyelésre
