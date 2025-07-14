@@ -22,6 +22,7 @@ if __name__ == "__main__":
         format='%(asctime)s [%(levelname)s] %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
+    logging.getLogger('telethon').setLevel(level=logging.WARNING)
     # Indítunk egy szálat a queue figyelésre
     t = threading.Thread(target=queue_loop, daemon=True)
     t.start()
