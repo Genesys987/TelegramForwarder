@@ -18,7 +18,7 @@ def queue_loop():
         time.sleep(0.5)
 
 if __name__ == "__main__":
-    log_handler = TimedRotatingFileHandler("logs/forwarder_log.txt", when="midnight")
+    log_handler = TimedRotatingFileHandler("logs/forwarder_log.txt", when="midnight", encoding='utf-8')
     log_handler.suffix = "%Y-%m-%d"
     log_handler.setFormatter(logging.Formatter(
         '%(asctime)s [%(levelname)s] %(message)s',
@@ -28,7 +28,8 @@ if __name__ == "__main__":
         level=logging.INFO,
         format='%(asctime)s [%(levelname)s] %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
-        handlers=[log_handler, logging.StreamHandler()]
+        handlers=[log_handler, logging.StreamHandler()],
+        encoding='utf-8'
     )
     logging.getLogger('telethon').setLevel(level=logging.WARNING)
     # Indítunk egy szálat a queue figyelésre
