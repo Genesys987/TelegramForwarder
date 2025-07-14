@@ -12,6 +12,7 @@ import traceback
 import logging
 from config import MT4_QUEUE_FILE_PATHS, MT4_SIGNAL_FILE_PATHS, getMT4DataFolderId
 from signal_parser import clean_channel_name
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,15 @@ def add_signal_to_queue(signal_data: dict) -> bool:
                    f"GID:{signal_data['group_id']}|{channel_name}\n")
 
         logger.info(f"🔄 [QueueAdd] Signal formázva csatorna névvel '{channel_name}' (eredeti: '{raw_channel_name}'): GID:{signal_data['group_id']}")
+        
+        # Write to local signals archive file
+        current_date = datetime.now().strftime("%Y%m%d")
+        archive_path = os.path.join(os.getcwd(), f"signals_archive_{current_date}.txt")
+        try:
+            with open(archive_path, "a", encoding='utf-8') as f:
+                f.write(message)
+        except Exception as e:
+            logger.error(f"❌ [QueueAdd] Hiba az archív fájl írásakor ({archive_path}): {e}")
 
         # 5) I/O művelet: Hozzáfűzés az összes queue-fájlhoz
         for queue_path in MT4_QUEUE_FILE_PATHS:
@@ -147,7 +157,7 @@ def process_signal_queue() -> None:
                     with open(queue_path, "w", encoding='utf-8') as f:
                         if first_valid_line_index + 1 < len(lines):
                             f.writelines(lines[first_valid_line_index + 1:])
-                    logger.info(f"📤 [Queue->EA] Szignál -> EA fájl ('{os.path.basename(signal_path)}'): {next_signal}")
+                    logger.info(f"📤 [Queue->EA] Szignál ('{os.path.basename(queue_path)}') -> EA fájl ('{signal_path}'): {next_signal}")
                 except IOError as e:
                     logger.error(f"❌ [QueueUpdate] Kritikus hiba a queue frissítésnél ({queue_path}): {e}")
                     continue

@@ -4,6 +4,7 @@ userbot_session.session-journal
 .env
 
 signals_queue*.txt
+signals_archive*.txt
 message_gid_map.json
 last_group_id.txt
 channels.txt

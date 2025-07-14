@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 try:
     # Csak azokat importáljuk, amiket KÖZVETLENÜL használunk itt
     from config import (API_ID, API_HASH, INVITE_LINKS,
-                        LAST_GID_FILE, MESSAGE_GID_MAP_FILE)
+                        LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL)
 except ImportError as e:
     logger.error(f"Hiba: Hianyzó alap beállítások a config.py-ban: {e}")
     exit()
@@ -182,6 +182,7 @@ async def run_userbot():
                         if command_written: logger.info(f"   ✅ SL parancs kiírva.")
                         else: logger.error(f"   ❌ SL parancs hiba.")
                     else: logger.warning(f"   FIGYELEM: Nem található GID (ID: {reply_to_msg_id}). SL válasz nem feldolgozható!")
+                    await forward_to_archive(message, chat_title)
                 else: logger.info(f"   Nem SL állításnak tűnő válasz.")
             else: logger.error(f"   Hiba: Eredeti üzenet lekérése sikertelen (ID: {reply_to_msg_id}).")
             return
@@ -190,8 +191,24 @@ async def run_userbot():
         else:
             try:
                 await process_new_standard_signal(message_text, message_id, message.date, chat_title)
+                await forward_to_archive(message, chat_title)
             except Exception as e:
                 logger.error(f"   Hiba process_new_standard_signal hívásakor: {e}"); traceback.print_exc()
 
     logger.info("🟢 Userbot elindult. Várakozás...")
     await client.run_until_disconnected()
+
+async def forward_to_archive(message, channel_name):
+    """
+    Forward a message to the archive channel.
+    """
+    if ARCHIVE_CHANNEL:
+        try:
+            cleaned_channel = "#" + clean_channel_name(channel_name)
+            message_text = f"{cleaned_channel}\n\n{message.text}"
+            await client.send_message(ARCHIVE_CHANNEL, message_text)
+            logger.info(f"📤 Üzenet továbbítva az archív csatornára: {ARCHIVE_CHANNEL}")
+        except Exception as e:
+            logger.error(f"❌ Hiba az üzenet továbbítása során az archív csatornára ({ARCHIVE_CHANNEL}): {e}")
+    else:
+        logger.warning("Figyelmeztetés: Nincs archív csatorna megadva.")

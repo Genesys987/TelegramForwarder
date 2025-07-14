@@ -16,6 +16,8 @@ INVITE_LINKS = config["INVITE_LINKS"].split(",") if config["INVITE_LINKS"] else 
 assert API_ID is not None, "TELEGRAM_API_ID is not set in .env file"
 assert API_HASH is not None, "TELEGRAM_API_HASH is not set in .env file"
 
+ARCHIVE_CHANNEL = config.get("ARCHIVE_CHANNEL", None)
+
 # ----------------------
 # MT4 File Paths
 # IMPORTANT: Verify these paths are correct for YOUR MT4 installation!
