@@ -1585,8 +1585,8 @@ int GetHighestTriggeredTP(int groupId, double &tpLevels[], int tpCount)
 //+------------------------------------------------------------------+
 void PrintLog(string msg)
 {
-    // needed to have real time logs to the file instead of irregular log flushing
-    string dateStr = TimeToString(TimeCurrent(), TIME_DATE);
+    datetime currentTime = TimeCurrent() - (brokerTimeOffsetMinutes * 60);
+    string dateStr = TimeToString(currentTime, TIME_DATE);
     string y = StringSubstr(dateStr, 0, 4);
     string m = StringSubstr(dateStr, 5, 2);
     string d = StringSubstr(dateStr, 8, 2);
@@ -1595,10 +1595,11 @@ void PrintLog(string msg)
     if(handle != INVALID_HANDLE)
     {
         FileSeek(handle, 0, SEEK_END);
-        FileWrite(handle, TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), " ", msg);
+        FileWrite(handle, TimeToString(currentTime, TIME_DATE|TIME_SECONDS), " ", msg);
         FileFlush(handle);
         FileClose(handle);
     }
     // Also print to Experts log for convenience
     Print(msg);
 }
+
