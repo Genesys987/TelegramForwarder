@@ -179,10 +179,11 @@ async def run_userbot():
                     if retrieved_group_id:
                         logger.info(f"   Talált GID: {retrieved_group_id}")
                         command_written = process_stoploss_reply(message_text, original_message_text, retrieved_group_id)
-                        if command_written: logger.info(f"   ✅ SL parancs kiírva.")
+                        if command_written: 
+                          logger.info(f"   ✅ SL parancs kiírva.")
+                          await forward_to_archive(message, chat_title)
                         else: logger.error(f"   ❌ SL parancs hiba.")
                     else: logger.warning(f"   FIGYELEM: Nem található GID (ID: {reply_to_msg_id}). SL válasz nem feldolgozható!")
-                    await forward_to_archive(message, chat_title)
                 else: logger.info(f"   Nem SL állításnak tűnő válasz.")
             else: logger.error(f"   Hiba: Eredeti üzenet lekérése sikertelen (ID: {reply_to_msg_id}).")
             return
@@ -190,8 +191,8 @@ async def run_userbot():
         # === Standard szignál feldolgozás ===
         else:
             try:
-                await process_new_standard_signal(message_text, message_id, message.date, chat_title)
-                await forward_to_archive(message, chat_title)
+                result = await process_new_standard_signal(message_text, message_id, message.date, chat_title)
+                if result is not None: await forward_to_archive(message, chat_title)
             except Exception as e:
                 logger.error(f"   Hiba process_new_standard_signal hívásakor: {e}"); traceback.print_exc()
 
