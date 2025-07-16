@@ -215,7 +215,7 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
       if(fh == -1) 
       {
           if(!FileExists(gSignalFile)) return(false);
-          fh = FileOpen(gSignalFile, FILE_READ | FILE_TXT | FILE_ANSI);
+          fh = FileOpen(gSignalFile, FILE_READ|FILE_SHARE_READ | FILE_TXT | FILE_ANSI);
           PrintLog(eaName + ": Opening signal file " + gSignalFile);
           if(fh == INVALID_HANDLE) {
               PrintLog(eaName + ": Failed to open signal file");
@@ -893,7 +893,7 @@ void ProcessExternalSLUpdates()
     if(!FileExists(gExternalSLFile)) return;
     if(fh == -1)
     {
-      fh = FileOpen(gExternalSLFile, FILE_READ|FILE_TXT|FILE_ANSI);
+      fh = FileOpen(gExternalSLFile, FILE_READ|FILE_SHARE_READ|FILE_TXT|FILE_ANSI);
     }
     if(fh == INVALID_HANDLE) return;
     string cmd = FileReadString(fh);
@@ -1375,7 +1375,7 @@ bool IsSignalTooOld(long signalTimestamp)
 //+------------------------------------------------------------------+
 bool FileExists(string filename)
 {
-    int tfh = FileOpen(filename, FILE_READ | FILE_TXT | FILE_ANSI);
+    int tfh = FileOpen(filename, FILE_READ|FILE_SHARE_READ | FILE_TXT | FILE_ANSI);
     if(tfh != INVALID_HANDLE)
     {
         FileClose(tfh);
@@ -1591,7 +1591,7 @@ void PrintLog(string msg)
     string m = StringSubstr(dateStr, 5, 2);
     string d = StringSubstr(dateStr, 8, 2);
     string logFile = y + m + d + ".log";
-    int handle = FileOpen(logFile, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_READ);
+    int handle = FileOpen(logFile, FILE_WRITE|FILE_SHARE_READ|FILE_READ|FILE_TXT|FILE_ANSI);
     if(handle != INVALID_HANDLE)
     {
         FileSeek(handle, 0, SEEK_END);
