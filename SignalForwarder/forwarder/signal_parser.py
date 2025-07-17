@@ -343,7 +343,7 @@ def parse_signal(text: str):
             r'TP\d+\s*:?\s*([\d\.]+)',                         # "TP1: 3289.0", "TP1 3420", "TP2 3423"
             r'TP\s*:\s*([\d\.]+)',                             # "TP: 1.1455"
             r'(?:TAKE\s*PROFIT)\s*\d*\s*(?:at\s+)?([\d\.]+)',  # "Take profit 1 at 89500.00"
-            r'TP\s+([\d\.]+)',                                 # "TP 3364"
+            r'TP\s+([\d\.]+(?:/[\d\.]+)*)',                    # "TP 3364" or "TP 3332/3334/3336/3338/3340"
         ]
         
         tp_found = False
@@ -351,9 +351,21 @@ def parse_signal(text: str):
             m = re.search(tp_pattern, line, re.IGNORECASE)
             if m:
                 try:
-                    tp_value = float(m.group(1))
-                    take_profits.append(tp_value)
-                    tp_found = True
+                    tp_values_text = m.group(1)
+                    if '/' in tp_values_text:
+                        # Multiple TP values separated by slashes
+                        tp_values = tp_values_text.split('/')
+                        for tp_val in tp_values:
+                            tp_value = float(tp_val.strip())
+                            if tp_value > 0.1:  # Filter out very small numbers but allow forex values
+                                take_profits.append(tp_value)
+                        tp_found = True
+                    else:
+                        # Single TP value
+                        tp_value = float(tp_values_text)
+                        if tp_value > 0.1:  # Filter out very small numbers but allow forex values
+                            take_profits.append(tp_value)
+                        tp_found = True
                     break
                 except ValueError:
                     print(f"Warning: Invalid number for TP: {m.group(1)}")
