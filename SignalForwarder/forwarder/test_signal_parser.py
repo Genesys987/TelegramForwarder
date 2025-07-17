@@ -15,46 +15,46 @@ class TestSignalParser(unittest.TestCase):
         signals = [
             # Signal 1: Standard BUY format
             ("BUY BTCUSD\nENTRY 89300.00\nTake profit 1 at 89500.00\nTake profit 2 at 89800.00\nTake profit 3 at 90300.00\nStop loss at 88600.00",
-             "BUY", "BTCUSD", 89300.0),
+             "BUY", "BTCUSD", 89300.0, [89500.0, 89800.0, 90300.0], 88600.0),
             
             # Signal 2: GOLD FROM range format
             ("GOLD BUY FROM 3362/3360\n\nTP 3364\nTP 3366\nTP 3368\nTP 3370\nTP 3372\nSL 3350\n\nUSE RISK MANAGEMENT",
-             "BUY", "XAUUSD", 3360.0),
+             "BUY", "XAUUSD", 3360.0, [3364.0, 3366.0, 3368.0, 3370.0, 3372.0], 3350.0),
             
             # Signal 3: Emoji alert format
             ("SIGNAL ALERT\n\nSELL XAUUSD 3290.5\n\n🤑TP1: 3289.0\n🤑TP2: 3287.5\n🤑TP3: 3281.4\n🔴SL: 3298.8 (830 pips)",
-             "SELL", "XAUUSD", 3290.5),
+             "SELL", "XAUUSD", 3290.5, [3289.0, 3287.5, 3281.4], 3298.8),
             
             # Signal 4: Colon format
             ("EURUSD BUY\n\nENTRY 1.1435\n\nTP: 1.1455\nTP: 1.1485\nTP: 1.1535\nSL: 1.1345",
-             "BUY", "EURUSD", 1.1435),
+             "BUY", "EURUSD", 1.1435, [1.1455, 1.1485, 1.1535], 1.1345),
             
             # Signal 5: Numbered TP format
             ("XAUUSD BUY\n\nENTRY: 3418\n\nTP1 3420\nTP2 3423\nTP3 3428\nSL 3412",
-             "BUY", "XAUUSD", 3418.0),
+             "BUY", "XAUUSD", 3418.0, [3420.0, 3423.0, 3428.0], 3412.0),
             
             # Signal 6: Pipe format with emojis
             ("BTCUSD | BUY 109500\n\n❌ Stop Loss 109000 (500 pips)\n\n✅TP1 109700\n✅TP2 109900\n✅TP3 110500",
-             "BUY", "BTCUSD", 109500.0),
+             "BUY", "BTCUSD", 109500.0, [109700.0, 109900.0, 110500.0], 109000.0),
             
             # Signal 7: Same as Signal 6
             ("BTCUSD | BUY 109500\n\n❌ Stop Loss 109000 (500 pips)\n\n✅TP1 109700\n✅TP2 109900\n✅TP3 110500",
-             "BUY", "BTCUSD", 109500.0),
+             "BUY", "BTCUSD", 109500.0, [109700.0, 109900.0, 110500.0], 109000.0),
             
             # Signal 8: NEW FORMAT - Simple symbol buy price
             ("XAUUSD BUY 3417\n\nSL:  3411.68\nTP:  3443.68\n--Trade by Matthew",
-             "BUY", "XAUUSD", 3417.0),
+             "BUY", "XAUUSD", 3417.0, [3443.68], 3411.68),
             
             # Signal 9: Range entry with slashed TPs format
             ("GOLD SELL 3334/3337\n\n3332/3330/3328/3325\n\n        SL 3345",
-             "SELL", "XAUUSD", 3337.0),
+             "SELL", "XAUUSD", 3337.0, [3332.0, 3330.0, 3328.0, 3325.0], 3345.0),
             
             # Signal 10: NOW signal with multiple TPs
             ("GOLD SELL NOW\n\nTP 3307\nTP 3305\nTP 3303\nTP 3300\nTP 3298\n\nSL 3322",
-             "SELL", "XAUUSD", 0)  # NOW signals have entry = 0
+             "SELL", "XAUUSD", 0, [3307.0, 3305.0, 3303.0, 3300.0, 3298.0], 3322.0)
         ]
         
-        for i, (signal_text, expected_type, expected_symbol, expected_entry) in enumerate(signals, 1):
+        for i, (signal_text, expected_type, expected_symbol, expected_entry, expected_tps, expected_sl) in enumerate(signals, 1):
             with self.subTest(signal=i):
                 result = parse_signal(signal_text)
                 self.assertIsNotNone(result, f"Signal {i} should parse successfully")
@@ -64,6 +64,8 @@ class TestSignalParser(unittest.TestCase):
                 self.assertIsNotNone(result["take_profits"])
                 self.assertIsNotNone(result["stop_loss"])
                 self.assertGreater(len(result["take_profits"]), 0)
+                self.assertEqual(result["take_profits"], expected_tps)
+                self.assertEqual(result["stop_loss"], expected_sl)
         
         print("✅ All 10 user-provided signal formats passed!")
 
