@@ -346,43 +346,37 @@ def parse_signal(text: str):
             r'TP\s+([\d\.]+)',                                 # "TP 3364"
         ]
         
-        tp_found = False
+        # Use re.findall to find ALL TP matches in the line, not just the first one
         for tp_pattern in tp_patterns:
-            m = re.search(tp_pattern, line, re.IGNORECASE)
-            if m:
+            matches = re.findall(tp_pattern, line, re.IGNORECASE)
+            for match in matches:
                 try:
-                    tp_value = float(m.group(1))
-                    take_profits.append(tp_value)
-                    tp_found = True
-                    break
+                    tp_value = float(match)
+                    if tp_value > 0.1:  # Filter out very small numbers but allow forex values like 1.1455
+                        take_profits.append(tp_value)
                 except ValueError:
-                    print(f"Warning: Invalid number for TP: {m.group(1)}")
+                    print(f"Warning: Invalid number for TP: {match}")
         
-        # NEW: Check for slash-separated TP values OR single numeric TP (e.g., "3332/3330/3328/3325" or "3340")
-        if not tp_found:
-            # Pattern for line containing only numbers separated by slashes OR single number
-            slash_tp_pattern = r'^([\d\.]+(?:/[\d\.]+)*)$'
-            slash_match = re.match(slash_tp_pattern, line.strip())
-            if slash_match:
-                tp_values_text = slash_match.group(1)
-                if '/' in tp_values_text:
-                    # Multiple TP values separated by slashes
-                    tp_values = tp_values_text.split('/')
-                else:
-                    # Single TP value
-                    tp_values = [tp_values_text]
-                
-                for tp_val in tp_values:
-                    try:
-                        tp_value = float(tp_val.strip())
-                        if tp_value > 10:  # Filter out small numbers
-                            take_profits.append(tp_value)
-                            tp_found = True
-                    except ValueError:
-                        print(f"Warning: Invalid TP value in numeric format: {tp_val}")
-        
-        if tp_found:
-            continue
+        # Check for slash-separated TP values OR single numeric TP (e.g., "3332/3330/3328/3325" or "3340")
+        # Pattern for line containing only numbers separated by slashes OR single number
+        slash_tp_pattern = r'^([\d\.]+(?:/[\d\.]+)*)$'
+        slash_match = re.match(slash_tp_pattern, line.strip())
+        if slash_match:
+            tp_values_text = slash_match.group(1)
+            if '/' in tp_values_text:
+                # Multiple TP values separated by slashes
+                tp_values = tp_values_text.split('/')
+            else:
+                # Single TP value
+                tp_values = [tp_values_text]
+            
+            for tp_val in tp_values:
+                try:
+                    tp_value = float(tp_val.strip())
+                    if tp_value > 0.1:  # Filter out very small numbers but allow forex values
+                        take_profits.append(tp_value)
+                except ValueError:
+                    print(f"Warning: Invalid TP value in numeric format: {tp_val}")
 
         # Stop Loss parsing - enhanced to handle different formats
         if not signal.get("stop_loss"):
