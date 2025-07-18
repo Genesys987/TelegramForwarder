@@ -421,6 +421,14 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
 //+------------------------------------------------------------------+
 void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, string channelName)
 {
+    // Skip XAUUSD (Gold) trades to avoid interfering with independent trades from same group
+    if(StringFind(ToUpperCase(symbol), "XAUUSD") >= 0 || StringFind(ToUpperCase(symbol), "GOLD") >= 0)
+    {
+        if(debugMode) PrintLog(eaName + ": Skipping UpdateExistingOrdersSL for Gold symbol: " + symbol + 
+                              " - avoiding interference with independent trades");
+        return;
+    }
+    
     int targetOrderType = (signalType == "BUY") ? OP_BUY : OP_SELL;
     
     for(int i=0; i<OrdersTotal(); i++)
