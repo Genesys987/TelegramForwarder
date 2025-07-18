@@ -621,26 +621,35 @@ void HandleTrailingStopsDynamic()
     modifiedCount = 0;
     ArrayInitialize(modifiedTickets, -1);
 
-    // Store current triggered groups before reset to preserve existing triggers
-    TriggeredGroup previousTriggered[MAX_GROUPS];
+    // Mark expired triggers by checking timestamp, but don't remove them yet
     int previousCount = triggeredCount;
+    
+    // First pass: mark expired triggers (older than 10 minutes)
     for(int i = 0; i < previousCount; i++) {
-        previousTriggered[i] = triggeredGroups[i];
+        if(now - triggeredGroups[i].triggerTime > 600) { // older than 10 minutes
+            triggeredGroups[i].groupId = -1; // mark as expired
+        }
     }
-
-    // Reset triggered groups array for this scan
-    triggeredCount = 0;
-    for(int i = 0; i < MAX_GROUPS; i++) {
+    
+    // Second pass: compact the array by removing expired entries
+    int writeIndex = 0;
+    for(int i = 0; i < previousCount; i++) {
+        if(triggeredGroups[i].groupId != -1) { // not expired
+            if(writeIndex != i) {
+                triggeredGroups[writeIndex] = triggeredGroups[i];
+            }
+            writeIndex++;
+        }
+    }
+    
+    // Update the count to reflect removed expired entries
+    triggeredCount = writeIndex;
+    
+    // Clear any remaining slots
+    for(int i = triggeredCount; i < MAX_GROUPS; i++) {
         triggeredGroups[i].groupId = -1;
         triggeredGroups[i].triggeredTPLevel = 0;
         triggeredGroups[i].triggerTime = 0;
-    }
-    
-    // Restore previous triggers that are still valid (within last 10 minutes)
-    for(int i = 0; i < previousCount; i++) {
-        if(now - previousTriggered[i].triggerTime <= 600) { // 10 minutes
-            AddTriggeredGroup(previousTriggered[i].groupId, previousTriggered[i].triggeredTPLevel);
-        }
     }
     
     // PHASE 1: Check for TP triggers by examining current market prices vs order TP levels
@@ -1105,6 +1114,9 @@ bool ReconstructTPLevelsFromOrders(int groupId, double &tpLevels[], int &tpCount
     tpCount = 0;
     double tempTPs[20];
     int tempCount = 0;
+    
+    // Initialize the tempTPs array to prevent uninitialized variable warnings
+    ArrayInitialize(tempTPs, 0.0);
     
     if(debugMode) PrintLog(eaName + ": Reconstructing TP levels for GID " + IntegerToString(groupId));
     
