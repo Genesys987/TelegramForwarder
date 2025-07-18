@@ -9,8 +9,8 @@ from signal_parser import parse_signal
 
 class TestSignalParser(unittest.TestCase):
     
-    def test_all_10_user_signals(self):
-        """Test all 10 signal formats provided by the user"""
+    def test_all_11_user_signals(self):
+        """Test all 11 signal formats provided by the user"""
         
         signals = [
             # Signal 1: Standard BUY format
@@ -51,7 +51,11 @@ class TestSignalParser(unittest.TestCase):
             
             # Signal 10: NOW signal with multiple TPs
             ("GOLD SELL NOW\n\nTP 3307\nTP 3305\nTP 3303\nTP 3300\nTP 3298\n\nSL 3322",
-             "SELL", "XAUUSD", 0, [3307.0, 3305.0, 3303.0, 3300.0, 3298.0], 3322.0)
+             "SELL", "XAUUSD", 0, [3307.0, 3305.0, 3303.0, 3300.0, 3298.0], 3322.0),
+            
+            # Signal 11: Slash-separated TPs format (NEW TEST CASE)
+            ("GOLD BUY 3330/3327\n\nTP 3332/3334/3336/3338/3340\n\nSL 3317\n\nUSE RISK MANAGEMENT",
+             "BUY", "XAUUSD", 3327.0, [3332.0, 3334.0, 3336.0, 3338.0, 3340.0], 3317.0)
         ]
         
         for i, (signal_text, expected_type, expected_symbol, expected_entry, expected_tps, expected_sl) in enumerate(signals, 1):
@@ -67,7 +71,7 @@ class TestSignalParser(unittest.TestCase):
                 self.assertEqual(result["take_profits"], expected_tps)
                 self.assertEqual(result["stop_loss"], expected_sl)
         
-        print("✅ All 10 user-provided signal formats passed!")
+        print("✅ All 11 user-provided signal formats passed!")
 
 
 if __name__ == '__main__':
