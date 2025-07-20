@@ -42,6 +42,20 @@ struct TriggeredGroup {
 };
 
 //+------------------------------------------------------------------+
+//|--- Anti-Whipsaw Protection Structure                           |
+//+------------------------------------------------------------------+
+struct PendingTrailingStop {
+    int ticket;             // Order ticket
+    int groupId;           // Group ID
+    int triggeredTPLevel;   // Which TP was triggered
+    double calculatedSL;    // Calculated new SL
+    datetime triggerTime;   // When trigger was detected
+    datetime executeTime;   // When to execute (triggerTime + delay)
+    double triggerPrice;    // Price when trigger was detected
+    bool isPending;         // If this is waiting
+};
+
+//+------------------------------------------------------------------+
 //|--- Global State Variables                                       |
 //+------------------------------------------------------------------+
 TriggeredGroup triggeredGroups[MAX_GROUPS];    // Array of groups that triggered TS
@@ -50,10 +64,20 @@ int      modifiedTickets[MAX_MODIFIED_TICKETS]; // Array of tickets modified by 
 int      modifiedCount       = 0;
 datetime lastTrailingScan     = 0;       // Timestamp of last TS scan
 string   eaName               = "TelegramSignalForwarder";
-int      fh = -1;                  // File handle for reading signals
+int      signalFileHandle = -1;        // File handle for reading signals
+int      externalSLHandle = -1;        // File handle for external SL updates
 string   nextSignal = "";
 int      lastProcessedGroupId = -1; // Track last processed signal to avoid duplicates
 datetime lastProcessedTime = 0;     // Track last processed time for additional safety
+
+// Anti-Whipsaw Protection Variables
+PendingTrailingStop pendingStops[100];
+int pendingStopCount = 0;
+int antiWhipsawDelaySeconds = 300;        // 5 perc várakozás
+double minSLDistancePips_BTC = 100.0;     // BTC minimum távolság (pips)
+double minSLDistancePips_GOLD = 50.0;     // XAU minimum távolság (pips) 
+double minSLDistancePips_FOREX = 20.0;    // Forex minimum távolság (pips)
+double minSLDistancePips_CRYPTO = 80.0;   // Egyéb crypto minimum távolság (pips)
 
 
 //+------------------------------------------------------------------+
@@ -84,6 +108,14 @@ bool    CheckStopLevel(string symbol, int orderType,
 bool    CheckFreezeLevel(string symbol,
                          double openPrice, double ask, double bid);
 
+// Anti-Whipsaw Protection Functions
+double  GetMinimumSLDistance(string symbol);
+bool    CheckIfSLTooClose(string symbol, double newSL, double currentPrice, bool isBuyOrder);
+void    AddPendingTrailingStop(int ticket, int groupId, int triggeredTPLevel, double calculatedSL, double currentPrice);
+void    ProcessPendingTrailingStops();
+int     CountActivePendingStops();
+void    ShowPendingStopsStatus();
+
 // Utility functions
 bool    IsSignalTooOld(long signalTimestampMs);
 bool    FileExists(string filename);
@@ -113,6 +145,19 @@ int init()
         triggeredGroups[i].triggerTime = 0;
     }
 
+    // Initialize pending trailing stops array
+    for(int i = 0; i < 100; i++) {
+        pendingStops[i].ticket = -1;
+        pendingStops[i].groupId = -1;
+        pendingStops[i].triggeredTPLevel = 0;
+        pendingStops[i].calculatedSL = 0.0;
+        pendingStops[i].triggerTime = 0;
+        pendingStops[i].executeTime = 0;
+        pendingStops[i].triggerPrice = 0.0;
+        pendingStops[i].isPending = false;
+    }
+    pendingStopCount = 0;
+
     // Use chart's expert name if provided
     string customName = WindowExpertName();
     if(StringLen(customName) > 0)
@@ -129,8 +174,19 @@ int init()
 //+------------------------------------------------------------------+
 int deinit()
 {
+    // CRITICAL FIX: Close any open file handles to prevent memory leaks
+    if(signalFileHandle != -1) {
+        FileClose(signalFileHandle);
+        signalFileHandle = -1;
+    }
+    
+    if(externalSLHandle != -1) {
+        FileClose(externalSLHandle);
+        externalSLHandle = -1;
+    }
+    
     if(debugMode)
-        PrintLog(eaName + ": Deinitialized");
+        PrintLog(eaName + ": Deinitialized - file handles closed");
     return(0);
 }
 
@@ -146,6 +202,9 @@ int start()
 
     if(IsTradeAllowed() && IsConnected() && !IsStopped())
     {
+        // ANTI-WHIPSAW: Process pending trailing stops first
+        ProcessPendingTrailingStops();
+        
         // Process new signal
         if(ReadSignalFile(signalType, symbol, entryPrice,
                           stopLoss, tp1, tp2, tp3, groupId, channelName, tpLevels, tpCount))
@@ -186,7 +245,6 @@ int start()
             {
                 if(debugMode)
                     PrintLog(eaName + ": No existing orders found, creating new orders");
-                UpdateExistingOrdersSL(symbol, signalType, stopLoss, channelName);
                 SendOrders(signalType, symbol,
                                  entryPrice, stopLoss, tp1, tp2, tp3,
                                  groupId, channelName, tpLevels, tpCount);
@@ -212,36 +270,37 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
   string line = "";
   if (StringLen(nextSignal) == 0)
   {
-      if(fh == -1) 
+      if(signalFileHandle == -1) 
       {
           if(!FileExists(gSignalFile)) return(false);
-          fh = FileOpen(gSignalFile, FILE_READ|FILE_SHARE_READ | FILE_TXT | FILE_ANSI);
+          signalFileHandle = FileOpen(gSignalFile, FILE_READ|FILE_SHARE_READ | FILE_TXT | FILE_ANSI);
           PrintLog(eaName + ": Opening signal file " + gSignalFile);
-          if(fh == INVALID_HANDLE) {
+          if(signalFileHandle == INVALID_HANDLE) {
               PrintLog(eaName + ": Failed to open signal file");
               return(false);
           }
       }
 
-      if(fh == INVALID_HANDLE)
+      if(signalFileHandle == INVALID_HANDLE)
       {
-          PrintLog(eaName + ": Failed to open temp file for reading");
+          PrintLog(eaName + ": Failed to open signal file for reading");
           return(false);
       }
-      if(IsTesting() && FileIsEnding(fh))
+      if(IsTesting() && FileIsEnding(signalFileHandle))
       {
-          FileClose(fh);
+          FileClose(signalFileHandle);
+          signalFileHandle = -1;
           return(false);
       }
-      line = FileReadString(fh);
+      line = FileReadString(signalFileHandle);
       if(debugMode)
       {
           PrintLog(eaName + ": Read signal line: [" + line + "]");
       }
       if(!IsTesting())
       {
-          FileClose(fh);
-          fh = -1;
+          FileClose(signalFileHandle);
+          signalFileHandle = -1;
           FileDelete(gSignalFile);
       }
   } else {
@@ -516,14 +575,17 @@ void SendOrders(string signalType, string symbol,
     double price;
     bool shouldBuy = signalType == "BUY";
     double midPrice = (entryPrice + tp1) / 2.0; // Midpoint for limit order logic
-    // mid price is halfway between entry and TP1
-    // between entry and mid price, market orders are used
-    // between mid price and TP1, limit orders are used for the mid price
-    bool shouldUseLimitOrders = useLimitOrders && (shouldBuy ? ask > midPrice : bid < midPrice);
+    
+    // CRITICAL FIX: Correct limit order logic
+    // Use limit orders only when current price is beyond entry point (favorable for us)
+    // For BUY: Use BUYLIMIT when current ask > entryPrice (we can buy cheaper)
+    // For SELL: Use SELLLIMIT when current bid < entryPrice (we can sell higher)
+    bool shouldUseLimitOrders = useLimitOrders && 
+                               (shouldBuy ? ask > entryPrice : bid < entryPrice);
 
     int orderType;
     if(shouldUseLimitOrders) {
-        price = midPrice;
+        price = entryPrice; // Use exact entry price for limit orders
         orderType = (shouldBuy) ? OP_BUYLIMIT : OP_SELLLIMIT;
     } else {
         price = shouldBuy ? ask : bid;
@@ -549,8 +611,10 @@ void SendOrders(string signalType, string symbol,
     {
         tpLevels[j] = NormalizeDouble(tpLevels[j], digits);
         double dist = MathAbs(tpLevels[j] - entryPrice);
-        if(dist < minDist)
-            tpLevels[j] = (shouldBuy) ? price + minDist : price - minDist;
+        if(dist < minDist) {
+            // CRITICAL FIX: Use entryPrice as reference, not price
+            tpLevels[j] = (shouldBuy) ? entryPrice + minDist : entryPrice - minDist;
+        }
         tpLevels[j] = NormalizeDouble(tpLevels[j], digits);
     }
 
@@ -567,17 +631,26 @@ void SendOrders(string signalType, string symbol,
     // Create orders for each TP level
     for(int k=0; k<tpCount; k++)
     {
-        RefreshRates();
-        ask = MarketInfo(symbol, MODE_ASK);
-        bid = MarketInfo(symbol, MODE_BID);
-        price = (shouldBuy) ? ask : bid;
+        // CRITICAL FIX: For market orders, refresh rates; for limit orders, keep original price
+        double finalPrice = price; // Use the price determined earlier (limit or market)
+        
+        if(orderType == OP_BUY || orderType == OP_SELL) {
+            // Market orders: refresh rates for accurate execution
+            RefreshRates();
+            ask = MarketInfo(symbol, MODE_ASK);
+            bid = MarketInfo(symbol, MODE_BID);
+            finalPrice = (shouldBuy) ? ask : bid;
+        }
+        // For limit orders (OP_BUYLIMIT/OP_SELLLIMIT): keep the original calculated price
+        
+        finalPrice = NormalizeDouble(finalPrice, digits);
         string comment = FormatMT4Comment(groupId, channelName, rawSL, digits);
     
         PrintLog(eaName + ": Order[" + IntegerToString(k) + "] parameters: " +
         "Symbol=" + symbol +
         " Type=" + IntegerToString(orderType) +
         " Lots=" + DoubleToString(lotSize, 2) +
-        " Price=" + DoubleToString(price, digits) +
+        " Price=" + DoubleToString(finalPrice, digits) +
         " SL=" + DoubleToString(rawSL, digits) +
         " TP=" + DoubleToString(tpLevels[k], digits) +
         " Comment=" + comment);
@@ -587,7 +660,7 @@ void SendOrders(string signalType, string symbol,
         if((orderType == OP_BUYLIMIT || orderType == OP_SELLLIMIT) && limitOrderExpirationSec > 0) {
             expiration = TimeCurrent() + limitOrderExpirationSec;
         }
-        int ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
+        int ticket = OrderSend(symbol, orderType, lotSize, finalPrice, slippage,
                                rawSL, tpLevels[k], comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
                                 
         if(ticket < 0) {
@@ -598,7 +671,7 @@ void SendOrders(string signalType, string symbol,
         {
             RefreshRates();
             PrintLog(eaName + ": Retrying with fallback SL=" + DoubleToString(fallbackSL, digits));
-            ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
+            ticket = OrderSend(symbol, orderType, lotSize, finalPrice, slippage,
                                fallbackSL, tpLevels[k], comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
         }
         
@@ -643,7 +716,14 @@ void HandleTrailingStopsDynamic()
         }
     }
     
-    // PHASE 1: Check for TP triggers by examining current market prices vs order TP levels
+    // PERFORMANCE FIX: Pre-calculate TP levels for all unique groups ONCE
+    int uniqueGroups[MAX_GROUPS];
+    double allTPLevels[MAX_GROUPS][20]; // [group_index][tp_index]
+    int allTPCounts[MAX_GROUPS];
+    bool allIsBuyOrder[MAX_GROUPS];
+    int uniqueGroupCount = 0;
+    
+    // PHASE 1: Collect all unique group IDs and their TP levels
     int openTotal = OrdersTotal();
     if(debugMode) PrintLog(eaName + ": TS checking " + IntegerToString(openTotal) + " open orders for triggers");
     
@@ -651,75 +731,145 @@ void HandleTrailingStopsDynamic()
     {
         if(!OrderSelect(m, SELECT_BY_POS, MODE_TRADES)) continue;
         if(OrderMagicNumber() != MAGIC_NUMBER) continue;
+        if(OrderCloseTime() != 0) continue; // Skip closed orders
+        
+        int gid;
+        double signalSL;
+        string channelName;
+        if(!ParseOrderCommentFull(OrderComment(), gid, signalSL, channelName)) continue;
+        
+        // Check if this group is already processed
+        bool groupFound = false;
+        int groupIndex = -1;
+        for(int g = 0; g < uniqueGroupCount; g++) {
+            if(uniqueGroups[g] == gid) {
+                groupFound = true;
+                groupIndex = g;
+                break;
+            }
+        }
+        
+        // If new group, add it and calculate TP levels
+        if(!groupFound && uniqueGroupCount < MAX_GROUPS) {
+            groupIndex = uniqueGroupCount;
+            uniqueGroups[groupIndex] = gid;
+            
+            // Calculate TP levels for this group ONCE
+            double tempTPLevels[20];
+            int tempTPCount;
+            if(ReconstructTPLevelsFromOrders(gid, tempTPLevels, tempTPCount) && tempTPCount > 0) {
+                allTPCounts[groupIndex] = tempTPCount;
+                allIsBuyOrder[groupIndex] = (OrderType() == OP_BUY || OrderType() == OP_BUYLIMIT);
+                
+                // Copy TP levels
+                for(int tp = 0; tp < tempTPCount; tp++) {
+                    allTPLevels[groupIndex][tp] = tempTPLevels[tp];
+                }
+                uniqueGroupCount++;
+                
+                if(debugMode) PrintLog(eaName + ": Pre-calculated " + IntegerToString(tempTPCount) + " TP levels for GID " + IntegerToString(gid));
+            }
+        }
+    }
+    
+    // PHASE 2: Check TP triggers using pre-calculated data
+    for(int m = 0; m < openTotal; m++)
+    {
+        if(!OrderSelect(m, SELECT_BY_POS, MODE_TRADES)) continue;
+        if(OrderMagicNumber() != MAGIC_NUMBER) continue;
+        if(OrderCloseTime() != 0) continue;
         
         string symbol = OrderSymbol();
         int ticket = OrderTicket();
-        
-        // CRITICAL FIX: Skip orders that are already closed or pending deletion
-        if(OrderCloseTime() != 0) continue;
         
         RefreshRates();
         double currentPrice = (OrderType() == OP_BUY || OrderType() == OP_BUYLIMIT) ? 
                              MarketInfo(symbol, MODE_BID) : MarketInfo(symbol, MODE_ASK);
         
         double orderTP = OrderTakeProfit();
-        if(orderTP <= 0) continue; // Skip orders without TP
+        if(orderTP <= 0) continue;
         
-        // Check if TP level has been reached - CRITICAL FIX: Improved tolerance logic
-        bool tpReached = false;
+        int gid;
+        double signalSL;
+        string channelName;
         bool isBuyOrder = (OrderType() == OP_BUY || OrderType() == OP_BUYLIMIT);
-        double tolerance = triggerTolerancePips * MarketInfo(symbol, MODE_POINT);
         
-        if(isBuyOrder) {
-            // For BUY orders: TP reached when current price >= TP level (no negative tolerance)
-            tpReached = (currentPrice >= orderTP);
-            if(debugMode && currentPrice >= orderTP - tolerance && currentPrice < orderTP) {
-                PrintLog(eaName + ": BUY order near TP but not triggered - Price: " + DoubleToString(currentPrice, MarketInfo(symbol, MODE_DIGITS)) +
-                      " TP: " + DoubleToString(orderTP, MarketInfo(symbol, MODE_DIGITS)) + " (needs to reach or exceed TP)");
-            }
-        } else {
-            // For SELL orders: TP reached when current price <= TP level (no positive tolerance)
-            tpReached = (currentPrice <= orderTP);
-            if(debugMode && currentPrice <= orderTP + tolerance && currentPrice > orderTP) {
-                PrintLog(eaName + ": SELL order near TP but not triggered - Price: " + DoubleToString(currentPrice, MarketInfo(symbol, MODE_DIGITS)) +
-                      " TP: " + DoubleToString(orderTP, MarketInfo(symbol, MODE_DIGITS)) + " (needs to reach or go below TP)");
+        if(!ParseOrderCommentFull(OrderComment(), gid, signalSL, channelName)) continue;
+        
+        // Find pre-calculated TP levels for this group
+        int groupIndex = -1;
+        for(int g = 0; g < uniqueGroupCount; g++) {
+            if(uniqueGroups[g] == gid) {
+                groupIndex = g;
+                break;
             }
         }
         
-        if(tpReached)
+        if(groupIndex == -1) {
+            if(debugMode) PrintLog(eaName + ": TS warning - GID " + IntegerToString(gid) + " not found in pre-calculated groups");
+            continue;
+        }
+        
+        // ENHANCED: Point calculation with symbol-specific fallbacks
+        double point = MarketInfo(symbol, MODE_POINT);
+        if(point <= 0) {
+            if(StringFind(symbol, "JPY") >= 0) {
+                point = 0.01;  // 4-digit JPY pairs
+            } else if(StringFind(symbol, "XAU") >= 0 || StringFind(symbol, "GOLD") >= 0) {
+                point = 0.01;  // Gold typically 2-3 digits
+            } else if(StringFind(symbol, "BTC") >= 0) {
+                point = 0.01;  // Bitcoin typically 2 digits
+            } else {
+                point = 0.00001; // 5-digit major pairs
+            }
+        }
+        double tolerance = triggerTolerancePips * point;
+        
+        // STABILITY FIX: More conservative trigger tolerance
+        double triggerTolerance = tolerance * 0.3; // Use 30% of tolerance for triggering
+        
+        // Check ALL TP levels for this group using pre-calculated data
+        int highestTriggeredTP = 0;
+        int tpCount = allTPCounts[groupIndex];
+        bool groupIsBuyOrder = allIsBuyOrder[groupIndex];
+        
+        for(int j = 0; j < tpCount; j++)
         {
-            int gid;
-            double signalSL;
-            string channelName;
+            double tpLevel = allTPLevels[groupIndex][j];
+            bool thisTPReached = false;
             
-            if(ParseOrderCommentFull(OrderComment(), gid, signalSL, channelName))
-            {
-                // Determine which TP level this is by reconstructing all TPs for this group
-                double tpLevels[20];
-                int tpCount;
-                
-                if(ReconstructTPLevelsFromOrders(gid, tpLevels, tpCount))
-                {
-                    // Find which TP level matches this order's TP
-                    for(int j = 0; j < tpCount; j++)
-                    {
-                        if(MathAbs(orderTP - tpLevels[j]) <= tolerance)
-                        {
-                            int tpLevel = j + 1; // 1-indexed
-                            AddTriggeredGroup(gid, tpLevel);
-                            if(debugMode) PrintLog(eaName + ": TS detected TP" + IntegerToString(tpLevel) + " reached for GID " + IntegerToString(gid) +
-                                              " Ticket: " + IntegerToString(ticket) +
-                                              " (Price: " + DoubleToString(currentPrice, MarketInfo(symbol, MODE_DIGITS)) +
-                                              ", TP: " + DoubleToString(orderTP, MarketInfo(symbol, MODE_DIGITS)) + ")");
-                            break;
-                        }
-                    }
+            if(groupIsBuyOrder) {
+                thisTPReached = (currentPrice >= tpLevel - triggerTolerance);
+            } else {
+                thisTPReached = (currentPrice <= tpLevel + triggerTolerance);
+            }
+            
+            if(thisTPReached && (j + 1) > highestTriggeredTP) {
+                highestTriggeredTP = j + 1; // 1-indexed
+            }
+            
+            // Enhanced debug logging for near misses
+            if(debugMode && !thisTPReached) {
+                double distance = groupIsBuyOrder ? (tpLevel - currentPrice) : (currentPrice - tpLevel);
+                if(distance <= tolerance && distance > triggerTolerance) {
+                    PrintLog(eaName + ": TS " + (groupIsBuyOrder ? "BUY" : "SELL") + " TP" + IntegerToString(j+1) + 
+                          " near but not triggered - Distance: " + DoubleToString(distance/point, 1) + " pips" +
+                          " (needs " + DoubleToString(triggerTolerance/point, 1) + " pips)");
                 }
             }
         }
+        
+        // Add triggered group if any TP level was reached
+        if(highestTriggeredTP > 0) {
+            AddTriggeredGroup(gid, highestTriggeredTP);
+            if(debugMode) PrintLog(eaName + ": TS detected HIGHEST TP" + IntegerToString(highestTriggeredTP) + 
+                              " for GID " + IntegerToString(gid) + " Ticket: " + IntegerToString(ticket) +
+                              " (Price: " + DoubleToString(currentPrice, MarketInfo(symbol, MODE_DIGITS)) +
+                              ", TP: " + DoubleToString(allTPLevels[groupIndex][highestTriggeredTP-1], MarketInfo(symbol, MODE_DIGITS)) + ")");
+        }
     }
     
-    // PHASE 2: Check recently closed orders for additional triggers
+    // PHASE 2: Check recently closed orders for additional triggers (using pre-calculated groups)
     int historyTotal = OrdersHistoryTotal();
     for(int i = historyTotal - 1; i >= 0; i--)
     {
@@ -744,14 +894,20 @@ void HandleTrailingStopsDynamic()
             
             if(ParseOrderCommentFull(OrderComment(), gid, signalSL, channelName))
             {
-                double tpLevels[20];
-                int tpCount;
+                // Find pre-calculated TP levels for this group
+                int groupIndex = -1;
+                for(int g = 0; g < uniqueGroupCount; g++) {
+                    if(uniqueGroups[g] == gid) {
+                        groupIndex = g;
+                        break;
+                    }
+                }
                 
-                if(ReconstructTPLevelsFromOrders(gid, tpLevels, tpCount))
-                {
+                if(groupIndex != -1) {
+                    int tpCount = allTPCounts[groupIndex];
                     for(int j = 0; j < tpCount; j++)
                     {
-                        if(MathAbs(orderTP - tpLevels[j]) <= tolerance)
+                        if(MathAbs(orderTP - allTPLevels[groupIndex][j]) <= tolerance)
                         {
                             int tpLevel = j + 1;
                             AddTriggeredGroup(gid, tpLevel);
@@ -766,15 +922,12 @@ void HandleTrailingStopsDynamic()
 
     if(debugMode) PrintLog(eaName + ": TS found " + IntegerToString(triggeredCount) + " triggered groups");
 
-    // PHASE 3: Update SL for remaining open orders based on triggered TPs
-    
+    // PHASE 3: Update SL for remaining open orders based on triggered TPs (using pre-calculated data)
     int totalModifications = 0;
     for(int m = 0; m < openTotal; m++)
     {
         if(!OrderSelect(m, SELECT_BY_POS, MODE_TRADES)) continue;
         if(OrderMagicNumber() != MAGIC_NUMBER) continue;
-        
-        // CRITICAL FIX: Skip orders that are already closed
         if(OrderCloseTime() != 0) continue;
         
         int ticket = OrderTicket();
@@ -805,10 +958,25 @@ void HandleTrailingStopsDynamic()
             continue; // No TP triggered for this group
         }
 
-        // Calculate new SL based on triggered TP level
+        // Find pre-calculated TP levels for this group
+        int groupIndex = -1;
+        for(int g = 0; g < uniqueGroupCount; g++) {
+            if(uniqueGroups[g] == gid) {
+                groupIndex = g;
+                break;
+            }
+        }
+        
+        if(groupIndex == -1) {
+            if(debugMode) PrintLog(eaName + ": TS warning - cannot find TP levels for GID " + IntegerToString(gid));
+            continue;
+        }
+
+        // Calculate new SL based on triggered TP level using pre-calculated data
         double newSL;
         double openPrice = OrderOpenPrice();
         int digits = MarketInfo(OrderSymbol(), MODE_DIGITS);
+        int tpCount = allTPCounts[groupIndex];
         
         if(triggeredTPLevel == 1)
         {
@@ -816,29 +984,20 @@ void HandleTrailingStopsDynamic()
             newSL = NormalizeDouble(openPrice, digits);
             if(debugMode) PrintLog(eaName + ": TS TP1 triggered for ticket " + IntegerToString(ticket) + " - moving SL to breakeven: " + DoubleToString(newSL, digits));
         }
-        else if(triggeredTPLevel > 1)
+        else if(triggeredTPLevel > 1 && triggeredTPLevel <= tpCount)
         {
-            // TP2+ hit: Move SL to previous TP level
-            double tpLevels[20];
-            int tpCount;
-            
-            if(ReconstructTPLevelsFromOrders(gid, tpLevels, tpCount) && triggeredTPLevel <= tpCount)
-            {
-                newSL = NormalizeDouble(tpLevels[triggeredTPLevel - 2], digits); // Previous TP
-                if(debugMode) PrintLog(eaName + ": TS TP" + IntegerToString(triggeredTPLevel) + " triggered for ticket " + IntegerToString(ticket) + 
-                                  " - moving SL to TP" + IntegerToString(triggeredTPLevel-1) + ": " + DoubleToString(newSL, digits));
-            }
-            else
-            {
-                continue; // Cannot determine correct SL
-            }
+            // TP2+ hit: Move SL to previous TP level using pre-calculated data
+            newSL = NormalizeDouble(allTPLevels[groupIndex][triggeredTPLevel - 2], digits); // Previous TP
+            if(debugMode) PrintLog(eaName + ": TS TP" + IntegerToString(triggeredTPLevel) + " triggered for ticket " + IntegerToString(ticket) + 
+                              " - moving SL to TP" + IntegerToString(triggeredTPLevel-1) + ": " + DoubleToString(newSL, digits));
         }
         else
         {
+            if(debugMode) PrintLog(eaName + ": TS invalid TP level " + IntegerToString(triggeredTPLevel) + " for ticket " + IntegerToString(ticket));
             continue; // Invalid TP level
         }
         
-        // Validate SL change
+        // STABILITY FIX: Enhanced validation with multiple checks
         double currentSL = OrderStopLoss();
         if(MathAbs(newSL - currentSL) < SL_MODIFY_THRESHOLD) {
             if(debugMode) PrintLog(eaName + ": TS SL change too small for ticket " + IntegerToString(ticket) + 
@@ -846,22 +1005,28 @@ void HandleTrailingStopsDynamic()
             continue;
         }
         
-        // Check SL direction
+        // STABILITY FIX: More robust SL direction validation
         bool isBuyOrder = (OrderType() == OP_BUY || OrderType() == OP_BUYLIMIT);
+        bool validDirection = false;
+        
         if(isBuyOrder) {
-            // For BUY orders: new SL must be higher than current SL (or current SL is 0)
-            if(currentSL > 0 && newSL <= currentSL) {
-                if(debugMode) PrintLog(eaName + ": TS invalid SL direction for BUY ticket " + IntegerToString(ticket) + 
-                                  " current: " + DoubleToString(currentSL, digits) + " new: " + DoubleToString(newSL, digits));
-                continue;
-            }
+            // For BUY orders: new SL must be higher than current SL (or current SL is 0/unset)
+            // ALSO: new SL should not be higher than current market price (avoid immediate trigger)
+            RefreshRates();
+            double currentBid = MarketInfo(OrderSymbol(), MODE_BID);
+            validDirection = (currentSL <= 0.000001 || newSL > currentSL) && (newSL < currentBid * 0.999); // 0.1% safety margin
         } else {
-            // For SELL orders: new SL must be lower than current SL (or current SL is 0)  
-            if(currentSL > 0 && newSL >= currentSL) {
-                if(debugMode) PrintLog(eaName + ": TS invalid SL direction for SELL ticket " + IntegerToString(ticket) +
-                                  " current: " + DoubleToString(currentSL, digits) + " new: " + DoubleToString(newSL, digits));
-                continue;
-            }
+            // For SELL orders: new SL must be lower than current SL (or current SL is 0/unset)
+            // ALSO: new SL should not be lower than current market price
+            RefreshRates();
+            double currentAsk = MarketInfo(OrderSymbol(), MODE_ASK);
+            validDirection = (currentSL <= 0.000001 || newSL < currentSL) && (newSL > currentAsk * 1.001); // 0.1% safety margin
+        }
+        
+        if(!validDirection) {
+            if(debugMode) PrintLog(eaName + ": TS invalid SL direction/level for " + (isBuyOrder ? "BUY" : "SELL") + " ticket " + IntegerToString(ticket) + 
+                              " Current SL: " + DoubleToString(currentSL, digits) + " Proposed: " + DoubleToString(newSL, digits));
+            continue;
         }
         
         // Apply broker constraints
@@ -874,23 +1039,94 @@ void HandleTrailingStopsDynamic()
             continue;
         }
 
-        // Modify the order
-        if(OrderModify(ticket, openPrice, newSL, OrderTakeProfit(), 0, clrMagenta))
-        {
-            PrintLog(eaName + ": ✅ TS successfully moved SL for ticket " + IntegerToString(ticket) + 
-                  " from " + DoubleToString(currentSL, digits) + " to " + DoubleToString(newSL, digits) +
-                  " (TP" + IntegerToString(triggeredTPLevel) + " triggered for GID " + IntegerToString(gid) + ")");
-            MarkAsModified(ticket);
-            totalModifications++;
+        // ANTI-WHIPSAW PROTECTION CHECK
+        string symbol = OrderSymbol();
+        double currentPrice = isBuyOrder ? bid : ask;
+        bool slTooClose = CheckIfSLTooClose(symbol, newSL, currentPrice, isBuyOrder);
+        
+        if(slTooClose) {
+            // SL túl közel van -> pending listára
+            PrintLog("🔄 Anti-Whipsaw DELAY: Ticket " + IntegerToString(ticket) + 
+                     " SL too close to current price, delaying " + IntegerToString(antiWhipsawDelaySeconds) + " seconds");
+            AddPendingTrailingStop(ticket, gid, triggeredTPLevel, newSL, currentPrice);
+            continue;
         }
-        else
-        {
-            PrintLog(eaName + ": ❌ TS modify failed for ticket " + IntegerToString(ticket) +
-                  " error: " + IntegerToString(GetLastError()) + " GID: " + IntegerToString(gid));
+
+        // STABILITY FIX: Enhanced order modification with better error handling
+        bool modifySuccess = false;
+        int attempts = 0;
+        int maxAttempts = 3;
+        
+        while(!modifySuccess && attempts < maxAttempts) {
+            attempts++;
+            
+            // Critical: Refresh rates and re-select order before each attempt
+            RefreshRates();
+            if(!OrderSelect(ticket, SELECT_BY_TICKET)) {
+                PrintLog(eaName + ": TS order disappeared during modify - ticket " + IntegerToString(ticket));
+                break;
+            }
+            
+            // Double-check order is still open
+            if(OrderCloseTime() != 0) {
+                if(debugMode) PrintLog(eaName + ": TS order closed during modify - ticket " + IntegerToString(ticket));
+                break;
+            }
+            
+            // Final safety check - verify SL is still valid with fresh market data
+            ask = MarketInfo(OrderSymbol(), MODE_ASK);
+            bid = MarketInfo(OrderSymbol(), MODE_BID);
+            if(!CheckStopLevel(OrderSymbol(), OrderType(), newSL, ask, bid)) {
+                PrintLog(eaName + ": TS SL became invalid due to market change - ticket " + IntegerToString(ticket));
+                break;
+            }
+            
+            if(OrderModify(ticket, OrderOpenPrice(), newSL, OrderTakeProfit(), 0, clrMagenta))
+            {
+                modifySuccess = true;
+                PrintLog(eaName + ": ✅ IMMEDIATE TS success for ticket " + IntegerToString(ticket) + 
+                      " from " + DoubleToString(currentSL, digits) + " to " + DoubleToString(newSL, digits) +
+                      " (TP" + IntegerToString(triggeredTPLevel) + " triggered for GID " + IntegerToString(gid) + ") [attempt " + IntegerToString(attempts) + "]");
+                MarkAsModified(ticket);
+                totalModifications++;
+            }
+            else
+            {
+                int error = GetLastError();
+                PrintLog(eaName + ": TS modify attempt " + IntegerToString(attempts) + "/" + IntegerToString(maxAttempts) + 
+                      " failed for ticket " + IntegerToString(ticket) + " error: " + IntegerToString(error));
+                
+                // STABILITY FIX: Better error handling
+                if(error == ERR_BROKER_BUSY || error == ERR_TRADE_CONTEXT_BUSY || error == ERR_PRICE_CHANGED) {
+                    if(attempts < maxAttempts) {
+                        Sleep(200 + (attempts * 100)); // Progressive delay: 200ms, 300ms, 400ms
+                        continue; // Retry
+                    }
+                } else if(error == ERR_INVALID_STOPS) {
+                    PrintLog(eaName + ": TS invalid stops error - market conditions changed");
+                    break; // Don't retry for constraint violations
+                } else if(error == ERR_TRADE_MODIFY_DENIED || error == ERR_TRADE_DISABLED) {
+                    PrintLog(eaName + ": TS trading not allowed - check trading permissions");
+                    break; // Don't retry for permission issues
+                } else {
+                    PrintLog(eaName + ": TS unhandled error " + IntegerToString(error) + " - stopping retries");
+                    break; // Non-retriable error
+                }
+            }
+        }
+        
+        if(!modifySuccess) {
+            PrintLog(eaName + ": ❌ TS modify failed permanently for ticket " + IntegerToString(ticket) + 
+                  " GID: " + IntegerToString(gid) + " after " + IntegerToString(attempts) + " attempts");
         }
     }
     
-    if(debugMode) PrintLog(eaName + ": TS scan complete - " + IntegerToString(totalModifications) + " orders modified");
+    if(debugMode) {
+        int pendingCount = CountActivePendingStops();
+        PrintLog(eaName + ": TS scan complete - Groups processed: " + IntegerToString(uniqueGroupCount) + 
+                 ", Immediate modifications: " + IntegerToString(totalModifications) + 
+                 ", Pending Anti-Whipsaw delays: " + IntegerToString(pendingCount));
+    }
 }
 
 //+------------------------------------------------------------------+
@@ -899,16 +1135,18 @@ void HandleTrailingStopsDynamic()
 void ProcessExternalSLUpdates()
 {
     if(!FileExists(gExternalSLFile)) return;
-    if(fh == -1)
+    
+    if(externalSLHandle == -1)
     {
-      fh = FileOpen(gExternalSLFile, FILE_READ|FILE_SHARE_READ|FILE_TXT|FILE_ANSI);
+        externalSLHandle = FileOpen(gExternalSLFile, FILE_READ|FILE_SHARE_READ|FILE_TXT|FILE_ANSI);
     }
-    if(fh == INVALID_HANDLE) return;
-    string cmd = FileReadString(fh);
+    if(externalSLHandle == INVALID_HANDLE) return;
+    
+    string cmd = FileReadString(externalSLHandle);
     if(!IsTesting()) {
-      FileClose(fh);
-      fh = -1;
-      FileDelete(gExternalSLFile);
+        FileClose(externalSLHandle);
+        externalSLHandle = -1;
+        FileDelete(gExternalSLFile);
     }
 
     // Check for old format (GID:xxxx|NEW_SL:value) and new format (xxxx|NEW_SL:value)
@@ -963,12 +1201,58 @@ void ProcessExternalSLUpdates()
             if(debugMode) PrintLog(eaName + ": Ignoring order at index " + IntegerToString(i) + " - GID mismatch");
             continue;
         }
+        
+        // STABILITY FIX: Enhanced external SL update with validation
         double op = OrderOpenPrice();
         double tp = OrderTakeProfit();
-        if(!OrderModify(OrderTicket(), op, newSL, tp, 0, clrGold))
-            PrintLog(eaName + ": ext SL update fail GID=" + IntegerToString(gid) +
-                  " err=" + IntegerToString(GetLastError()));
+        double currentSL = OrderStopLoss();
+        
+        // Check if change is significant enough
+        if(MathAbs(currentSL - newSL) < SL_MODIFY_THRESHOLD) {
+            if(debugMode) PrintLog(eaName + ": External SL change too small for ticket " + IntegerToString(OrderTicket()));
+            continue;
+        }
+        
+        // Validate SL direction for order type
+        bool isBuyOrder = (OrderType() == OP_BUY || OrderType() == OP_BUYLIMIT);
+        bool validDirection = true;
+        
+        if(isBuyOrder && currentSL > 0 && newSL <= currentSL) {
+            PrintLog(eaName + ": External SL invalid direction for BUY order - current: " + 
+                  DoubleToString(currentSL, MarketInfo(OrderSymbol(), MODE_DIGITS)) + 
+                  " new: " + DoubleToString(newSL, MarketInfo(OrderSymbol(), MODE_DIGITS)));
+            validDirection = false;
+        } else if(!isBuyOrder && currentSL > 0 && newSL >= currentSL) {
+            PrintLog(eaName + ": External SL invalid direction for SELL order - current: " + 
+                  DoubleToString(currentSL, MarketInfo(OrderSymbol(), MODE_DIGITS)) + 
+                  " new: " + DoubleToString(newSL, MarketInfo(OrderSymbol(), MODE_DIGITS)));
+            validDirection = false;
+        }
+        
+        if(!validDirection) continue;
+        
+        // Apply broker constraints
+        RefreshRates();
+        double ask = MarketInfo(OrderSymbol(), MODE_ASK);
+        double bid = MarketInfo(OrderSymbol(), MODE_BID);
+        
+        if(!CheckStopLevel(OrderSymbol(), OrderType(), newSL, ask, bid)) {
+            PrintLog(eaName + ": External SL failed broker constraints for ticket " + IntegerToString(OrderTicket()));
+            continue;
+        }
+        
+        if(!OrderModify(OrderTicket(), op, newSL, tp, 0, clrGold)) {
+            PrintLog(eaName + ": External SL update failed for GID=" + IntegerToString(gid) +
+                  " ticket=" + IntegerToString(OrderTicket()) + 
+                  " error=" + IntegerToString(GetLastError()));
+        } else {
+            PrintLog(eaName + ": ✅ External SL updated for GID=" + IntegerToString(gid) +
+                  " ticket=" + IntegerToString(OrderTicket()) + 
+                  " from " + DoubleToString(currentSL, MarketInfo(OrderSymbol(), MODE_DIGITS)) +
+                  " to " + DoubleToString(newSL, MarketInfo(OrderSymbol(), MODE_DIGITS)));
+        }
     }
+}
 }
 
 //+------------------------------------------------------------------+
@@ -1182,7 +1466,9 @@ bool ReconstructTPLevelsFromOrders(int groupId, double &tpLevels[], int &tpCount
         return false;
     }
     
-    // Sort TP levels (ascending for BUY, descending for SELL)
+    // CRITICAL FIX: Sort TP levels correctly
+    // For BUY orders: TP1 < TP2 < TP3 (ascending - closest to entry first)
+    // For SELL orders: TP1 > TP2 > TP3 (descending - closest to entry first)
     // We need to determine order type first
     bool isBuyOrder = true;
     for(int i = 0; i < OrdersTotal(); i++)
@@ -1200,11 +1486,14 @@ bool ReconstructTPLevelsFromOrders(int groupId, double &tpLevels[], int &tpCount
         break;
     }
     
+    // FIXED: Correct sorting logic - TP1 should always be closest to entry
     // Simple bubble sort
     for(int i = 0; i < tempCount - 1; i++)
     {
         for(int j = 0; j < tempCount - i - 1; j++)
         {
+            // For BUY: Sort ascending (TP1=lowest, TP2=higher, TP3=highest)
+            // For SELL: Sort descending (TP1=highest, TP2=lower, TP3=lowest)
             bool shouldSwap = isBuyOrder ? (tempTPs[j] > tempTPs[j + 1]) : (tempTPs[j] < tempTPs[j + 1]);
             if(shouldSwap)
             {
@@ -1266,39 +1555,69 @@ void AddTriggeredGroup(int groupId, int tpLevel)
         return;
     }
     
+    // STABILITY FIX: Thread-safe group management with bounds checking
+    datetime currentTime = TimeCurrent();
+    
     // Check if group already exists and update with higher TP level
     for(int i = 0; i < triggeredCount; i++)
     {
         if(triggeredGroups[i].groupId == groupId)
         {
-            // Update to higher TP level if applicable
+            // STABILITY FIX: Only update if significantly higher TP level
             if(tpLevel > triggeredGroups[i].triggeredTPLevel)
             {
+                int oldLevel = triggeredGroups[i].triggeredTPLevel;
                 triggeredGroups[i].triggeredTPLevel = tpLevel;
-                triggeredGroups[i].triggerTime = TimeCurrent();
-                if(debugMode) PrintLog(eaName + ": Updated triggered group " + IntegerToString(groupId) + " from TP" + 
-                                  IntegerToString(triggeredGroups[i].triggeredTPLevel) + " to TP" + IntegerToString(tpLevel));
+                triggeredGroups[i].triggerTime = currentTime;
+                if(debugMode) PrintLog(eaName + ": Updated triggered group " + IntegerToString(groupId) + 
+                                  " from TP" + IntegerToString(oldLevel) + " to TP" + IntegerToString(tpLevel));
+            }
+            else if(tpLevel == triggeredGroups[i].triggeredTPLevel) {
+                // Refresh timestamp for same level (maintain validity)
+                triggeredGroups[i].triggerTime = currentTime;
+                if(debugMode) PrintLog(eaName + ": Refreshed trigger time for group " + IntegerToString(groupId) + " TP" + IntegerToString(tpLevel));
             }
             else if(debugMode) {
-                PrintLog(eaName + ": Group " + IntegerToString(groupId) + " already has TP" + 
+                PrintLog(eaName + ": Group " + IntegerToString(groupId) + " already has higher TP" + 
                       IntegerToString(triggeredGroups[i].triggeredTPLevel) + " (ignoring TP" + IntegerToString(tpLevel) + ")");
             }
             return;
         }
     }
     
-    // Add new triggered group
+    // STABILITY FIX: Add new triggered group with bounds checking
     if(triggeredCount < MAX_GROUPS)
     {
         triggeredGroups[triggeredCount].groupId = groupId;
         triggeredGroups[triggeredCount].triggeredTPLevel = tpLevel;
-        triggeredGroups[triggeredCount].triggerTime = TimeCurrent();
+        triggeredGroups[triggeredCount].triggerTime = currentTime;
         triggeredCount++;
-        if(debugMode) PrintLog(eaName + ": Added new triggered group " + IntegerToString(groupId) + " with TP" + IntegerToString(tpLevel));
+        if(debugMode) PrintLog(eaName + ": Added new triggered group " + IntegerToString(groupId) + " with TP" + IntegerToString(tpLevel) + 
+                              " (total groups: " + IntegerToString(triggeredCount) + ")");
     }
     else
     {
-        PrintLog(eaName + ": WARNING: Cannot add triggered group " + IntegerToString(groupId) + " - array full!");
+        // STABILITY FIX: Try to replace the oldest entry if array is full
+        int oldestIndex = 0;
+        datetime oldestTime = triggeredGroups[0].triggerTime;
+        
+        for(int i = 1; i < MAX_GROUPS; i++) {
+            if(triggeredGroups[i].triggerTime < oldestTime) {
+                oldestTime = triggeredGroups[i].triggerTime;
+                oldestIndex = i;
+            }
+        }
+        
+        // Replace oldest entry if it's older than 5 minutes
+        if(currentTime - oldestTime > 300) {
+            PrintLog(eaName + ": WARNING: Replacing oldest triggered group " + IntegerToString(triggeredGroups[oldestIndex].groupId) + 
+                  " with new group " + IntegerToString(groupId) + " TP" + IntegerToString(tpLevel));
+            triggeredGroups[oldestIndex].groupId = groupId;
+            triggeredGroups[oldestIndex].triggeredTPLevel = tpLevel;
+            triggeredGroups[oldestIndex].triggerTime = currentTime;
+        } else {
+            PrintLog(eaName + ": ERROR: Cannot add triggered group " + IntegerToString(groupId) + " - array full with recent entries!");
+        }
     }
 }
 
@@ -1609,5 +1928,265 @@ void PrintLog(string msg)
     }
     // Also print to Experts log for convenience
     Print(msg);
+}
+
+//+------------------------------------------------------------------+
+//| ANTI-WHIPSAW PROTECTION FUNCTIONS                              |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| GetMinimumSLDistance: Symbol-specific minimum SL distance       |
+//+------------------------------------------------------------------+
+double GetMinimumSLDistance(string symbol)
+{
+    // Bitcoin párok
+    if(StringFind(symbol, "BTC") >= 0 || 
+       StringFind(symbol, "BITCOIN") >= 0) {
+        return minSLDistancePips_BTC;
+    }
+    
+    // Arany (XAU)
+    if(StringFind(symbol, "XAU") >= 0 || 
+       StringFind(symbol, "GOLD") >= 0) {
+        return minSLDistancePips_GOLD;
+    }
+    
+    // Major Forex párok
+    if(StringFind(symbol, "USD") >= 0 || 
+       StringFind(symbol, "EUR") >= 0 || 
+       StringFind(symbol, "GBP") >= 0 || 
+       StringFind(symbol, "JPY") >= 0 ||
+       StringFind(symbol, "CHF") >= 0 ||
+       StringFind(symbol, "CAD") >= 0 ||
+       StringFind(symbol, "AUD") >= 0 ||
+       StringFind(symbol, "NZD") >= 0) {
+        return minSLDistancePips_FOREX;
+    }
+    
+    // Crypto párok (ETH, LTC, stb.)
+    if(StringFind(symbol, "ETH") >= 0 || 
+       StringFind(symbol, "LTC") >= 0 || 
+       StringFind(symbol, "BCH") >= 0 ||
+       StringFind(symbol, "XRP") >= 0 ||
+       StringFind(symbol, "ADA") >= 0) {
+        return minSLDistancePips_CRYPTO;
+    }
+    
+    // Default: forex távolság
+    return minSLDistancePips_FOREX;
+}
+
+//+------------------------------------------------------------------+
+//| CheckIfSLTooClose: Ellenőrzi hogy túl közel van-e az új SL     |
+//+------------------------------------------------------------------+
+bool CheckIfSLTooClose(string symbol, double newSL, double currentPrice, bool isBuyOrder)
+{
+    double point = MarketInfo(symbol, MODE_POINT);
+    if(point <= 0) {
+        // Fallback point értékek
+        if(StringFind(symbol, "JPY") >= 0) {
+            point = 0.01;
+        } else {
+            point = 0.00001;
+        }
+    }
+    
+    double minDistancePips = GetMinimumSLDistance(symbol);
+    double minDistancePrice = minDistancePips * point;
+    
+    double slDistance;
+    if(isBuyOrder) {
+        // BUY order esetén: current price - new SL = távolság
+        slDistance = currentPrice - newSL;
+    } else {
+        // SELL order esetén: new SL - current price = távolság
+        slDistance = newSL - currentPrice;
+    }
+    
+    bool tooClose = (slDistance < minDistancePrice);
+    
+    if(debugMode) {
+        PrintLog("Anti-Whipsaw Check for " + symbol + ":");
+        PrintLog("  Current Price: " + DoubleToString(currentPrice, MarketInfo(symbol, MODE_DIGITS)));
+        PrintLog("  Proposed SL: " + DoubleToString(newSL, MarketInfo(symbol, MODE_DIGITS)));
+        PrintLog("  Distance: " + DoubleToString(slDistance / point, 1) + " pips");
+        PrintLog("  Minimum Required: " + DoubleToString(minDistancePips, 1) + " pips");
+        PrintLog("  Too Close: " + (tooClose ? "YES (DELAY)" : "NO (EXECUTE)"));
+    }
+    
+    return tooClose;
+}
+
+//+------------------------------------------------------------------+
+//| AddPendingTrailingStop: Függőben lévő trailing stop hozzáadása |
+//+------------------------------------------------------------------+
+void AddPendingTrailingStop(int ticket, int groupId, int triggeredTPLevel, double calculatedSL, double currentPrice)
+{
+    if(pendingStopCount >= 100) {
+        PrintLog("WARNING: Pending stops array full, cannot add more!");
+        return;
+    }
+    
+    // Ellenőrizzük hogy már benne van-e
+    for(int i = 0; i < pendingStopCount; i++) {
+        if(pendingStops[i].ticket == ticket && pendingStops[i].isPending) {
+            PrintLog("Ticket " + IntegerToString(ticket) + " already has pending trailing stop");
+            return;
+        }
+    }
+    
+    // Új pending stop hozzáadása
+    pendingStops[pendingStopCount].ticket = ticket;
+    pendingStops[pendingStopCount].groupId = groupId;
+    pendingStops[pendingStopCount].triggeredTPLevel = triggeredTPLevel;
+    pendingStops[pendingStopCount].calculatedSL = calculatedSL;
+    pendingStops[pendingStopCount].triggerTime = TimeCurrent();
+    pendingStops[pendingStopCount].executeTime = TimeCurrent() + antiWhipsawDelaySeconds;
+    pendingStops[pendingStopCount].triggerPrice = currentPrice;
+    pendingStops[pendingStopCount].isPending = true;
+    
+    pendingStopCount++;
+    
+    PrintLog("Anti-Whipsaw: Added pending trailing stop for ticket " + IntegerToString(ticket) + 
+             " (Execute at " + TimeToString(pendingStops[pendingStopCount-1].executeTime) + ")");
+}
+
+//+------------------------------------------------------------------+
+//| ProcessPendingTrailingStops: Feldolgozza a függő trailing stops|
+//+------------------------------------------------------------------+
+void ProcessPendingTrailingStops()
+{
+    datetime now = TimeCurrent();
+    
+    for(int i = 0; i < pendingStopCount; i++) {
+        if(!pendingStops[i].isPending) continue;
+        
+        // Ellenőrizzük hogy lejárt-e a várakozási idő
+        if(now < pendingStops[i].executeTime) continue;
+        
+        int ticket = pendingStops[i].ticket;
+        
+        // Ellenőrizzük hogy az order még nyitva van-e
+        if(!OrderSelect(ticket, SELECT_BY_TICKET)) {
+            PrintLog("Anti-Whipsaw: Ticket " + IntegerToString(ticket) + " not found (closed?)");
+            pendingStops[i].isPending = false;
+            continue;
+        }
+        
+        if(OrderCloseTime() != 0) {
+            PrintLog("Anti-Whipsaw: Ticket " + IntegerToString(ticket) + " already closed");
+            pendingStops[i].isPending = false;
+            continue;
+        }
+        
+        string symbol = OrderSymbol();
+        RefreshRates();
+        double currentPrice = (OrderType() == OP_BUY) ? 
+                             MarketInfo(symbol, MODE_BID) : MarketInfo(symbol, MODE_ASK);
+        
+        // RE-VALIDATION: Ellenőrizzük hogy most sem túl közel-e
+        bool isBuyOrder = (OrderType() == OP_BUY);
+        double proposedSL = pendingStops[i].calculatedSL;
+        
+        bool stillTooClose = CheckIfSLTooClose(symbol, proposedSL, currentPrice, isBuyOrder);
+        
+        if(stillTooClose) {
+            // Ha még mindig túl közel van, adjunk még 2 percet
+            pendingStops[i].executeTime = now + 120; // +2 perc
+            PrintLog("Anti-Whipsaw: Ticket " + IntegerToString(ticket) + " still too close, delaying +2min");
+            continue;
+        }
+        
+        // VÉGREHAJTÁS: SL módosítás most már biztonságos
+        double currentSL = OrderStopLoss();
+        
+        // Végső irány ellenőrzés
+        bool validDirection = true;
+        if(isBuyOrder) {
+            // BUY order: új SL magasabb legyen mint a jelenlegi (vagy 0)
+            validDirection = (currentSL <= 0.000001 || proposedSL > currentSL);
+        } else {
+            // SELL order: új SL alacsonyabb legyen mint a jelenlegi (vagy 0)
+            validDirection = (currentSL <= 0.000001 || proposedSL < currentSL);
+        }
+        
+        if(!validDirection) {
+            PrintLog("Anti-Whipsaw: Invalid SL direction for ticket " + IntegerToString(ticket) + 
+                     " Current: " + DoubleToString(currentSL, MarketInfo(symbol, MODE_DIGITS)) +
+                     " Proposed: " + DoubleToString(proposedSL, MarketInfo(symbol, MODE_DIGITS)));
+            pendingStops[i].isPending = false;
+            continue;
+        }
+        
+        // SL módosítás végrehajtása
+        bool success = OrderModify(ticket, OrderOpenPrice(), proposedSL, 
+                                   OrderTakeProfit(), OrderExpiration());
+        
+        if(success) {
+            PrintLog("✅ Anti-Whipsaw SUCCESS: Modified ticket " + IntegerToString(ticket) + 
+                     " SL: " + DoubleToString(currentSL, MarketInfo(symbol, MODE_DIGITS)) + 
+                     " -> " + DoubleToString(proposedSL, MarketInfo(symbol, MODE_DIGITS)));
+                     
+            // Statisztika frissítése
+            if(modifiedCount < MAX_MODIFIED_TICKETS) {
+                modifiedTickets[modifiedCount] = ticket;
+                modifiedCount++;
+            }
+        } else {
+            int error = GetLastError();
+            PrintLog("❌ Anti-Whipsaw FAILED: Ticket " + IntegerToString(ticket) + 
+                     " Error: " + IntegerToString(error));
+        }
+        
+        // Pending stop eltávolítása (sikeres vagy sikertelen)
+        pendingStops[i].isPending = false;
+    }
+    
+    // Tisztítás: inaktív bejegyzések eltávolítása
+    int activeCount = 0;
+    for(int i = 0; i < pendingStopCount; i++) {
+        if(pendingStops[i].isPending) {
+            if(activeCount != i) {
+                pendingStops[activeCount] = pendingStops[i];
+            }
+            activeCount++;
+        }
+    }
+    pendingStopCount = activeCount;
+}
+
+//+------------------------------------------------------------------+
+//| CountActivePendingStops: Aktív pending stops száma             |
+//+------------------------------------------------------------------+
+int CountActivePendingStops()
+{
+    int count = 0;
+    for(int i = 0; i < pendingStopCount; i++) {
+        if(pendingStops[i].isPending) count++;
+    }
+    return count;
+}
+
+//+------------------------------------------------------------------+
+//| ShowPendingStopsStatus: Pending stops státusz kiírása         |
+//+------------------------------------------------------------------+
+void ShowPendingStopsStatus()
+{
+    int activeCount = CountActivePendingStops();
+    if(activeCount == 0) {
+        PrintLog("Anti-Whipsaw: No pending trailing stops");
+        return;
+    }
+    
+    PrintLog("Anti-Whipsaw Status: " + IntegerToString(activeCount) + " pending stops");
+    
+    for(int i = 0; i < pendingStopCount; i++) {
+        if(!pendingStops[i].isPending) continue;
+        
+        int remainingSeconds = (int)(pendingStops[i].executeTime - TimeCurrent());
+        PrintLog("  Ticket " + IntegerToString(pendingStops[i].ticket) + 
+                 " -> Execute in " + IntegerToString(remainingSeconds) + "s" +
+                 " (TP" + IntegerToString(pendingStops[i].triggeredTPLevel) + ")");
+    }
 }
 
