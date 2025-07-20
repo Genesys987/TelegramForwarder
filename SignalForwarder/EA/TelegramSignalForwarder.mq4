@@ -567,10 +567,15 @@ void SendOrders(string signalType, string symbol,
     // Create orders for each TP level
     for(int k=0; k<tpCount; k++)
     {
-        RefreshRates();
-        ask = MarketInfo(symbol, MODE_ASK);
-        bid = MarketInfo(symbol, MODE_BID);
-        price = (shouldBuy) ? ask : bid;
+        if(!shouldUseLimitOrders) {
+            // we intend to place all limit orders at the same spot
+            // however, for market orders we want to get the correct current price
+            // to avoid off-quotes errors
+            RefreshRates();
+            ask = MarketInfo(symbol, MODE_ASK);
+            bid = MarketInfo(symbol, MODE_BID);
+            price = (shouldBuy) ? ask : bid;
+        }
         string comment = FormatMT4Comment(groupId, channelName, rawSL, digits);
     
         PrintLog(eaName + ": Order[" + IntegerToString(k) + "] parameters: " +
