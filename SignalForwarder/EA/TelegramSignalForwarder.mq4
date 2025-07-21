@@ -9,7 +9,7 @@
 //|--- Extern Parameters (EA Configuration)                         |
 //+------------------------------------------------------------------+
 extern bool   debugMode                = true;  // Enable detailed logging
-extern int    trailingCheckIntervalSec = 5;     // Interval (sec) between trailing stop scans
+extern int    trailingCheckIntervalSec = 30;    // Interval (sec) between trailing stop scans
 extern int    triggerTolerancePips     = 5;     // Pips tolerance for trailing stop trigger
 extern int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC in minutes (e.g., UTC+2 = 120)
 extern int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
@@ -567,10 +567,15 @@ void SendOrders(string signalType, string symbol,
     // Create orders for each TP level
     for(int k=0; k<tpCount; k++)
     {
-        RefreshRates();
-        ask = MarketInfo(symbol, MODE_ASK);
-        bid = MarketInfo(symbol, MODE_BID);
-        price = (shouldBuy) ? ask : bid;
+        if(!shouldUseLimitOrders) {
+            // we intend to place all limit orders at the same spot
+            // however, for market orders we want to get the correct current price
+            // to avoid off-quotes errors
+            RefreshRates();
+            ask = MarketInfo(symbol, MODE_ASK);
+            bid = MarketInfo(symbol, MODE_BID);
+            price = (shouldBuy) ? ask : bid;
+        }
         string comment = FormatMT4Comment(groupId, channelName, rawSL, digits);
     
         PrintLog(eaName + ": Order[" + IntegerToString(k) + "] parameters: " +
@@ -631,25 +636,13 @@ void HandleTrailingStopsDynamic()
         }
     }
     
-    // Second pass: compact the array by removing expired entries
-    int writeIndex = 0;
+    // Restore previous triggers that are still valid (within last 30 minutes)
     for(int i = 0; i < previousCount; i++) {
-        if(triggeredGroups[i].groupId != -1) { // not expired
-            if(writeIndex != i) {
-                triggeredGroups[writeIndex] = triggeredGroups[i];
-            }
-            writeIndex++;
+        if(now - previousTriggered[i].triggerTime <= 1800) { // 30 minutes
+            AddTriggeredGroup(previousTriggered[i].groupId, previousTriggered[i].triggeredTPLevel);
+            if(debugMode) PrintLog(eaName + ": TS restored previous trigger GID=" + IntegerToString(previousTriggered[i].groupId) + 
+                              " TP" + IntegerToString(previousTriggered[i].triggeredTPLevel));
         }
-    }
-    
-    // Update the count to reflect removed expired entries
-    triggeredCount = writeIndex;
-    
-    // Clear any remaining slots
-    for(int i = triggeredCount; i < MAX_GROUPS; i++) {
-        triggeredGroups[i].groupId = -1;
-        triggeredGroups[i].triggeredTPLevel = 0;
-        triggeredGroups[i].triggerTime = 0;
     }
     
     // PHASE 1: Check for TP triggers by examining current market prices vs order TP levels
@@ -664,7 +657,7 @@ void HandleTrailingStopsDynamic()
         string symbol = OrderSymbol();
         int ticket = OrderTicket();
         
-        // CRITICAL FIX: Skip orders that are already closed or pending deletion
+        // Skip orders that are already closed or pending deletion
         if(OrderCloseTime() != 0) continue;
         
         RefreshRates();
@@ -674,25 +667,16 @@ void HandleTrailingStopsDynamic()
         double orderTP = OrderTakeProfit();
         if(orderTP <= 0) continue; // Skip orders without TP
         
-        // Check if TP level has been reached - CRITICAL FIX: Improved tolerance logic
+        // Check if TP level has been reached
         bool tpReached = false;
         bool isBuyOrder = (OrderType() == OP_BUY || OrderType() == OP_BUYLIMIT);
-        double tolerance = triggerTolerancePips * MarketInfo(symbol, MODE_POINT);
         
         if(isBuyOrder) {
-            // For BUY orders: TP reached when current price >= TP level (no negative tolerance)
+            // For BUY orders: TP reached when current price >= TP level
             tpReached = (currentPrice >= orderTP);
-            if(debugMode && currentPrice >= orderTP - tolerance && currentPrice < orderTP) {
-                PrintLog(eaName + ": BUY order near TP but not triggered - Price: " + DoubleToString(currentPrice, MarketInfo(symbol, MODE_DIGITS)) +
-                      " TP: " + DoubleToString(orderTP, MarketInfo(symbol, MODE_DIGITS)) + " (needs to reach or exceed TP)");
-            }
         } else {
-            // For SELL orders: TP reached when current price <= TP level (no positive tolerance)
+            // For SELL orders: TP reached when current price <= TP level
             tpReached = (currentPrice <= orderTP);
-            if(debugMode && currentPrice <= orderTP + tolerance && currentPrice > orderTP) {
-                PrintLog(eaName + ": SELL order near TP but not triggered - Price: " + DoubleToString(currentPrice, MarketInfo(symbol, MODE_DIGITS)) +
-                      " TP: " + DoubleToString(orderTP, MarketInfo(symbol, MODE_DIGITS)) + " (needs to reach or go below TP)");
-            }
         }
         
         if(tpReached)
@@ -712,17 +696,24 @@ void HandleTrailingStopsDynamic()
                     // Find which TP level matches this order's TP
                     for(int j = 0; j < tpCount; j++)
                     {
-                        if(MathAbs(orderTP - tpLevels[j]) <= tolerance)
+                        if(MathAbs(orderTP - tpLevels[j]) < 0.00001) // Floating point precision
                         {
                             int tpLevel = j + 1; // 1-indexed
                             AddTriggeredGroup(gid, tpLevel);
                             if(debugMode) PrintLog(eaName + ": TS detected TP" + IntegerToString(tpLevel) + " reached for GID " + IntegerToString(gid) +
                                               " Ticket: " + IntegerToString(ticket) +
                                               " (Price: " + DoubleToString(currentPrice, MarketInfo(symbol, MODE_DIGITS)) +
-                                              ", TP: " + DoubleToString(orderTP, MarketInfo(symbol, MODE_DIGITS)) + ")");
+                                              ", TP: " + DoubleToString(orderTP, MarketInfo(symbol, MODE_DIGITS)) + 
+                                              ", Diff: " + DoubleToString(currentPrice - orderTP, MarketInfo(symbol, MODE_DIGITS)) + ")");
                             break;
                         }
                     }
+                }
+                else
+                {
+                    // Fallback: If can't reconstruct TPs, assume this is TP1
+                    AddTriggeredGroup(gid, 1);
+                    if(debugMode) PrintLog(eaName + ": TS fallback TP1 trigger for GID " + IntegerToString(gid) + " ticket " + IntegerToString(ticket));
                 }
             }
         }
@@ -730,22 +721,23 @@ void HandleTrailingStopsDynamic()
     
     // PHASE 2: Check recently closed orders for additional triggers
     int historyTotal = OrdersHistoryTotal();
+    if(debugMode) PrintLog(eaName + ": TS checking " + IntegerToString(historyTotal) + " history orders for closed TP triggers");
+    
     for(int i = historyTotal - 1; i >= 0; i--)
     {
         if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
         if(OrderMagicNumber() != MAGIC_NUMBER) continue;
         
-        // Only check orders closed in last 10 minutes
-        if(now - OrderCloseTime() > 600) continue;
+        // Only check orders closed in last 30 minutes
+        if(now - OrderCloseTime() > 1800) continue;
         
         double orderTP = OrderTakeProfit();
         if(orderTP <= 0) continue;
         
         double closePrice = OrderClosePrice();
-        double tolerance = triggerTolerancePips * MarketInfo(OrderSymbol(), MODE_POINT);
         
         // Check if order was closed at TP
-        if(MathAbs(closePrice - orderTP) <= tolerance)
+        if(MathAbs(closePrice - orderTP) < 0.00001) // Floating point precision
         {
             int gid;
             double signalSL;
@@ -760,11 +752,13 @@ void HandleTrailingStopsDynamic()
                 {
                     for(int j = 0; j < tpCount; j++)
                     {
-                        if(MathAbs(orderTP - tpLevels[j]) <= tolerance)
+                        if(MathAbs(orderTP - tpLevels[j]) < 0.00001) // Floating point precision
                         {
                             int tpLevel = j + 1;
                             AddTriggeredGroup(gid, tpLevel);
-                            if(debugMode) PrintLog(eaName + ": TS detected closed TP" + IntegerToString(tpLevel) + " for GID " + IntegerToString(gid));
+                            if(debugMode) PrintLog(eaName + ": TS detected closed TP" + IntegerToString(tpLevel) + " for GID " + IntegerToString(gid) + 
+                                              " (Close: " + DoubleToString(closePrice, MarketInfo(OrderSymbol(), MODE_DIGITS)) +
+                                              ", TP: " + DoubleToString(orderTP, MarketInfo(OrderSymbol(), MODE_DIGITS)) + ")");
                             break;
                         }
                     }
@@ -783,7 +777,7 @@ void HandleTrailingStopsDynamic()
         if(!OrderSelect(m, SELECT_BY_POS, MODE_TRADES)) continue;
         if(OrderMagicNumber() != MAGIC_NUMBER) continue;
         
-        // CRITICAL FIX: Skip orders that are already closed
+        // Skip orders that are already closed
         if(OrderCloseTime() != 0) continue;
         
         int ticket = OrderTicket();
@@ -813,27 +807,31 @@ void HandleTrailingStopsDynamic()
             if(debugMode) PrintLog(eaName + ": TS no trigger for GID " + IntegerToString(gid) + " ticket " + IntegerToString(ticket));
             continue; // No TP triggered for this group
         }
+        
+        if(debugMode) PrintLog(eaName + ": TS processing ticket " + IntegerToString(ticket) + " GID " + IntegerToString(gid) + 
+                          " triggered TP" + IntegerToString(triggeredTPLevel));
 
         // Calculate new SL based on triggered TP level
         double newSL;
         double openPrice = OrderOpenPrice();
         int digits = MarketInfo(OrderSymbol(), MODE_DIGITS);
+        double point = MarketInfo(OrderSymbol(), MODE_POINT);
         
         if(triggeredTPLevel == 1)
         {
-            // TP1 hit: Move SL to breakeven (order open price)
-            newSL = NormalizeDouble(openPrice, digits);
-            if(debugMode) PrintLog(eaName + ": TS TP1 triggered for ticket " + IntegerToString(ticket) + " - moving SL to breakeven: " + DoubleToString(newSL, digits));
+            // TP1 hit: Move SL to halfway between entry and original stop loss
+            newSL = NormalizeDouble((openPrice + signalSL) / 2.0, digits);
+            if(debugMode) PrintLog(eaName + ": TS TP1 triggered for ticket " + IntegerToString(ticket) + " - moving SL to halfway: " + DoubleToString(newSL, digits));
         }
         else if(triggeredTPLevel > 1)
         {
-            // TP2+ hit: Move SL to previous TP level
+            // TP2+ hit: Move SL to previous TP level (TP2->TP1, TP3->TP2, etc.)
             double tpLevels[20];
             int tpCount;
             
             if(ReconstructTPLevelsFromOrders(gid, tpLevels, tpCount) && triggeredTPLevel <= tpCount)
             {
-                newSL = NormalizeDouble(tpLevels[triggeredTPLevel - 2], digits); // Previous TP
+                newSL = NormalizeDouble(tpLevels[triggeredTPLevel - 2], digits); // Previous TP level
                 if(debugMode) PrintLog(eaName + ": TS TP" + IntegerToString(triggeredTPLevel) + " triggered for ticket " + IntegerToString(ticket) + 
                                   " - moving SL to TP" + IntegerToString(triggeredTPLevel-1) + ": " + DoubleToString(newSL, digits));
             }
@@ -857,6 +855,7 @@ void HandleTrailingStopsDynamic()
         
         // Check SL direction
         bool isBuyOrder = (OrderType() == OP_BUY || OrderType() == OP_BUYLIMIT);
+        
         if(isBuyOrder) {
             // For BUY orders: new SL must be higher than current SL (or current SL is 0)
             if(currentSL > 0 && newSL <= currentSL) {
@@ -865,7 +864,7 @@ void HandleTrailingStopsDynamic()
                 continue;
             }
         } else {
-            // For SELL orders: new SL must be lower than current SL (or current SL is 0)  
+            // For SELL orders: new SL must be lower than current SL (or current SL is 0)
             if(currentSL > 0 && newSL >= currentSL) {
                 if(debugMode) PrintLog(eaName + ": TS invalid SL direction for SELL ticket " + IntegerToString(ticket) +
                                   " current: " + DoubleToString(currentSL, digits) + " new: " + DoubleToString(newSL, digits));
@@ -886,7 +885,7 @@ void HandleTrailingStopsDynamic()
         // Modify the order
         if(OrderModify(ticket, openPrice, newSL, OrderTakeProfit(), 0, clrMagenta))
         {
-            PrintLog(eaName + ": ✅ TS successfully moved SL for ticket " + IntegerToString(ticket) + 
+            PrintLog(eaName + ": TS successfully moved SL for ticket " + IntegerToString(ticket) + 
                   " from " + DoubleToString(currentSL, digits) + " to " + DoubleToString(newSL, digits) +
                   " (TP" + IntegerToString(triggeredTPLevel) + " triggered for GID " + IntegerToString(gid) + ")");
             MarkAsModified(ticket);
@@ -894,7 +893,7 @@ void HandleTrailingStopsDynamic()
         }
         else
         {
-            PrintLog(eaName + ": ❌ TS modify failed for ticket " + IntegerToString(ticket) +
+            PrintLog(eaName + ": TS modify failed for ticket " + IntegerToString(ticket) +
                   " error: " + IntegerToString(GetLastError()) + " GID: " + IntegerToString(gid));
         }
     }
@@ -1120,7 +1119,7 @@ bool ReconstructTPLevelsFromOrders(int groupId, double &tpLevels[], int &tpCount
     
     if(debugMode) PrintLog(eaName + ": Reconstructing TP levels for GID " + IntegerToString(groupId));
     
-    // Scan all orders (both open and closed) for this group
+    // Scan all OPEN orders for this group
     int totalOrders = OrdersTotal();
     for(int i = 0; i < totalOrders; i++)
     {
@@ -1154,7 +1153,7 @@ bool ReconstructTPLevelsFromOrders(int groupId, double &tpLevels[], int &tpCount
         }
     }
     
-    // Also check closed orders
+    // ALSO check history orders to get ALL TP levels for complete reconstruction
     int historyTotal = OrdersHistoryTotal();
     for(int i = 0; i < historyTotal; i++)
     {
@@ -1278,24 +1277,25 @@ void AddTriggeredGroup(int groupId, int tpLevel)
         return;
     }
     
-    // Check if group already exists and update with higher TP level
+    // Check if group already exists - only accept higher TP levels
     for(int i = 0; i < triggeredCount; i++)
     {
         if(triggeredGroups[i].groupId == groupId)
         {
-            // Update to higher TP level if applicable
+            // Only update if this is a HIGHER TP level
             if(tpLevel > triggeredGroups[i].triggeredTPLevel)
             {
+                int previousLevel = triggeredGroups[i].triggeredTPLevel;
                 triggeredGroups[i].triggeredTPLevel = tpLevel;
                 triggeredGroups[i].triggerTime = TimeCurrent();
                 if(debugMode) PrintLog(eaName + ": Updated triggered group " + IntegerToString(groupId) + " from TP" + 
-                                  IntegerToString(triggeredGroups[i].triggeredTPLevel) + " to TP" + IntegerToString(tpLevel));
+                                  IntegerToString(previousLevel) + " to TP" + IntegerToString(tpLevel));
             }
             else if(debugMode) {
                 PrintLog(eaName + ": Group " + IntegerToString(groupId) + " already has TP" + 
                       IntegerToString(triggeredGroups[i].triggeredTPLevel) + " (ignoring TP" + IntegerToString(tpLevel) + ")");
             }
-            return;
+            return; // KRITIKUS: Always return - don't refresh time for same/lower TP
         }
     }
     
@@ -1576,14 +1576,13 @@ int GetHighestTriggeredTP(int groupId, double &tpLevels[], int tpCount)
             // Check if this order was closed at TP
             double orderTP = OrderTakeProfit();
             double closePrice = OrderClosePrice();
-            double tolerance = triggerTolerancePips * MarketInfo(OrderSymbol(), MODE_POINT);
             
-            if(orderTP > 0 && MathAbs(closePrice - orderTP) <= tolerance)
+            if(orderTP > 0 && MathAbs(closePrice - orderTP) < 0.00001) // Floating point precision
             {
                 // Find which TP level this corresponds to
                 for(int j = 0; j < tpCount; j++)
                 {
-                    if(MathAbs(orderTP - tpLevels[j]) <= tolerance)
+                    if(MathAbs(orderTP - tpLevels[j]) < 0.00001) // Floating point precision
                     {
                         int triggeredTP = j + 1; // TP levels are 1-indexed
                         highestTP = MathMax(highestTP, triggeredTP);
