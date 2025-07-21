@@ -626,23 +626,12 @@ void HandleTrailingStopsDynamic()
     modifiedCount = 0;
     ArrayInitialize(modifiedTickets, -1);
 
-    // Mark expired triggers by checking timestamp, but don't remove them yet
-    int previousCount = triggeredCount;
-    
-    // First pass: mark expired triggers (older than 10 minutes)
-    for(int i = 0; i < previousCount; i++) {
-        if(now - triggeredGroups[i].triggerTime > 600) { // older than 10 minutes
-            triggeredGroups[i].groupId = -1; // mark as expired
-        }
-    }
-    
-    // Restore previous triggers that are still valid (within last 30 minutes)
-    for(int i = 0; i < previousCount; i++) {
-        if(now - previousTriggered[i].triggerTime <= 1800) { // 30 minutes
-            AddTriggeredGroup(previousTriggered[i].groupId, previousTriggered[i].triggeredTPLevel);
-            if(debugMode) PrintLog(eaName + ": TS restored previous trigger GID=" + IntegerToString(previousTriggered[i].groupId) + 
-                              " TP" + IntegerToString(previousTriggered[i].triggeredTPLevel));
-        }
+    // Reset triggered groups for fresh scan
+    triggeredCount = 0;
+    for(int i = 0; i < MAX_GROUPS; i++) {
+        triggeredGroups[i].groupId = -1;
+        triggeredGroups[i].triggeredTPLevel = 0;
+        triggeredGroups[i].triggerTime = 0;
     }
     
     // PHASE 1: Check for TP triggers by examining current market prices vs order TP levels
