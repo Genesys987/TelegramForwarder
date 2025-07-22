@@ -72,10 +72,10 @@ void    CheckAndCleanExpiredLimitOrders();
 void    ProcessDynamicTrailingStop();
 void    CleanupInactiveTrailingStops();
 void    InitializeTrailingStop(int gid, string channel, string symbol, bool isBuy, 
-                              double entry, double sl, double tpLevels[], int tpCount);
+                              double entry, double sl, double &tpLevels[], int tpCount);
 void    UpdateTrailingStopState(int gid, string channel);
 double  CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL, 
-                      double tpLevels[], int tpCount, string symbol, bool isBuy);
+                      double &tpLevels[], int tpCount, string symbol, bool isBuy);
 int     GetTrailingStopIndex(int gid, string channel);
 bool    ParseOrderCommentFull(string comment, int &groupId, string &channelName);
 bool    CheckStopLevel(string symbol, int orderType,
@@ -1135,7 +1135,6 @@ void CleanupInactiveTrailingStops()
 {
     for(int i = gTrailingStopsCount - 1; i >= 0; i--) // Reverse loop for safe removal
     {
-        TrailingStopState &state = gTrailingStops[i];
         bool hasOpenOrders = false;
         
         // Check if this GID has any open orders
@@ -1143,19 +1142,19 @@ void CleanupInactiveTrailingStops()
         {
             if(!OrderSelect(o, SELECT_BY_POS, MODE_TRADES)) continue;
             if(OrderMagicNumber() != MAGIC_NUMBER) continue;
-            if(OrderSymbol() != state.symbol) continue;
+            if(OrderSymbol() != gTrailingStops[i].symbol) continue;
             
             int orderGid;
             string orderChannel;
             if(!ParseOrderCommentFull(OrderComment(), orderGid, orderChannel)) continue;
-            if(orderGid == state.gid && orderChannel == state.channel) {
+            if(orderGid == gTrailingStops[i].gid && orderChannel == gTrailingStops[i].channel) {
                 hasOpenOrders = true;
                 break;
             }
         }
         
         // If no open orders and more than 5 minutes old, remove from array
-        if(!hasOpenOrders && TimeCurrent() - state.lastUpdate > 300) {
+        if(!hasOpenOrders && TimeCurrent() - gTrailingStops[i].lastUpdate > 300) {
             // Shift array elements down to remove this entry
             for(int j = i; j < gTrailingStopsCount - 1; j++) {
                 gTrailingStops[j] = gTrailingStops[j + 1];
@@ -1169,7 +1168,7 @@ void CleanupInactiveTrailingStops()
 //| InitializeTrailingStop: Set up new trailing stop state         |
 //+------------------------------------------------------------------+
 void InitializeTrailingStop(int gid, string channel, string symbol, bool isBuy, 
-                           double entry, double sl, double tpLevels[], int tpCount)
+                           double entry, double sl, double &tpLevels[], int tpCount)
 {
     // Check if this GID already exists
     int existingIndex = GetTrailingStopIndex(gid, channel);
@@ -1203,7 +1202,17 @@ void InitializeTrailingStop(int gid, string channel, string symbol, bool isBuy,
     gTrailingStopsCount++;
     
     PrintLog(eaName + ": Trailing stop initialized for GID:" + IntegerToString(gid) + 
-           " Channel:" + channel + " TPCount:" + IntegerToString(tpCount));
+           " Channel:" + channel + " TPCount:" + IntegerToString(tpCount) + 
+           " Entry:" + DoubleToString(entry, MarketInfo(symbol, MODE_DIGITS)) +
+           " SL:" + DoubleToString(sl, MarketInfo(symbol, MODE_DIGITS)));
+    
+    // Debug: print all TP levels
+    if(debugMode) {
+        for(int j = 0; j < tpCount && j < 20; j++) {
+            PrintLog(eaName + ": TP[" + IntegerToString(j+1) + "] = " + 
+                   DoubleToString(newState.tpLevels[j], MarketInfo(symbol, MODE_DIGITS)));
+        }
+    }
 }
 
 //+------------------------------------------------------------------+
@@ -1214,7 +1223,9 @@ void UpdateTrailingStopState(int gid, string channel)
     int index = GetTrailingStopIndex(gid, channel);
     if(index < 0) return;
     
-    TrailingStopState &state = gTrailingStops[index];
+    if(debugMode) PrintLog(eaName + ": Updating trailing stop state for GID:" + IntegerToString(gid) + 
+                          " Channel:" + channel + " Current level:" + IntegerToString(gTrailingStops[index].tpHitLevel));
+    
     int newTpHitLevel = 0;
     
     // Check history for closed orders with profit (TP hits)
@@ -1223,7 +1234,7 @@ void UpdateTrailingStopState(int gid, string channel)
     {
         if(!OrderSelect(h, SELECT_BY_POS, MODE_HISTORY)) continue;
         if(OrderMagicNumber() != MAGIC_NUMBER) continue;
-        if(OrderSymbol() != state.symbol) continue;
+        if(OrderSymbol() != gTrailingStops[index].symbol) continue;
         
         // Parse order comment to check if it belongs to our GID
         int orderGid;
@@ -1235,7 +1246,7 @@ void UpdateTrailingStopState(int gid, string channel)
         datetime closeTime = OrderCloseTime();
         double profit = OrderProfit();
         
-        if(closeTime > state.lastUpdate && profit > 0 && closeTime > 0) {
+        if(closeTime > gTrailingStops[index].lastUpdate && profit > 0 && closeTime > 0) {
             // Extract the TP level this order was targeting from comment
             // Comment format: GID|CHANNEL|TP1|ORDER_TP
             string comment = OrderComment();
@@ -1250,11 +1261,19 @@ void UpdateTrailingStopState(int gid, string channel)
                         string orderTPStr = StringSubstr(comment, thirdPipe + 1);
                         double orderTP = StrToDouble(orderTPStr);
                         
+                        if(debugMode) PrintLog(eaName + ": Analyzing closed order TP: " + DoubleToString(orderTP, MarketInfo(gTrailingStops[index].symbol, MODE_DIGITS)) + 
+                                              " Profit: " + DoubleToString(profit, 2));
+                        
                         // Find which TP level this corresponds to
-                        for(int tp = 0; tp < state.tpCount && tp < 20; tp++) {
-                            if(MathAbs(orderTP - state.tpLevels[tp]) <= 0.00001) {
+                        for(int tp = 0; tp < gTrailingStops[index].tpCount && tp < 20; tp++) {
+                            double diff = MathAbs(orderTP - gTrailingStops[index].tpLevels[tp]);
+                            if(debugMode) PrintLog(eaName + ": Comparing with TP[" + IntegerToString(tp+1) + "] = " + 
+                                                  DoubleToString(gTrailingStops[index].tpLevels[tp], MarketInfo(gTrailingStops[index].symbol, MODE_DIGITS)) + 
+                                                  " Diff: " + DoubleToString(diff, 8));
+                            if(diff <= 0.00001) {
                                 int detectedLevel = tp + 1; // TP levels are 1-indexed
                                 newTpHitLevel = MathMax(newTpHitLevel, detectedLevel);
+                                if(debugMode) PrintLog(eaName + ": MATCH FOUND! TP" + IntegerToString(detectedLevel) + " hit, new level: " + IntegerToString(newTpHitLevel));
                                 break;
                             }
                         }
@@ -1265,22 +1284,22 @@ void UpdateTrailingStopState(int gid, string channel)
     }
     
     // If new TP level was hit, update SL for remaining orders
-    if(newTpHitLevel > state.tpHitLevel) {
-        state.tpHitLevel = newTpHitLevel;
-        state.lastUpdate = TimeCurrent();
+    if(newTpHitLevel > gTrailingStops[index].tpHitLevel) {
+        gTrailingStops[index].tpHitLevel = newTpHitLevel;
+        gTrailingStops[index].lastUpdate = TimeCurrent();
         
-        double newSL = CalculateNewSL(state.tpHitLevel, state.originalEntry, state.originalSL, 
-                                     state.tpLevels, state.tpCount, state.symbol, state.isBuy);
+        double newSL = CalculateNewSL(gTrailingStops[index].tpHitLevel, gTrailingStops[index].originalEntry, gTrailingStops[index].originalSL, 
+                                     gTrailingStops[index].tpLevels, gTrailingStops[index].tpCount, gTrailingStops[index].symbol, gTrailingStops[index].isBuy);
         
         PrintLog(eaName + ": TP" + IntegerToString(newTpHitLevel) + " hit for GID:" + IntegerToString(gid) + 
-               " - Moving SL to:" + DoubleToString(newSL, MarketInfo(state.symbol, MODE_DIGITS)));
+               " - Moving SL to:" + DoubleToString(newSL, MarketInfo(gTrailingStops[index].symbol, MODE_DIGITS)));
         
         // Update SL for all remaining open orders of this GID
         for(int o = 0; o < OrdersTotal(); o++)
         {
             if(!OrderSelect(o, SELECT_BY_POS, MODE_TRADES)) continue;
             if(OrderMagicNumber() != MAGIC_NUMBER) continue;
-            if(OrderSymbol() != state.symbol) continue;
+            if(OrderSymbol() != gTrailingStops[index].symbol) continue;
             
             int orderGid;
             string orderChannel;
@@ -1298,8 +1317,8 @@ void UpdateTrailingStopState(int gid, string channel)
                 if(modified) {
                     PrintLog(eaName + ": Trailing SL updated for ticket:" + IntegerToString(OrderTicket()) +
                            " GID:" + IntegerToString(gid) + " from " + 
-                           DoubleToString(currentSL, MarketInfo(state.symbol, MODE_DIGITS)) + 
-                           " to " + DoubleToString(newSL, MarketInfo(state.symbol, MODE_DIGITS)));
+                           DoubleToString(currentSL, MarketInfo(gTrailingStops[index].symbol, MODE_DIGITS)) + 
+                           " to " + DoubleToString(newSL, MarketInfo(gTrailingStops[index].symbol, MODE_DIGITS)));
                 } else {
                     PrintLog(eaName + ": Failed to update trailing SL for ticket:" + IntegerToString(OrderTicket()) +
                            " Error:" + IntegerToString(GetLastError()));
@@ -1313,7 +1332,7 @@ void UpdateTrailingStopState(int gid, string channel)
 //| CalculateNewSL: Calculate new SL based on TP hit level         |
 //+------------------------------------------------------------------+
 double CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL, 
-                     double tpLevels[], int tpCount, string symbol, bool isBuy)
+                     double &tpLevels[], int tpCount, string symbol, bool isBuy)
 {
     if(tpHitLevel <= 0 || tpCount <= 0) return originalSL;
     
@@ -1340,7 +1359,7 @@ double CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL,
             break;
             
         default: // TP5+ hit -> move SL to previous TP level
-            if(tpHitLevel > 2 && tpHitLevel <= tpCount) {
+            if(tpHitLevel > 4 && tpHitLevel <= tpCount) {
                 int targetIndex = tpHitLevel - 2; // Previous TP level (0-indexed)
                 if(targetIndex >= 0 && targetIndex < tpCount && targetIndex < 20) {
                     newSL = tpLevels[targetIndex];
@@ -1349,18 +1368,29 @@ double CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL,
             break;
     }
     
-    // Validate SL direction for BUY/SELL
+    // Validate SL direction for BUY/SELL - ensure it moves in favorable direction only
     if(isBuy) {
-        // For BUY: new SL should be higher than original (more favorable)
-        if(newSL <= originalSL) {
+        // For BUY: new SL should be higher than current SL (more favorable)
+        // But allow equal SL in case of breakeven moves
+        if(newSL < originalSL) {
+            if(debugMode) PrintLog(eaName + ": BUY - New SL " + DoubleToString(newSL, digits) + 
+                                  " would be worse than original " + DoubleToString(originalSL, digits) + ", keeping original");
             return originalSL;
         }
     } else {
-        // For SELL: new SL should be lower than original (more favorable)
-        if(newSL >= originalSL) {
+        // For SELL: new SL should be lower than current SL (more favorable)  
+        // But allow equal SL in case of breakeven moves
+        if(newSL > originalSL) {
+            if(debugMode) PrintLog(eaName + ": SELL - New SL " + DoubleToString(newSL, digits) + 
+                                  " would be worse than original " + DoubleToString(originalSL, digits) + ", keeping original");
             return originalSL;
         }
     }
+    
+    if(debugMode) PrintLog(eaName + ": SL calculation successful - Level:" + IntegerToString(tpHitLevel) + 
+                          " Original:" + DoubleToString(originalSL, digits) + 
+                          " New:" + DoubleToString(newSL, digits) + 
+                          " Direction:" + (isBuy ? "BUY" : "SELL"));
     
     return NormalizeDouble(newSL, digits);
 }
