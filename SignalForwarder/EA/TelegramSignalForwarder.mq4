@@ -51,8 +51,7 @@ void    SendOrders(string signalType, string symbol,
                          double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
                          int groupId, string channelName, double &tpLevels[], int tpCount);
 void    ProcessExternalSLUpdates();
-bool    ParseOrderComment(string comment, int &groupId, double &signalSL);
-bool    ParseOrderCommentFull(string comment, int &groupId, double &signalSL, string &channelName);
+bool    ParseOrderCommentFull(string comment, int &groupId, string &channelName);
 bool    CheckStopLevel(string symbol, int orderType,
                        double sl, double ask, double bid);
 bool    CheckFreezeLevel(string symbol,
@@ -65,7 +64,7 @@ string  Trim(string s);
 string  ToUpperCase(string s);
 bool    IsValidDouble(string s);
 string  CleanChannelName(string channelName);
-string  FormatMT4Comment(int groupId, string channelName, double stopLoss, int digits);
+string  FormatMT4Comment(int groupId, string channelName, double tp1, double tp2, string symbol);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -124,9 +123,8 @@ int start()
                     if(OrderMagicNumber() == MAGIC_NUMBER)
                     {
                         int orderGid;
-                        double orderSL;
                         string orderChannel;
-                        if(ParseOrderCommentFull(OrderComment(), orderGid, orderSL, orderChannel))
+                        if(ParseOrderCommentFull(OrderComment(), orderGid, orderChannel))
                         {
                             if(orderGid == groupId && orderChannel == channelName)
                             {
@@ -408,9 +406,8 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, stri
 
         // Parse the order's comment to get channel information
         int orderGid;
-        double orderSL;
         string orderChannelName;
-        if(!ParseOrderCommentFull(OrderComment(), orderGid, orderSL, orderChannelName)) {
+        if(!ParseOrderCommentFull(OrderComment(), orderGid, orderChannelName)) {
             if (debugMode) PrintLog(eaName + ": Failed to parse order comment for ticket " + IntegerToString(OrderTicket()) + ": " + OrderComment());
             continue;
         }
@@ -536,7 +533,7 @@ void SendOrders(string signalType, string symbol,
             bid = MarketInfo(symbol, MODE_BID);
             price = (shouldBuy) ? ask : bid;
         }
-        string comment = FormatMT4Comment(groupId, channelName, rawSL, digits);
+        string comment = FormatMT4Comment(groupId, channelName, tp1, tpLevels[k], symbol);
     
         PrintLog(eaName + ": Order[" + IntegerToString(k) + "] parameters: " +
         "Symbol=" + symbol +
@@ -650,25 +647,17 @@ void ProcessExternalSLUpdates()
 }
 
 //+------------------------------------------------------------------+
-//| ParseOrderComment: extracts GID and SL from trade comment       |
+//| ParseOrderCommentFull: extracts GID and channel from comment    |
 //+------------------------------------------------------------------+
-bool ParseOrderComment(string comment, int &groupId, double &signalSL)
+bool ParseOrderCommentFull(string comment, int &groupId, string &channelName)
 {
-    string channelName = "";
-    return ParseOrderCommentFull(comment, groupId, signalSL, channelName);
-}
-
-//+------------------------------------------------------------------+
-//| ParseOrderCommentFull: extracts GID, SL and channel from comment|
-//+------------------------------------------------------------------+
-bool ParseOrderCommentFull(string comment, int &groupId, double &signalSL, string &channelName)
-{
-    // New format: 1234|ABCD|1.2345 (ABCD is 4-letter channel code, no GID: and SL: prefixes)
-    // Old format: GID:1234|SL:1.2345 (for backward compatibility)
+    // New format: 1234|ABCD|1.2550|1.2600 (GID|CHANNEL|TP1|ORDER_TP)
+    // Old format compatibility: GID:1234|SL:1.2345 or 1234|ABCD|1.2345
+    // We only care about GID and CHANNEL for identification purposes
     
     // Check if it's the old format with GID: prefix
     if(StringFind(comment, "GID:") == 0) {
-        // Old format handling
+        // Old format handling: GID:xxxx|...
         int p1 = StringFind(comment, "GID:");
         if(p1 != 0) {
             if(debugMode) PrintLog(eaName + ": Invalid old comment format, no GID found: " + comment);
@@ -689,39 +678,17 @@ bool ParseOrderCommentFull(string comment, int &groupId, double &signalSL, strin
             return(false);
         }
         
-        // Look for SL: either immediately after first pipe (old format) or after second pipe (old new format)
-        if(StringSubstr(comment, firstPipe, 4) == "|SL:") {
-            // Direct old format: GID:xxxx|SL:yyyy (SL immediately after first pipe)
-            channelName = "LEGC"; // Old format default
-            // Extract SL value directly from first pipe + 4
-            signalSL = StrToDouble(StringSubstr(comment, firstPipe + 4));
-        } else {
-            // Look for |SL: after first pipe (old new format: GID:xxxx|CHAN|SL:yyyy)
-            int slPos = StringFind(comment, "|SL:", firstPipe + 1);
-            if(slPos < 0) {
-                if(debugMode) PrintLog(eaName + ": No SL found in old comment: " + comment);
-                return(false);
-            }
-            
-            // Extract channel name (between first pipe and |SL:)
-            if(slPos > firstPipe + 1) {
-                channelName = StringSubstr(comment, firstPipe+1, slPos-firstPipe-1);
-            } else {
-                channelName = "UNKN";
-            }
-            
-            // Extract SL value
-            signalSL = StrToDouble(StringSubstr(comment, slPos + 4));
-        }
+        // For old format, use legacy channel name
+        channelName = "LEGC"; // Old format default
         
         if(debugMode) {
-            PrintLog(eaName + ": Parsed old comment - GID:" + IntegerToString(groupId) + " Channel:" + channelName + " SL:" + DoubleToString(signalSL, 5));
+            PrintLog(eaName + ": Parsed old comment (legacy) - GID:" + IntegerToString(groupId) + " Channel:" + channelName);
         }
         
         return(true);
     }
     
-    // New format: 1234|ABCD|1.2345
+    // New format: 1234|ABCD|... (we only need the first two parts)
     int firstPipe = StringFind(comment, "|");
     if(firstPipe < 0) {
         if(debugMode) PrintLog(eaName + ": Invalid new comment format, no first pipe found: " + comment);
@@ -748,11 +715,8 @@ bool ParseOrderCommentFull(string comment, int &groupId, double &signalSL, strin
         channelName = "UNKN"; // Fallback
     }
     
-    // Extract SL value (third part)
-    signalSL = StrToDouble(StringSubstr(comment, secondPipe + 1));
-    
     if(debugMode) {
-        PrintLog(eaName + ": Parsed new comment - GID:" + IntegerToString(groupId) + " Channel:" + channelName + " SL:" + DoubleToString(signalSL, 5));
+        PrintLog(eaName + ": Parsed comment - GID:" + IntegerToString(groupId) + " Channel:" + channelName);
     }
     
     return(true);
@@ -942,38 +906,72 @@ string CleanChannelName(string channelName)
 
 //+------------------------------------------------------------------+
 //| FormatMT4Comment: Format comment string within 31 char limit    |
-//| New format: 1234|ABCD|1.2345 (saves 7 chars vs old GID:xxx|SL:)|
+//| New format: 1234|ABCD|1.2550|1.2600 (GID|CHANNEL|TP1|ORDER_TP)|
 //+------------------------------------------------------------------+
-string FormatMT4Comment(int groupId, string channelName, double stopLoss, int digits)
+string FormatMT4Comment(int groupId, string channelName, double tp1, double tp2, string symbol)
 {
-    // Format: 1234|ABCD|1.2345 (saves 7 chars vs old GID:xxx|SL: format)
     string cleanChannel = CleanChannelName(channelName);
     
-    // Format SL with reduced precision to save space
-    string slStr = DoubleToString(stopLoss, MathMin(digits, 4));
+    // Determine decimal precision based on symbol type
+    int precision = 4; // Default for Forex
+    string upperSymbol = ToUpperCase(symbol);
     
-    // Remove trailing zeros from SL string to save space
-    while(StringLen(slStr) > 1 && StringGetCharacter(slStr, StringLen(slStr)-1) == '0')
-    {
-        slStr = StringSubstr(slStr, 0, StringLen(slStr)-1);
-    }
-    if(StringGetCharacter(slStr, StringLen(slStr)-1) == '.')
-    {
-        slStr = StringSubstr(slStr, 0, StringLen(slStr)-1);
+    if(StringFind(upperSymbol, "XAUUSD") >= 0 || StringFind(upperSymbol, "GOLD") >= 0) {
+        precision = 1; // Gold: 3366.9 (1 decimal, total 6 chars)
+    } else if(StringFind(upperSymbol, "BTCUSD") >= 0 || StringFind(upperSymbol, "BTC") >= 0) {
+        precision = 0; // Bitcoin: 118710 (no decimals, total 6 chars)
+    } else {
+        precision = 4; // Forex: 1.2550 (4 decimals, total 6 chars)
     }
     
-    // Build the comment: GID|CHANNEL|SL
-    string comment = IntegerToString(groupId) + "|" + cleanChannel + "|" + slStr;
+    // Format TP values with appropriate precision
+    string tp1Str = DoubleToString(tp1, precision);
+    string tp2Str = DoubleToString(tp2, precision);
+    
+    // Remove trailing zeros if needed (except for the required format)
+    if(precision > 0) {
+        // For decimal numbers, ensure we maintain the required format length
+        while(StringLen(tp1Str) > 1 && StringGetCharacter(tp1Str, StringLen(tp1Str)-1) == '0' && StringFind(tp1Str, ".") >= 0)
+        {
+            tp1Str = StringSubstr(tp1Str, 0, StringLen(tp1Str)-1);
+        }
+        if(StringLen(tp1Str) > 1 && StringGetCharacter(tp1Str, StringLen(tp1Str)-1) == '.')
+        {
+            tp1Str = StringSubstr(tp1Str, 0, StringLen(tp1Str)-1);
+        }
+        
+        while(StringLen(tp2Str) > 1 && StringGetCharacter(tp2Str, StringLen(tp2Str)-1) == '0' && StringFind(tp2Str, ".") >= 0)
+        {
+            tp2Str = StringSubstr(tp2Str, 0, StringLen(tp2Str)-1);
+        }
+        if(StringLen(tp2Str) > 1 && StringGetCharacter(tp2Str, StringLen(tp2Str)-1) == '.')
+        {
+            tp2Str = StringSubstr(tp2Str, 0, StringLen(tp2Str)-1);
+        }
+    }
+    
+    // Build the comment: GID|CHANNEL|TP1|TP2
+    string comment = IntegerToString(groupId) + "|" + cleanChannel + "|" + tp1Str + "|" + tp2Str;
     
     // Ensure comment fits within MT4's 31-character limit
     if(StringLen(comment) > 31)
     {
-        // If too long, truncate SL precision
-        int maxSLLen = 31 - StringLen(IntegerToString(groupId)) - StringLen(cleanChannel) - 2; // -2 for pipes
-        if(maxSLLen > 0)
-        {
-            slStr = StringSubstr(slStr, 0, maxSLLen);
-            comment = IntegerToString(groupId) + "|" + cleanChannel + "|" + slStr;
+        // If too long, truncate precision further
+        if(precision > 0) {
+            precision = MathMax(0, precision - 1);
+            tp1Str = DoubleToString(tp1, precision);
+            tp2Str = DoubleToString(tp2, precision);
+            comment = IntegerToString(groupId) + "|" + cleanChannel + "|" + tp1Str + "|" + tp2Str;
+        }
+        
+        // If still too long, truncate the TP strings
+        if(StringLen(comment) > 31) {
+            int maxTPLen = (31 - StringLen(IntegerToString(groupId)) - StringLen(cleanChannel) - 3) / 2; // -3 for pipes
+            if(maxTPLen > 0) {
+                tp1Str = StringSubstr(tp1Str, 0, maxTPLen);
+                tp2Str = StringSubstr(tp2Str, 0, maxTPLen);
+                comment = IntegerToString(groupId) + "|" + cleanChannel + "|" + tp1Str + "|" + tp2Str;
+            }
         }
     }
     
