@@ -51,6 +51,7 @@ void    SendOrders(string signalType, string symbol,
                          double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
                          int groupId, string channelName, double &tpLevels[], int tpCount);
 void    ProcessExternalSLUpdates();
+void    CheckAndCleanExpiredLimitOrders();
 bool    ParseOrderCommentFull(string comment, int &groupId, string &channelName);
 bool    CheckStopLevel(string symbol, int orderType,
                        double sl, double ask, double bid);
@@ -107,6 +108,8 @@ int start()
 
     if(IsTradeAllowed() && IsConnected() && !IsStopped())
     {
+        // Check and clean expired limit orders first
+        CheckAndCleanExpiredLimitOrders();
         // Process new signal
         if(ReadSignalFile(signalType, symbol, entryPrice,
                           stopLoss, tp1, tp2, tp3, groupId, channelName, tpLevels, tpCount))
@@ -976,6 +979,102 @@ string FormatMT4Comment(int groupId, string channelName, double tp1, double tp2,
     }
     
     return comment;
+}
+
+//+------------------------------------------------------------------+
+//| CheckAndCleanExpiredLimitOrders: Delete limit orders if price passed TP1 |
+//+------------------------------------------------------------------+
+void CheckAndCleanExpiredLimitOrders()
+{
+    for(int i = OrdersTotal() - 1; i >= 0; i--) // Reverse loop for safe deletion
+    {
+        if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+            if(debugMode) PrintLog(eaName + ": Failed to select order at index " + IntegerToString(i) + " for limit check");
+            continue;
+        }
+        
+        // Only check our limit orders
+        if(OrderMagicNumber() != MAGIC_NUMBER) continue;
+        if(OrderType() != OP_BUYLIMIT && OrderType() != OP_SELLLIMIT) continue;
+        
+        // Parse order comment to extract TP1
+        string comment = OrderComment();
+        int groupId;
+        string channelName;
+        if(!ParseOrderCommentFull(comment, groupId, channelName)) {
+            if(debugMode) PrintLog(eaName + ": Failed to parse comment for limit order cleanup: " + comment);
+            continue;
+        }
+        
+        // Extract TP1 from comment (new format: GID|CHANNEL|TP1|ORDER_TP)
+        double tp1 = 0;
+        int firstPipe = StringFind(comment, "|");
+        if(firstPipe >= 0) {
+            int secondPipe = StringFind(comment, "|", firstPipe + 1);
+            if(secondPipe >= 0) {
+                int thirdPipe = StringFind(comment, "|", secondPipe + 1);
+                if(thirdPipe >= 0) {
+                    // Extract TP1 (third part of comment)
+                    string tp1Str = StringSubstr(comment, secondPipe + 1, thirdPipe - secondPipe - 1);
+                    if(IsValidDouble(tp1Str)) {
+                        tp1 = StrToDouble(tp1Str);
+                    }
+                }
+            }
+        }
+        
+        // If we couldn't extract TP1, skip this order
+        if(tp1 <= 0) {
+            if(debugMode) PrintLog(eaName + ": Could not extract TP1 from comment: " + comment);
+            continue;
+        }
+        
+        // Get current market prices
+        RefreshRates();
+        string symbol = OrderSymbol();
+        double ask = MarketInfo(symbol, MODE_ASK);
+        double bid = MarketInfo(symbol, MODE_BID);
+        
+        if(ask <= 0 || bid <= 0) {
+            if(debugMode) PrintLog(eaName + ": Invalid market prices for " + symbol + " - ask: " + DoubleToString(ask, 5) + " bid: " + DoubleToString(bid, 5));
+            continue;
+        }
+        
+        bool shouldDelete = false;
+        string reason = "";
+        
+        if(OrderType() == OP_BUYLIMIT) {
+            // For BUY LIMIT: if current ASK price is higher than TP1, delete the order
+            // (price moved up beyond TP1, no longer want to enter)
+            if(ask > tp1) {
+                shouldDelete = true;
+                reason = "BUY LIMIT: ask (" + DoubleToString(ask, MarketInfo(symbol, MODE_DIGITS)) + 
+                        ") > TP1 (" + DoubleToString(tp1, MarketInfo(symbol, MODE_DIGITS)) + ")";
+            }
+        }
+        else if(OrderType() == OP_SELLLIMIT) {
+            // For SELL LIMIT: if current BID price is lower than TP1, delete the order
+            // (price moved down beyond TP1, no longer want to enter)
+            if(bid < tp1) {
+                shouldDelete = true;
+                reason = "SELL LIMIT: bid (" + DoubleToString(bid, MarketInfo(symbol, MODE_DIGITS)) + 
+                        ") < TP1 (" + DoubleToString(tp1, MarketInfo(symbol, MODE_DIGITS)) + ")";
+            }
+        }
+        
+        if(shouldDelete) {
+            int ticket = OrderTicket();
+            bool deleted = OrderDelete(ticket);
+            if(deleted) {
+                PrintLog(eaName + ": Deleted expired limit order #" + IntegerToString(ticket) + 
+                       " GID:" + IntegerToString(groupId) + " Channel:" + channelName + 
+                       " Reason: " + reason);
+            } else {
+                PrintLog(eaName + ": Failed to delete expired limit order #" + IntegerToString(ticket) + 
+                       " Error: " + IntegerToString(GetLastError()));
+            }
+        }
+    }
 }
 
 //+------------------------------------------------------------------+
