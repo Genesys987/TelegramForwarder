@@ -572,10 +572,7 @@ void SendOrders(string signalType, string symbol,
                                 
         if(ticket < 0) {
             PrintLog(eaName + ": Error creating order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket) + " error=" + IntegerToString(GetLastError()));
-        }
-        
-        if(ticket < 0 && GetLastError() == ERR_INVALID_STOPS)
-        {
+            Sleep(1000);
             RefreshRates();
             PrintLog(eaName + ": Retrying with fallback SL=" + DoubleToString(fallbackSL, digits));
             ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
