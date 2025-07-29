@@ -91,6 +91,9 @@ string  ToUpperCase(string s);
 bool    IsValidDouble(string s);
 string  CleanChannelName(string channelName);
 string  FormatMT4Comment(int groupId, string channelName, double tp1, double tp2, string symbol);
+double  GetValidLotSize(string symbol, double requestedLotSize);
+double  CalculateValidSL(string symbol, int orderType, double price, double requestedSL);
+string  ErrorDescription(int errorCode);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -557,8 +560,9 @@ void SendOrders(string signalType, string symbol,
 
     int slippage = 20;
     color cols[6] = { clrBlue, clrGreen, clrRed, clrYellow, clrMagenta, clrCyan };
-    double lotSize = (symbol == "BTCUSD") ? fixedLotSizeBitcoin :
-                        (symbol == "XAUUSD") ? fixedLotSizeGold : fixedLotSize;
+    double lotSize = (StringFind(ToUpperCase(symbol), "BTC") >= 0) ? fixedLotSizeBitcoin :
+                        (StringFind(ToUpperCase(symbol), "XAU") >= 0 || StringFind(ToUpperCase(symbol), "GOLD") >= 0) ? fixedLotSizeGold : 
+                        fixedLotSize;
 
     // Create orders for each TP level
     for(int k=0; k<tpCount; k++)
@@ -588,19 +592,126 @@ void SendOrders(string signalType, string symbol,
         if((orderType == OP_BUYLIMIT || orderType == OP_SELLLIMIT) && limitOrderExpirationSec > 0) {
             expiration = TimeCurrent() + limitOrderExpirationSec;
         }
+        // FIRST ATTEMPT: Try with original parameters
         int ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
-                               rawSL, tpLevels[k], comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
-                                
+                       rawSL, tpLevels[k], comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
+                        
         if(ticket < 0) {
-            PrintLog(eaName + ": Error creating order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket) + " error=" + IntegerToString(GetLastError()));
-        }
-        
-        if(ticket < 0 && GetLastError() == ERR_INVALID_STOPS)
-        {
+            int error = GetLastError();
+            PrintLog(eaName + ": Error creating order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket) + 
+                     " error=" + IntegerToString(error) + " (" + ErrorDescription(error) + ")");
+                     
+            // SECOND ATTEMPT: Simple retry first (maybe it was just a temporary glitch)
+            PrintLog(eaName + ": Attempting simple retry for error " + IntegerToString(error));
+            Sleep(100); // Short delay
             RefreshRates();
-            PrintLog(eaName + ": Retrying with fallback SL=" + DoubleToString(fallbackSL, digits));
+            
+            // Update price if it's a market order
+            if(!shouldUseLimitOrders) {
+                ask = MarketInfo(symbol, MODE_ASK);
+                bid = MarketInfo(symbol, MODE_BID);
+                price = (shouldBuy) ? ask : bid;
+            }
+            
             ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
-                               fallbackSL, tpLevels[k], comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
+                               rawSL, tpLevels[k], comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
+            
+            if(ticket >= 0) {
+                PrintLog(eaName + ": Simple retry successful - ticket=" + IntegerToString(ticket));
+            } else {
+                int secondError = GetLastError();
+                PrintLog(eaName + ": Simple retry failed - error=" + IntegerToString(secondError) + " (" + ErrorDescription(secondError) + ")");
+                
+                // THIRD ATTEMPT: Handle specific errors with corrections
+                if(secondError == 131) { // ERR_INVALID_TRADE_VOLUME
+                    PrintLog(eaName + ": ERR_INVALID_TRADE_VOLUME - attempting lot size correction for " + symbol);
+                    
+                    // Get corrected lot size
+                    double correctedLotSize = GetValidLotSize(symbol, lotSize);
+                    
+                    // Additional debugging info
+                    PrintLog(eaName + ": Volume correction details:");
+                    PrintLog("  Original lot: " + DoubleToString(lotSize, 3));
+                    PrintLog("  Corrected lot: " + DoubleToString(correctedLotSize, 3));
+                    PrintLog("  Min lot: " + DoubleToString(MarketInfo(symbol, MODE_MINLOT), 3));
+                    PrintLog("  Max lot: " + DoubleToString(MarketInfo(symbol, MODE_MAXLOT), 3));
+                    PrintLog("  Lot step: " + DoubleToString(MarketInfo(symbol, MODE_LOTSTEP), 3));
+                    PrintLog("  Free margin: " + DoubleToString(AccountFreeMargin(), 2));
+                    PrintLog("  Margin required: " + DoubleToString(MarketInfo(symbol, MODE_MARGINREQUIRED) * correctedLotSize, 2));
+                    
+                    // Retry with corrected lot size
+                    ticket = OrderSend(symbol, orderType, correctedLotSize, price, slippage,
+                                       rawSL, tpLevels[k], comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
+                    
+                    if(ticket < 0) {
+                        int thirdError = GetLastError();
+                        PrintLog(eaName + ": Volume correction failed - error=" + IntegerToString(thirdError) + " (" + ErrorDescription(thirdError) + ")");
+                    } else {
+                        PrintLog(eaName + ": Volume correction successful - ticket=" + IntegerToString(ticket));
+                    }
+                }
+                else if(secondError == 130) { // ERR_INVALID_STOPS
+                    PrintLog(eaName + ": ERR_INVALID_STOPS - attempting SL/TP correction for " + symbol);
+                    
+                    // Calculate valid SL and TP
+                    double correctedSL = CalculateValidSL(symbol, orderType, price, rawSL);
+                    double correctedTP = tpLevels[k]; // Keep TP as is for now
+                    
+                    // Additional debugging info
+                    PrintLog(eaName + ": Stops correction details:");
+                    PrintLog("  Original SL: " + DoubleToString(rawSL, digits));
+                    PrintLog("  Corrected SL: " + DoubleToString(correctedSL, digits));
+                    PrintLog("  TP: " + DoubleToString(correctedTP, digits));
+                    PrintLog("  Price: " + DoubleToString(price, digits));
+                    PrintLog("  Stop level: " + IntegerToString(MarketInfo(symbol, MODE_STOPLEVEL)));
+                    PrintLog("  Point: " + DoubleToString(MarketInfo(symbol, MODE_POINT), digits+1));
+                    
+                    // Retry with corrected SL
+                    ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
+                                       correctedSL, correctedTP, comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
+                    
+                    if(ticket < 0) {
+                        int thirdError = GetLastError();
+                        PrintLog(eaName + ": Stops correction failed - error=" + IntegerToString(thirdError) + " (" + ErrorDescription(thirdError) + ")");
+                        
+                        // FOURTH ATTEMPT: Try with fallback SL (already calculated)
+                        if(thirdError == 130) {
+                            PrintLog(eaName + ": Attempting fallback SL=" + DoubleToString(fallbackSL, digits));
+                            ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
+                                               fallbackSL, correctedTP, comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
+                            
+                            if(ticket >= 0) {
+                                PrintLog(eaName + ": Fallback SL successful - ticket=" + IntegerToString(ticket));
+                            } else {
+                                PrintLog(eaName + ": Fallback SL also failed - error=" + IntegerToString(GetLastError()));
+                            }
+                        }
+                    } else {
+                        PrintLog(eaName + ": Stops correction successful - ticket=" + IntegerToString(ticket));
+                    }
+                }
+                else if(secondError == 136) { // ERR_OFF_QUOTES
+                    PrintLog(eaName + ": ERR_OFF_QUOTES - refreshing rates and retrying with higher slippage");
+                    RefreshRates();
+                    Sleep(200); // Longer delay for off quotes
+                    
+                    // Update price for retry
+                    if(!shouldUseLimitOrders) {
+                        ask = MarketInfo(symbol, MODE_ASK);
+                        bid = MarketInfo(symbol, MODE_BID);
+                        price = (shouldBuy) ? ask : bid;
+                    }
+                    
+                    ticket = OrderSend(symbol, orderType, lotSize, price, slippage * 3, // Higher slippage
+                                       rawSL, tpLevels[k], comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
+                    
+                    if(ticket >= 0) {
+                        PrintLog(eaName + ": Off quotes retry successful - ticket=" + IntegerToString(ticket));
+                    } else {
+                        PrintLog(eaName + ": Off quotes retry failed - error=" + IntegerToString(GetLastError()));
+                    }
+                }
+            }
         }
         
         PrintLog(eaName + ": Order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket));
@@ -1429,5 +1540,90 @@ void PrintLog(string msg)
     }
     // Also print to Experts log for convenience
     Print(msg);
+}
+
+//+------------------------------------------------------------------+
+//| GetValidLotSize: Validate and adjust lot size for symbol        |
+//+------------------------------------------------------------------+
+double GetValidLotSize(string symbol, double requestedLotSize)
+{
+    double minLot = MarketInfo(symbol, MODE_MINLOT);
+    double maxLot = MarketInfo(symbol, MODE_MAXLOT);
+    double lotStep = MarketInfo(symbol, MODE_LOTSTEP);
+    
+    if(debugMode)
+        PrintLog(eaName + ": " + symbol + " lot rules: Min=" + DoubleToString(minLot, 3) + 
+                 " Max=" + DoubleToString(maxLot, 3) + " Step=" + DoubleToString(lotStep, 3));
+    
+    // Ensure lot size is within bounds
+    if(requestedLotSize < minLot) {
+        PrintLog(eaName + ": Adjusting lot size from " + DoubleToString(requestedLotSize, 3) + 
+                 " to minimum " + DoubleToString(minLot, 3) + " for " + symbol);
+        requestedLotSize = minLot;
+    }
+    
+    if(requestedLotSize > maxLot) {
+        PrintLog(eaName + ": Adjusting lot size from " + DoubleToString(requestedLotSize, 3) + 
+                 " to maximum " + DoubleToString(maxLot, 3) + " for " + symbol);
+        requestedLotSize = maxLot;
+    }
+    
+    // Normalize to lot step
+    if(lotStep > 0) {
+        double normalizedLot = MathRound(requestedLotSize / lotStep) * lotStep;
+        if(MathAbs(normalizedLot - requestedLotSize) > 0.00001) {
+            PrintLog(eaName + ": Normalizing lot size from " + DoubleToString(requestedLotSize, 3) + 
+                     " to " + DoubleToString(normalizedLot, 3) + " for " + symbol);
+            requestedLotSize = normalizedLot;
+        }
+    }
+    
+    return NormalizeDouble(requestedLotSize, 3);
+}
+
+//+------------------------------------------------------------------+
+//| CalculateValidSL: Calculate valid SL respecting broker limits   |
+//+------------------------------------------------------------------+
+double CalculateValidSL(string symbol, int orderType, double price, double requestedSL)
+{
+    int digits = MarketInfo(symbol, MODE_DIGITS);
+    double point = MarketInfo(symbol, MODE_POINT);
+    int stopLevel = MarketInfo(symbol, MODE_STOPLEVEL);
+    double minDist = MathMax(stopLevel * point, point * 2); // Minimum 2 points
+    
+    double validSL = requestedSL;
+    
+    if(orderType == OP_BUY || orderType == OP_BUYLIMIT) {
+        // For BUY orders: SL must be below price by at least minDist
+        double maxAllowedSL = price - minDist;
+        if(validSL > maxAllowedSL) {
+            validSL = maxAllowedSL;
+            if(debugMode) PrintLog(eaName + ": BUY SL adjusted from " + DoubleToString(requestedSL, digits) + 
+                                  " to " + DoubleToString(validSL, digits) + " for " + symbol);
+        }
+    } else if(orderType == OP_SELL || orderType == OP_SELLLIMIT) {
+        // For SELL orders: SL must be above price by at least minDist
+        double minAllowedSL = price + minDist;
+        if(validSL < minAllowedSL) {
+            validSL = minAllowedSL;
+            if(debugMode) PrintLog(eaName + ": SELL SL adjusted from " + DoubleToString(requestedSL, digits) + 
+                                  " to " + DoubleToString(validSL, digits) + " for " + symbol);
+        }
+    }
+    
+    return NormalizeDouble(validSL, digits);
+}
+
+//+------------------------------------------------------------------+
+//| ErrorDescription: Return human readable error description       |
+//+------------------------------------------------------------------+
+string ErrorDescription(int errorCode)
+{
+    switch(errorCode) {
+        case 130: return "Invalid stops";
+        case 131: return "Invalid trade volume";
+        case 136: return "Off quotes";
+        default: return "Error " + IntegerToString(errorCode);
+    }
 }
 
