@@ -12,11 +12,9 @@ extern bool   debugMode                = true;  // Enable detailed logging
 extern int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC in minutes (e.g., UTC+2 = 120)
 extern int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
 extern string symbolPostfix           = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
-extern bool   useLimitOrders           = true;  // Use limit orders at middle between entry and TP1
 extern double fixedLotSize              = 0.02;  // Default lot size for FX orders
 extern double fixedLotSizeBitcoin       = 0.02;  // Default lot size for Bitcoin orders
 extern double fixedLotSizeGold          = 0.02;  // Default lot size for Gold orders
-extern double limitOrderExpirationSec = -1;   // Limit order expiration time in seconds (-1 to disable)
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -68,7 +66,6 @@ void    SendOrders(string signalType, string symbol,
                          double entryPrice, double stopLoss,
                          int groupId, string channelName, double &tpLevels[], int tpCount);
 void    ProcessExternalSLUpdates();
-void    CheckAndCleanExpiredLimitOrders();
 void    ProcessDynamicTrailingStop();
 void    CleanupInactiveTrailingStops();
 void    InitializeTrailingStop(int gid, string channel, string symbol, bool isBuy, 
@@ -136,9 +133,6 @@ int start()
 
     if(IsTradeAllowed() && IsConnected() && !IsStopped())
     {
-        // Check and clean expired limit orders first
-        CheckAndCleanExpiredLimitOrders();
-        
         // Process dynamic trailing stop for existing positions
         ProcessDynamicTrailingStop();
         
@@ -474,7 +468,7 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, stri
 }
 
 //+------------------------------------------------------------------+
-//| SendOrders: Place three market or limit orders with SL & TP        |
+//| SendOrders: Place three market orders with SL & TP        |
 //+------------------------------------------------------------------+
 void SendOrders(string signalType, string symbol,
                       double entryPrice, double stopLoss,
@@ -506,21 +500,18 @@ void SendOrders(string signalType, string symbol,
     double price;
     bool shouldBuy = signalType == "BUY";
     double tp1 = tpLevels[0];
-    double midPrice = (entryPrice + tp1) / 2.0; // Midpoint for limit order logic
-    // mid price is halfway between entry and TP1
-    // between entry and mid price, market orders are used
-    // between mid price and TP1, limit orders are used for the mid price
-    bool shouldUseLimitOrders = useLimitOrders && (shouldBuy ? ask > midPrice : bid < midPrice);
 
-    int orderType;
-    if(shouldUseLimitOrders) {
-        price = midPrice;
-        orderType = (shouldBuy) ? OP_BUYLIMIT : OP_SELLLIMIT;
-    } else {
-        price = shouldBuy ? ask : bid;
-        orderType = (shouldBuy) ? OP_BUY : OP_SELL;
-    }
+    double price = shouldBuy ? ask : bid;
+    int orderType = (shouldBuy) ? OP_BUY : OP_SELL;
     price = NormalizeDouble(price, digits);
+    
+    if(shouldBuy && price > tp1 || !shouldBuy && price < tp1) {
+      PrintLog(eaName + ": Entry price " + DoubleToString(price, digits) +
+            " is beyond TP1 " + DoubleToString(tp1, digits) + 
+            " for GID=" + IntegerToString(groupId) + 
+            ", skipping order creation");
+      return;
+    }
 
     // Always use the original stop loss from signal
     double rawSL = NormalizeDouble(stopLoss, digits);
@@ -558,15 +549,12 @@ void SendOrders(string signalType, string symbol,
     // Create orders for each TP level
     for(int k=0; k<tpCount; k++)
     {
-        if(!shouldUseLimitOrders) {
-            // we intend to place all limit orders at the same spot
-            // however, for market orders we want to get the correct current price
-            // to avoid off-quotes errors
-            RefreshRates();
-            ask = MarketInfo(symbol, MODE_ASK);
-            bid = MarketInfo(symbol, MODE_BID);
-            price = (shouldBuy) ? ask : bid;
-        }
+         // for market orders we want to get the correct current price
+         // to avoid off-quotes errors
+         RefreshRates();
+         ask = MarketInfo(symbol, MODE_ASK);
+         bid = MarketInfo(symbol, MODE_BID);
+         price = (shouldBuy) ? ask : bid;
         string comment = FormatMT4Comment(groupId, channelName, tp1, tpLevels[k], symbol);
     
         PrintLog(eaName + ": Order[" + IntegerToString(k) + "] parameters: " +
@@ -579,12 +567,8 @@ void SendOrders(string signalType, string symbol,
         " Comment=" + comment);
 
         int colorIndex = k % 6; // Cycle through available colors
-        datetime expiration = 0;
-        if((orderType == OP_BUYLIMIT || orderType == OP_SELLLIMIT) && limitOrderExpirationSec > 0) {
-            expiration = TimeCurrent() + limitOrderExpirationSec;
-        }
         int ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
-                               rawSL, tpLevels[k], comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
+                               rawSL, tpLevels[k], comment, MAGIC_NUMBER, 0 /* expiration */, cols[colorIndex]);
                                 
         if(ticket < 0) {
             PrintLog(eaName + ": Error creating order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket) + " error=" + IntegerToString(GetLastError()));
@@ -595,7 +579,7 @@ void SendOrders(string signalType, string symbol,
             RefreshRates();
             PrintLog(eaName + ": Retrying with fallback SL=" + DoubleToString(fallbackSL, digits));
             ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
-                               fallbackSL, tpLevels[k], comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
+                               fallbackSL, tpLevels[k], comment, MAGIC_NUMBER, 0 /* expiration */, cols[colorIndex]);
         }
         
         PrintLog(eaName + ": Order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket));
@@ -767,10 +751,10 @@ bool CheckStopLevel(string symbol, int orderType,
     double point= MarketInfo(symbol, MODE_POINT);
     double minStopLevelDist = MarketInfo(symbol, MODE_STOPLEVEL) * point + point;
     bool valid;
-    if(orderType == OP_BUY || orderType == OP_BUYLIMIT)
+    if(orderType == OP_BUY)
          // For buy orders, SL must be below the bid price
          valid = (sl < bid && bid - sl >= minStopLevelDist);
-    else if(orderType == OP_SELL || orderType == OP_SELLLIMIT)
+    else if(orderType == OP_SELL)
          // For sell orders, SL must be above the ask price
          valid = (sl > ask && sl - ask >= minStopLevelDist);
     else valid = false;
@@ -1010,102 +994,6 @@ string FormatMT4Comment(int groupId, string channelName, double tp1, double tp2,
     }
     
     return comment;
-}
-
-//+------------------------------------------------------------------+
-//| CheckAndCleanExpiredLimitOrders: Delete limit orders if price passed TP1 |
-//+------------------------------------------------------------------+
-void CheckAndCleanExpiredLimitOrders()
-{
-    for(int i = OrdersTotal() - 1; i >= 0; i--) // Reverse loop for safe deletion
-    {
-        if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
-            if(debugMode) PrintLog(eaName + ": Failed to select order at index " + IntegerToString(i) + " for limit check");
-            continue;
-        }
-        
-        // Only check our limit orders
-        if(OrderMagicNumber() != MAGIC_NUMBER) continue;
-        if(OrderType() != OP_BUYLIMIT && OrderType() != OP_SELLLIMIT) continue;
-        
-        // Parse order comment to extract TP1
-        string comment = OrderComment();
-        int groupId;
-        string channelName;
-        if(!ParseOrderCommentFull(comment, groupId, channelName)) {
-            if(debugMode) PrintLog(eaName + ": Failed to parse comment for limit order cleanup: " + comment);
-            continue;
-        }
-        
-        // Extract TP1 from comment (new format: GID|CHANNEL|TP1|ORDER_TP)
-        double tp1 = 0;
-        int firstPipe = StringFind(comment, "|");
-        if(firstPipe >= 0) {
-            int secondPipe = StringFind(comment, "|", firstPipe + 1);
-            if(secondPipe >= 0) {
-                int thirdPipe = StringFind(comment, "|", secondPipe + 1);
-                if(thirdPipe >= 0) {
-                    // Extract TP1 (third part of comment)
-                    string tp1Str = StringSubstr(comment, secondPipe + 1, thirdPipe - secondPipe - 1);
-                    if(IsValidDouble(tp1Str)) {
-                        tp1 = StrToDouble(tp1Str);
-                    }
-                }
-            }
-        }
-        
-        // If we couldn't extract TP1, skip this order
-        if(tp1 <= 0) {
-            if(debugMode) PrintLog(eaName + ": Could not extract TP1 from comment: " + comment);
-            continue;
-        }
-        
-        // Get current market prices
-        RefreshRates();
-        string symbol = OrderSymbol();
-        double ask = MarketInfo(symbol, MODE_ASK);
-        double bid = MarketInfo(symbol, MODE_BID);
-        
-        if(ask <= 0 || bid <= 0) {
-            if(debugMode) PrintLog(eaName + ": Invalid market prices for " + symbol + " - ask: " + DoubleToString(ask, 5) + " bid: " + DoubleToString(bid, 5));
-            continue;
-        }
-        
-        bool shouldDelete = false;
-        string reason = "";
-        
-        if(OrderType() == OP_BUYLIMIT) {
-            // For BUY LIMIT: if current ASK price is higher than TP1, delete the order
-            // (price moved up beyond TP1, no longer want to enter)
-            if(ask > tp1) {
-                shouldDelete = true;
-                reason = "BUY LIMIT: ask (" + DoubleToString(ask, MarketInfo(symbol, MODE_DIGITS)) + 
-                        ") > TP1 (" + DoubleToString(tp1, MarketInfo(symbol, MODE_DIGITS)) + ")";
-            }
-        }
-        else if(OrderType() == OP_SELLLIMIT) {
-            // For SELL LIMIT: if current BID price is lower than TP1, delete the order
-            // (price moved down beyond TP1, no longer want to enter)
-            if(bid < tp1) {
-                shouldDelete = true;
-                reason = "SELL LIMIT: bid (" + DoubleToString(bid, MarketInfo(symbol, MODE_DIGITS)) + 
-                        ") < TP1 (" + DoubleToString(tp1, MarketInfo(symbol, MODE_DIGITS)) + ")";
-            }
-        }
-        
-        if(shouldDelete) {
-            int ticket = OrderTicket();
-            bool deleted = OrderDelete(ticket);
-            if(deleted) {
-                PrintLog(eaName + ": Deleted expired limit order #" + IntegerToString(ticket) + 
-                       " GID:" + IntegerToString(groupId) + " Channel:" + channelName + 
-                       " Reason: " + reason);
-            } else {
-                PrintLog(eaName + ": Failed to delete expired limit order #" + IntegerToString(ticket) + 
-                       " Error: " + IntegerToString(GetLastError()));
-            }
-        }
-    }
 }
 
 //+------------------------------------------------------------------+
