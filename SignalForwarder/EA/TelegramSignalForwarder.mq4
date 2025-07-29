@@ -65,7 +65,7 @@ bool    ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
                        int &groupId, string &channelName, double &tpLevels[], int &tpCount);
 void    UpdateExistingOrdersSL(string symbol, string signalType, double newSL, string channelName);
 void    SendOrders(string signalType, string symbol,
-                         double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
+                         double entryPrice, double stopLoss,
                          int groupId, string channelName, double &tpLevels[], int tpCount);
 void    ProcessExternalSLUpdates();
 void    CheckAndCleanExpiredLimitOrders();
@@ -130,7 +130,7 @@ int deinit()
 int start()
 {
     string signalType, symbol, channelName;
-    double entryPrice, stopLoss, tp1, tp2, tp3;
+    double entryPrice, stopLoss;
     int    groupId, tpCount;
     double tpLevels[20]; // Support up to 20 TP levels
 
@@ -144,7 +144,7 @@ int start()
         
         // Process new signal
         if(ReadSignalFile(signalType, symbol, entryPrice,
-                          stopLoss, tp1, tp2, tp3, groupId, channelName, tpLevels, tpCount))
+                          stopLoss, groupId, channelName, tpLevels, tpCount))
         {
             if(debugMode)
                 PrintLog(eaName + ": Processing NEW signal from channel '" + channelName + "' - GID=" + IntegerToString(groupId) + " with " + IntegerToString(tpCount) + " TP levels");
@@ -183,7 +183,7 @@ int start()
                     PrintLog(eaName + ": No existing orders found, creating new orders");
                 UpdateExistingOrdersSL(symbol, signalType, stopLoss, channelName);
                 SendOrders(signalType, symbol,
-                                 entryPrice, stopLoss, tp1, tp2, tp3,
+                                 entryPrice, stopLoss,
                                  groupId, channelName, tpLevels, tpCount);
                 
                 // Initialize trailing stop state for this new GID
@@ -203,7 +203,6 @@ int start()
 //+------------------------------------------------------------------+
 bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
                     double &stopLoss,
-                    double &tp1, double &tp2, double &tp3,
                     int &groupId, string &channelName, double &tpLevels[], int &tpCount)
 {
   string line = "";
@@ -249,7 +248,7 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
         return(false);
     }
 
-    // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3|SL|GID:<id>|CHANNEL_NAME
+    // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3,...|SL|GID:<id>|CHANNEL_NAME
     string parts[];
     if(StringSplit(line, '|', parts) < 8) {
         PrintLog(eaName + ": Invalid signal format, expected 8 parts but got " + IntegerToString(ArraySize(parts)));
@@ -321,12 +320,7 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
         }
         tpLevels[i] = NormalizeDouble(StrToDouble(tpsArr[i]), MarketInfo(symbol, MODE_DIGITS));
     }
-    
-    // Set backward compatibility values for first 3 TPs
-    tp1 = tpLevels[0];
-    tp2 = tpCount > 1 ? tpLevels[1] : tpLevels[0];
-    tp3 = tpCount > 2 ? tpLevels[2] : tpLevels[0];
-    
+
     // Validate TP order and remove duplicates
     bool shouldBuy = signalType == "BUY";
     for(int i=0; i<tpCount; i++) {
@@ -483,7 +477,7 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, stri
 //| SendOrders: Place three market or limit orders with SL & TP        |
 //+------------------------------------------------------------------+
 void SendOrders(string signalType, string symbol,
-                      double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
+                      double entryPrice, double stopLoss,
                       int groupId, string channelName, double &tpLevels[], int tpCount)
 {
     // Simple check for immediate entry (entry price = 0)
@@ -511,6 +505,7 @@ void SendOrders(string signalType, string symbol,
     double bid = MarketInfo(symbol, MODE_BID);
     double price;
     bool shouldBuy = signalType == "BUY";
+    double tp1 = tpLevels[0];
     double midPrice = (entryPrice + tp1) / 2.0; // Midpoint for limit order logic
     // mid price is halfway between entry and TP1
     // between entry and mid price, market orders are used
@@ -1430,4 +1425,3 @@ void PrintLog(string msg)
     // Also print to Experts log for convenience
     Print(msg);
 }
-
