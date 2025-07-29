@@ -666,44 +666,8 @@ void ProcessExternalSLUpdates()
 //+------------------------------------------------------------------+
 bool ParseOrderCommentFull(string comment, int &groupId, string &channelName)
 {
-    // New format: 1234|ABCD|1.2550|1.2600 (GID|CHANNEL|TP1|ORDER_TP)
-    // Old format compatibility: GID:1234|SL:1.2345 or 1234|ABCD|1.2345
-    // We only care about GID and CHANNEL for identification purposes
+    // 1234|ABCD|1.2550|1.2600 (GID|CHANNEL|TP1|ORDER_TP)
     
-    // Check if it's the old format with GID: prefix
-    if(StringFind(comment, "GID:") == 0) {
-        // Old format handling: GID:xxxx|...
-        int p1 = StringFind(comment, "GID:");
-        if(p1 != 0) {
-            if(debugMode) PrintLog(eaName + ": Invalid old comment format, no GID found: " + comment);
-            return(false);
-        }
-        
-        // Find first pipe after GID
-        int firstPipe = StringFind(comment, "|", 4);
-        if(firstPipe < 0) {
-            if(debugMode) PrintLog(eaName + ": Invalid old comment format, no pipe separator found: " + comment);
-            return(false);
-        }
-        
-        // Extract GID
-        groupId = StrToInteger(StringSubstr(comment, 4, firstPipe-4));
-        if(groupId <= 0) {
-            if(debugMode) PrintLog(eaName + ": Invalid GID in old comment: " + comment);
-            return(false);
-        }
-        
-        // For old format, use legacy channel name
-        channelName = "LEGC"; // Old format default
-        
-        if(debugMode) {
-            PrintLog(eaName + ": Parsed old comment (legacy) - GID:" + IntegerToString(groupId) + " Channel:" + channelName);
-        }
-        
-        return(true);
-    }
-    
-    // New format: 1234|ABCD|... (we only need the first two parts)
     int firstPipe = StringFind(comment, "|");
     if(firstPipe < 0) {
         if(debugMode) PrintLog(eaName + ": Invalid new comment format, no first pipe found: " + comment);
