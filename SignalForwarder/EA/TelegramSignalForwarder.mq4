@@ -267,7 +267,8 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
     nextSignal = "";
 
     // 1) Signal type
-    signalType = StringToUpper(parts[1]);
+    signalType = parts[1];
+    StringToUpper(signalType);
     if(signalType != "BUY" && signalType != "SELL") {
         PrintLog(eaName + ": Invalid signal type '" + signalType + "', expected BUY or SELL");
         return(false);
@@ -405,7 +406,8 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
 void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, string channelName)
 {
     // Skip XAUUSD (Gold) trades to avoid interfering with independent trades from same group
-    if(StringFind(StringToUpper(symbol), "XAUUSD") >= 0 || StringFind(StringToUpper(symbol), "GOLD") >= 0)
+    StringToUpper(symbol);
+    if(StringFind(symbol, "XAUUSD") >= 0 || StringFind(symbol, "GOLD") >= 0)
     {
         if(debugMode) PrintLog(eaName + ": Skipping UpdateExistingOrdersSL for Gold symbol: " + symbol + 
                               " - avoiding interference with independent trades");
@@ -495,7 +497,6 @@ void SendOrders(string signalType, string symbol,
     RefreshRates();
     double ask = MarketInfo(symbol, MODE_ASK);
     double bid = MarketInfo(symbol, MODE_BID);
-    double price;
     bool shouldBuy = signalType == "BUY";
     double tp1 = tpLevels[0];
 
@@ -553,7 +554,8 @@ void SendOrders(string signalType, string symbol,
          ask = MarketInfo(symbol, MODE_ASK);
          bid = MarketInfo(symbol, MODE_BID);
          price = (shouldBuy) ? ask : bid;
-        string comment = FormatMT4Comment(groupId, channelName, tp1, tpLevels[k], symbol);
+         // when k=0 (TP1) - no TP in comment, when k=1, shows TP1 etc.
+        string comment = FormatMT4Comment(groupId, channelName, tpLevels, k, symbol);
     
         PrintLog(eaName + ": Order[" + IntegerToString(k) + "] parameters: " +
         "Symbol=" + symbol +
@@ -804,76 +806,37 @@ string CleanChannelName(string channelName)
 
 //+------------------------------------------------------------------+
 //| FormatMT4Comment: Format comment string within 31 char limit    |
-//| New format: 1234|ABCD|1.2550|1.2600 (GID|CHANNEL|TP1|ORDER_TP)|
+//| Format: 1234|ABCD|1.2550,1.2600 (GID|CHANNEL|TP1,TP2,TP3)      |
 //+------------------------------------------------------------------+
-string FormatMT4Comment(int groupId, string channelName, double tp1, double tp2, string symbol)
+string FormatMT4Comment(int groupId, string channelName, double &tpLevels[], int tpCount, string symbol)
 {
     string cleanChannel = CleanChannelName(channelName);
     
     // Determine decimal precision based on symbol type
     int precision = 4; // Default for Forex
-    string upperSymbol = StringToUpper(symbol);
-    
-    if(StringFind(upperSymbol, "XAUUSD") >= 0 || StringFind(upperSymbol, "GOLD") >= 0) {
+    StringToUpper(symbol);
+
+    if(StringFind(symbol, "XAUUSD") >= 0 || StringFind(symbol, "GOLD") >= 0) {
         precision = 1; // Gold: 3366.9 (1 decimal, total 6 chars)
-    } else if(StringFind(upperSymbol, "BTCUSD") >= 0 || StringFind(upperSymbol, "BTC") >= 0) {
+    } else if(StringFind(symbol, "BTCUSD") >= 0 || StringFind(symbol, "BTC") >= 0) {
         precision = 0; // Bitcoin: 118710 (no decimals, total 6 chars)
     } else {
         precision = 4; // Forex: 1.2550 (4 decimals, total 6 chars)
     }
-    
-    // Format TP values with appropriate precision
-    string tp1Str = DoubleToString(tp1, precision);
-    string tp2Str = DoubleToString(tp2, precision);
-    
-    // Remove trailing zeros if needed (except for the required format)
-    if(precision > 0) {
-        // For decimal numbers, ensure we maintain the required format length
-        while(StringLen(tp1Str) > 1 && StringGetCharacter(tp1Str, StringLen(tp1Str)-1) == '0' && StringFind(tp1Str, ".") >= 0)
-        {
-            tp1Str = StringSubstr(tp1Str, 0, StringLen(tp1Str)-1);
-        }
-        if(StringLen(tp1Str) > 1 && StringGetCharacter(tp1Str, StringLen(tp1Str)-1) == '.')
-        {
-            tp1Str = StringSubstr(tp1Str, 0, StringLen(tp1Str)-1);
-        }
-        
-        while(StringLen(tp2Str) > 1 && StringGetCharacter(tp2Str, StringLen(tp2Str)-1) == '0' && StringFind(tp2Str, ".") >= 0)
-        {
-            tp2Str = StringSubstr(tp2Str, 0, StringLen(tp2Str)-1);
-        }
-        if(StringLen(tp2Str) > 1 && StringGetCharacter(tp2Str, StringLen(tp2Str)-1) == '.')
-        {
-            tp2Str = StringSubstr(tp2Str, 0, StringLen(tp2Str)-1);
-        }
-    }
-    
-    // Build the comment: GID|CHANNEL|TP1|TP2
-    string comment = IntegerToString(groupId) + "|" + cleanChannel + "|" + tp1Str + "|" + tp2Str;
-    
-    // Ensure comment fits within MT4's 31-character limit
-    if(StringLen(comment) > 31)
+
+    string formattedTpLevels[3];
+    for (int i = 0; i < MathMin(tpCount, 3); i++)
     {
-        // If too long, truncate precision further
-        if(precision > 0) {
-            precision = MathMax(0, precision - 1);
-            tp1Str = DoubleToString(tp1, precision);
-            tp2Str = DoubleToString(tp2, precision);
-            comment = IntegerToString(groupId) + "|" + cleanChannel + "|" + tp1Str + "|" + tp2Str;
-        }
-        
-        // If still too long, truncate the TP strings
-        if(StringLen(comment) > 31) {
-            int maxTPLen = (31 - StringLen(IntegerToString(groupId)) - StringLen(cleanChannel) - 3) / 2; // -3 for pipes
-            if(maxTPLen > 0) {
-                tp1Str = StringSubstr(tp1Str, 0, maxTPLen);
-                tp2Str = StringSubstr(tp2Str, 0, maxTPLen);
-                comment = IntegerToString(groupId) + "|" + cleanChannel + "|" + tp1Str + "|" + tp2Str;
-            }
-        }
+         string tpStr = DoubleToString(tpLevels[i], precision);
+         formattedTpLevels[i] = tpStr;
     }
-    
-    return comment;
+
+    string result[3];
+    result[0] = IntegerToString(groupId);
+    result[1] = cleanChannel;
+    result[2] = StringJoin(formattedTpLevels, 3, ",");
+
+    return StringJoin(result, 3, "|");
 }
 
 //+------------------------------------------------------------------+
@@ -881,6 +844,7 @@ string FormatMT4Comment(int groupId, string channelName, double tp1, double tp2,
 //+------------------------------------------------------------------+
 void ProcessDynamicTrailingStop()
 {
+
     // Clean up inactive trailing stops first
     CleanupInactiveTrailingStops();
     
@@ -1192,4 +1156,18 @@ void PrintLog(string msg)
     }
     // Also print to Experts log for convenience
     Print(msg);
+}
+
+//+------------------------------------------------------------------+
+//| StringJoin: Join array of strings with a delimiter              |
+//+------------------------------------------------------------------+
+string StringJoin(string &arr[], int size, string delimiter)
+{
+    string result = "";
+    for(int i = 0; i < size; i++)
+    {
+        if(i > 0 && StringLen(arr[i]) > 0) result += delimiter;
+        result += arr[i];
+    }
+    return result;
 }
