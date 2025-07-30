@@ -74,7 +74,7 @@ void    UpdateTrailingStopState(int gid, string channel);
 double  CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL, 
                       double &tpLevels[], int tpCount, string symbol, bool isBuy);
 int     GetTrailingStopIndex(int gid, string channel);
-bool    ParseOrderCommentFull(string comment, int &groupId, string &channelName);
+bool    ParseOrderComment(string comment, int &groupId, string &channelName);
 bool    CheckStopLevel(string symbol, int orderType,
                        double sl, double ask, double bid);
 bool    CheckFreezeLevel(string symbol,
@@ -153,7 +153,7 @@ int start()
                     {
                         int orderGid;
                         string orderChannel;
-                        if(ParseOrderCommentFull(OrderComment(), orderGid, orderChannel))
+                        if(ParseOrderComment(OrderComment(), orderGid, orderChannel))
                         {
                             if(orderGid == groupId && orderChannel == channelName)
                             {
@@ -434,7 +434,7 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, stri
         // Parse the order's comment to get channel information
         int orderGid;
         string orderChannelName;
-        if(!ParseOrderCommentFull(OrderComment(), orderGid, orderChannelName)) {
+        if(!ParseOrderComment(OrderComment(), orderGid, orderChannelName)) {
             if (debugMode) PrintLog(eaName + ": Failed to parse order comment for ticket " + IntegerToString(OrderTicket()) + ": " + OrderComment());
             continue;
         }
@@ -664,31 +664,25 @@ void ProcessExternalSLUpdates()
 //+------------------------------------------------------------------+
 //| ParseOrderCommentFull: extracts GID and channel from comment    |
 //+------------------------------------------------------------------+
-bool ParseOrderCommentFull(string comment, int &groupId, string &channelName)
+bool ParseOrderComment(string comment, int &groupId, string &channelName)
 {
-    // 1234|ABCD|1.2550|1.2600 (GID|CHANNEL|TP1|ORDER_TP)
+    // 1234|ABCD|1.2550,1.2600 (GID|CHANNEL|TP1,TP2,...)
     
-    int firstPipe = StringFind(comment, "|");
-    if(firstPipe < 0) {
-        if(debugMode) PrintLog(eaName + ": Invalid new comment format, no first pipe found: " + comment);
+    string parts[];
+    if(StringSplit(comment, '|', parts) < 2) {
+        PrintLog(eaName + ": Invalid comment format, expected 2 parts but got " + IntegerToString(ArraySize(parts)));
         return(false);
     }
-    
-    int secondPipe = StringFind(comment, "|", firstPipe + 1);
-    if(secondPipe < 0) {
-        if(debugMode) PrintLog(eaName + ": Invalid new comment format, no second pipe found: " + comment);
-        return(false);
-    }
-    
+
     // Extract GID (first part)
-    groupId = StrToInteger(StringSubstr(comment, 0, firstPipe));
+    groupId = StrToInteger(parts[0]);
     if(groupId <= 0) {
-        if(debugMode) PrintLog(eaName + ": Invalid GID in new comment: " + comment);
+        if(debugMode) PrintLog(eaName + ": Invalid GID in comment: " + comment);
         return(false);
     }
     
     // Extract channel name (second part, should be 4 letters)
-    channelName = StringSubstr(comment, firstPipe + 1, secondPipe - firstPipe - 1);
+    channelName = parts[1];
     if(StringLen(channelName) != 4) {
         if(debugMode) PrintLog(eaName + ": Invalid channel name length in new comment: " + comment);
         channelName = "UNKN"; // Fallback
@@ -990,7 +984,7 @@ void CleanupInactiveTrailingStops()
             
             int orderGid;
             string orderChannel;
-            if(!ParseOrderCommentFull(OrderComment(), orderGid, orderChannel)) continue;
+            if(!ParseOrderComment(OrderComment(), orderGid, orderChannel)) continue;
             if(orderGid == gTrailingStops[i].gid && orderChannel == gTrailingStops[i].channel) {
                 hasOpenOrders = true;
                 break;
@@ -1083,7 +1077,7 @@ void UpdateTrailingStopState(int gid, string channel)
         // Parse order comment to check if it belongs to our GID
         int orderGid;
         string orderChannel;
-        if(!ParseOrderCommentFull(OrderComment(), orderGid, orderChannel)) continue;
+        if(!ParseOrderComment(OrderComment(), orderGid, orderChannel)) continue;
         if(orderGid != gid || orderChannel != channel) continue;
         
         // Check if order was closed with profit (TP hit) after our last update
@@ -1147,7 +1141,7 @@ void UpdateTrailingStopState(int gid, string channel)
             
             int orderGid;
             string orderChannel;
-            if(!ParseOrderCommentFull(OrderComment(), orderGid, orderChannel)) continue;
+            if(!ParseOrderComment(OrderComment(), orderGid, orderChannel)) continue;
             if(orderGid != gid || orderChannel != channel) continue;
             
             // Only update market positions (not pending orders)
