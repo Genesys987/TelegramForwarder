@@ -79,7 +79,6 @@ bool    ParseOrderComment(string comment, int &groupId, string &channelName);
 // Utility functions
 bool    IsSignalTooOld(long signalTimestampMs);
 bool    FileExists(string filename);
-string  Trim(string s);
 string  ToUpperCase(string s);
 bool    IsValidDouble(string s);
 string  CleanChannelName(string channelName);
@@ -244,6 +243,10 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
         PrintLog(eaName + ": Invalid signal format, expected 8 parts but got " + IntegerToString(ArraySize(parts)));
         return(false);
     }
+    
+    for(int i = 0; i < ArraySize(parts); i++) {
+        parts[i] = StringTrimLeft(StringTrimRight(parts[i]));
+    }
 
     // 0) Extract and validate timestamp (first part, no prefix)
     string timestampStr = parts[0];
@@ -265,14 +268,14 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
     nextSignal = "";
 
     // 1) Signal type
-    signalType = ToUpperCase(Trim(parts[1]));
+    signalType = ToUpperCase(parts[1]);
     if(signalType != "BUY" && signalType != "SELL") {
         PrintLog(eaName + ": Invalid signal type '" + signalType + "', expected BUY or SELL");
         return(false);
     }
 
     // 2) Symbol validation
-    symbol = Trim(parts[2]) + symbolPostfix;
+    symbol = parts[2] + symbolPostfix;
     if(MarketInfo(symbol, MODE_TIME) == 0) {
         PrintLog(eaName + ": Invalid symbol '" + symbol + "', skipping");
         return(false);
@@ -381,7 +384,7 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
 
     // 7) Channel Name (new field) - clean and truncate to 4 letters
     if(ArraySize(parts) >= 8) {
-        string rawChannelName = Trim(parts[7]);
+        string rawChannelName = parts[7];
         if(StringLen(rawChannelName) == 0) rawChannelName = "UNKNOWN";
         channelName = CleanChannelName(rawChannelName);
     } else {
@@ -734,18 +737,6 @@ bool FileExists(string filename)
         return(true);
     }
     return(false);
-}
-
-//+------------------------------------------------------------------+
-//| Trim: remove whitespace from string ends                        |
-//+------------------------------------------------------------------+
-string Trim(string s)
-{
-    int len = StringLen(s);
-    int start = 0, end = len - 1;
-    while(start < len && StringGetCharacter(s, start) <= 32) start++;
-    while(end > start && StringGetCharacter(s, end) <= 32) end--;
-    return StringSubstr(s, start, end - start + 1);
 }
 
 //+------------------------------------------------------------------+
