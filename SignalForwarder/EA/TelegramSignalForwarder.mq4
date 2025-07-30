@@ -79,7 +79,6 @@ bool    ParseOrderComment(string comment, int &groupId, string &channelName);
 // Utility functions
 bool    IsSignalTooOld(long signalTimestampMs);
 bool    FileExists(string filename);
-string  ToUpperCase(string s);
 bool    IsValidDouble(string s);
 string  CleanChannelName(string channelName);
 string  FormatMT4Comment(int groupId, string channelName, double tp1, double tp2, string symbol);
@@ -268,7 +267,7 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
     nextSignal = "";
 
     // 1) Signal type
-    signalType = ToUpperCase(parts[1]);
+    signalType = StringToUpper(parts[1]);
     if(signalType != "BUY" && signalType != "SELL") {
         PrintLog(eaName + ": Invalid signal type '" + signalType + "', expected BUY or SELL");
         return(false);
@@ -406,7 +405,7 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
 void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, string channelName)
 {
     // Skip XAUUSD (Gold) trades to avoid interfering with independent trades from same group
-    if(StringFind(ToUpperCase(symbol), "XAUUSD") >= 0 || StringFind(ToUpperCase(symbol), "GOLD") >= 0)
+    if(StringFind(StringToUpper(symbol), "XAUUSD") >= 0 || StringFind(StringToUpper(symbol), "GOLD") >= 0)
     {
         if(debugMode) PrintLog(eaName + ": Skipping UpdateExistingOrdersSL for Gold symbol: " + symbol + 
                               " - avoiding interference with independent trades");
@@ -740,22 +739,6 @@ bool FileExists(string filename)
 }
 
 //+------------------------------------------------------------------+
-//| ToUpperCase: convert string to uppercase                        |
-//+------------------------------------------------------------------+
-string ToUpperCase(string s)
-{
-    string result = "";
-    int length = StringLen(s);
-    for(int i = 0; i < length; i++)
-    {
-        int code = StringGetCharacter(s, i);
-        if(code >= 'a' && code <= 'z') code -= 32;
-        result += CharToStr(code);
-    }
-    return result;
-}
-
-//+------------------------------------------------------------------+
 //| IsValidDouble: validate if string is numeric                    |
 //+------------------------------------------------------------------+
 bool IsValidDouble(string s)
@@ -829,7 +812,7 @@ string FormatMT4Comment(int groupId, string channelName, double tp1, double tp2,
     
     // Determine decimal precision based on symbol type
     int precision = 4; // Default for Forex
-    string upperSymbol = ToUpperCase(symbol);
+    string upperSymbol = StringToUpper(symbol);
     
     if(StringFind(upperSymbol, "XAUUSD") >= 0 || StringFind(upperSymbol, "GOLD") >= 0) {
         precision = 1; // Gold: 3366.9 (1 decimal, total 6 chars)
