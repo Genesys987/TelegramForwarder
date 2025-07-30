@@ -75,10 +75,6 @@ double  CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL,
                       double &tpLevels[], int tpCount, string symbol, bool isBuy);
 int     GetTrailingStopIndex(int gid, string channel);
 bool    ParseOrderComment(string comment, int &groupId, string &channelName);
-bool    CheckStopLevel(string symbol, int orderType,
-                       double sl, double ask, double bid);
-bool    CheckFreezeLevel(string symbol,
-                         double openPrice, double ask, double bid);
 
 // Utility functions
 bool    IsSignalTooOld(long signalTimestampMs);
@@ -692,51 +688,6 @@ bool ParseOrderComment(string comment, int &groupId, string &channelName)
         PrintLog(eaName + ": Parsed comment - GID:" + IntegerToString(groupId) + " Channel:" + channelName);
     }
     
-    return(true);
-}
-
-//+------------------------------------------------------------------+
-//| CheckStopLevel: validate new SL against market constraints      |
-//+------------------------------------------------------------------+
-bool CheckStopLevel(string symbol, int orderType,
-                    double sl, double ask, double bid)
-{
-    if(sl <= 0) return(true);
-    int digits = MarketInfo(symbol, MODE_DIGITS);
-    double point= MarketInfo(symbol, MODE_POINT);
-    double minStopLevelDist = MarketInfo(symbol, MODE_STOPLEVEL) * point + point;
-    bool valid;
-    if(orderType == OP_BUY)
-         // For buy orders, SL must be below the bid price
-         valid = (sl < bid && bid - sl >= minStopLevelDist);
-    else if(orderType == OP_SELL)
-         // For sell orders, SL must be above the ask price
-         valid = (sl > ask && sl - ask >= minStopLevelDist);
-    else valid = false;
-    if(!valid)
-        PrintLog(eaName + ": invalid SL " + DoubleToString(sl, digits));
-    return(valid);
-}
-
-//+------------------------------------------------------------------+
-//| CheckFreezeLevel: ensure open price respects freeze level      |
-//+------------------------------------------------------------------+
-bool CheckFreezeLevel(string symbol,
-                      double openPrice, double ask, double bid)
-{
-    double freezePts = MarketInfo(symbol, MODE_FREEZELEVEL);
-    if(freezePts <= 0) return(true);
-    double freezeDist= freezePts * MarketInfo(symbol, MODE_POINT);
-    if(ask <= bid || ask <= 0 || bid <= 0)
-    {
-        PrintLog(eaName + ": price freeze err");
-        return(false);
-    }
-    if(MathAbs(openPrice-ask) < freezeDist || MathAbs(openPrice-bid) < freezeDist)
-    {
-        PrintLog(eaName + ": freeze violation");
-        return(false);
-    }
     return(true);
 }
 
