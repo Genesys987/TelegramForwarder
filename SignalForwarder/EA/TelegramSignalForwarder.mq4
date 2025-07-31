@@ -894,10 +894,11 @@ double CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL,
     
     switch(tpHitLevel) {
         case 1: // TP1 hit -> move SL to entry
-            // newSL = (originalSL + originalEntry) / 2.0;
-            // TODO originalSL has to be a stable value stored in comment
-            newSL = originalEntry;
+        {
+            double diff = MathAbs(originalEntry - tpLevels[0]) * 2;
+            newSL = isBuy ? originalEntry - diff : originalEntry + diff;
             break;
+      }
             
         case 2: // TP2 hit -> move SL to TP1
             newSL = tpLevels[0];
