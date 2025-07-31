@@ -39,10 +39,9 @@ datetime lastProcessedTime = 0;     // Track last processed time for additional 
 //|--- Function Prototypes                                          |
 //+------------------------------------------------------------------+
 void    PrintLog(string message);
-bool    ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
-                       double &stopLoss,
-                       double &tp1, double &tp2, double &tp3,
-                       int &groupId, string &channelName, double &tpLevels[], int &tpCount);
+bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
+                    double &stopLoss,
+                    int &groupId, string &channelName, double &tpLevels[], int &tpCount);
 void    UpdateExistingOrdersSL(string symbol, string signalType, double newSL, string channelName);
 void    SendOrders(string signalType, string symbol,
                          double entryPrice, double stopLoss,
@@ -59,7 +58,7 @@ bool    IsSignalTooOld(long signalTimestampMs);
 bool    FileExists(string filename);
 bool    IsValidDouble(string s);
 string  CleanChannelName(string channelName);
-string  FormatMT4Comment(int groupId, string channelName, double tp1, double tp2, string symbol);
+string FormatMT4Comment(int groupId, string channelName, double &tpLevels[], int tpCount, string symbol);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
