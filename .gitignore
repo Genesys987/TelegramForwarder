@@ -3,6 +3,9 @@ userbot_session.session-journal
 
 .env
 
+# Compiled Metatrader files
+*.ex4
+
 signals_queue*.txt
 signals_archive*.txt
 logs/

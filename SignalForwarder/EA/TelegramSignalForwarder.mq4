@@ -12,11 +12,9 @@ extern bool   debugMode                = true;  // Enable detailed logging
 extern int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC in minutes (e.g., UTC+2 = 120)
 extern int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
 extern string symbolPostfix           = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
-extern bool   useLimitOrders           = true;  // Use limit orders at middle between entry and TP1
 extern double fixedLotSize              = 0.02;  // Default lot size for FX orders
 extern double fixedLotSizeBitcoin       = 0.02;  // Default lot size for Bitcoin orders
 extern double fixedLotSizeGold          = 0.02;  // Default lot size for Gold orders
-extern double limitOrderExpirationSec = -1;   // Limit order expiration time in seconds (-1 to disable)
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -37,60 +35,30 @@ string   nextSignal = "";
 int      lastProcessedGroupId = -1; // Track last processed signal to avoid duplicates
 datetime lastProcessedTime = 0;     // Track last processed time for additional safety
 
-// Trailing Stop State Tracking
-struct TrailingStopState {
-    int gid;
-    string channel;
-    string symbol;
-    bool isBuy;
-    double originalEntry;
-    double originalSL;
-    int tpHitLevel;        // 0=no hits, 1=TP1 hit, 2=TP2 hit, etc.
-    double tpLevels[20];   // All TP levels for this GID
-    int tpCount;           // Number of TP levels
-    datetime lastUpdate;   // Last time this GID was updated
-};
-
-TrailingStopState gTrailingStops[100]; // Support up to 100 concurrent GIDs
-int gTrailingStopsCount = 0;
-
-
 //+------------------------------------------------------------------+
 //|--- Function Prototypes                                          |
 //+------------------------------------------------------------------+
 void    PrintLog(string message);
-bool    ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
-                       double &stopLoss,
-                       double &tp1, double &tp2, double &tp3,
-                       int &groupId, string &channelName, double &tpLevels[], int &tpCount);
+bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
+                    double &stopLoss,
+                    int &groupId, string &channelName, double &tpLevels[], int &tpCount);
 void    UpdateExistingOrdersSL(string symbol, string signalType, double newSL, string channelName);
 void    SendOrders(string signalType, string symbol,
-                         double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
+                         double entryPrice, double stopLoss,
                          int groupId, string channelName, double &tpLevels[], int tpCount);
 void    ProcessExternalSLUpdates();
-void    CheckAndCleanExpiredLimitOrders();
 void    ProcessDynamicTrailingStop();
-void    CleanupInactiveTrailingStops();
-void    InitializeTrailingStop(int gid, string channel, string symbol, bool isBuy, 
-                              double entry, double sl, double &tpLevels[], int tpCount);
-void    UpdateTrailingStopState(int gid, string channel);
 double  CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL, 
                       double &tpLevels[], int tpCount, string symbol, bool isBuy);
-int     GetTrailingStopIndex(int gid, string channel);
-bool    ParseOrderCommentFull(string comment, int &groupId, string &channelName);
-bool    CheckStopLevel(string symbol, int orderType,
-                       double sl, double ask, double bid);
-bool    CheckFreezeLevel(string symbol,
-                         double openPrice, double ask, double bid);
+bool    ParseOrderGidChannel(string comment, int &groupId, string &channelName);
+int     ParseOrderTpLevels(string comment, double &tpLevels[]);
 
 // Utility functions
 bool    IsSignalTooOld(long signalTimestampMs);
 bool    FileExists(string filename);
-string  Trim(string s);
-string  ToUpperCase(string s);
 bool    IsValidDouble(string s);
 string  CleanChannelName(string channelName);
-string  FormatMT4Comment(int groupId, string channelName, double tp1, double tp2, string symbol);
+string FormatMT4Comment(int groupId, string channelName, double &tpLevels[], int tpCount, string symbol);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -99,9 +67,6 @@ int init()
 {
     lastProcessedGroupId = -1; // Initialize to -1 to allow first signal
     lastProcessedTime = 0;     // Initialize to 0 to allow first signal
-    
-    // Initialize trailing stop array
-    gTrailingStopsCount = 0;
 
     // Use chart's expert name if provided
     string customName = WindowExpertName();
@@ -130,21 +95,18 @@ int deinit()
 int start()
 {
     string signalType, symbol, channelName;
-    double entryPrice, stopLoss, tp1, tp2, tp3;
+    double entryPrice, stopLoss;
     int    groupId, tpCount;
     double tpLevels[20]; // Support up to 20 TP levels
 
     if(IsTradeAllowed() && IsConnected() && !IsStopped())
     {
-        // Check and clean expired limit orders first
-        CheckAndCleanExpiredLimitOrders();
-        
         // Process dynamic trailing stop for existing positions
         ProcessDynamicTrailingStop();
         
         // Process new signal
         if(ReadSignalFile(signalType, symbol, entryPrice,
-                          stopLoss, tp1, tp2, tp3, groupId, channelName, tpLevels, tpCount))
+                          stopLoss, groupId, channelName, tpLevels, tpCount))
         {
             if(debugMode)
                 PrintLog(eaName + ": Processing NEW signal from channel '" + channelName + "' - GID=" + IntegerToString(groupId) + " with " + IntegerToString(tpCount) + " TP levels");
@@ -159,7 +121,7 @@ int start()
                     {
                         int orderGid;
                         string orderChannel;
-                        if(ParseOrderCommentFull(OrderComment(), orderGid, orderChannel))
+                        if(ParseOrderGidChannel(OrderComment(), orderGid, orderChannel))
                         {
                             if(orderGid == groupId && orderChannel == channelName)
                             {
@@ -183,12 +145,8 @@ int start()
                     PrintLog(eaName + ": No existing orders found, creating new orders");
                 UpdateExistingOrdersSL(symbol, signalType, stopLoss, channelName);
                 SendOrders(signalType, symbol,
-                                 entryPrice, stopLoss, tp1, tp2, tp3,
+                                 entryPrice, stopLoss,
                                  groupId, channelName, tpLevels, tpCount);
-                
-                // Initialize trailing stop state for this new GID
-                InitializeTrailingStop(groupId, channelName, symbol, signalType == "BUY", 
-                                     entryPrice, stopLoss, tpLevels, tpCount);
             }
         }
     }
@@ -203,7 +161,6 @@ int start()
 //+------------------------------------------------------------------+
 bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
                     double &stopLoss,
-                    double &tp1, double &tp2, double &tp3,
                     int &groupId, string &channelName, double &tpLevels[], int &tpCount)
 {
   string line = "";
@@ -249,11 +206,15 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
         return(false);
     }
 
-    // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3|SL|GID:<id>|CHANNEL_NAME
+    // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3,...|SL|GID:<id>|CHANNEL_NAME
     string parts[];
     if(StringSplit(line, '|', parts) < 8) {
         PrintLog(eaName + ": Invalid signal format, expected 8 parts but got " + IntegerToString(ArraySize(parts)));
         return(false);
+    }
+    
+    for(int i = 0; i < ArraySize(parts); i++) {
+        parts[i] = StringTrimLeft(StringTrimRight(parts[i]));
     }
 
     // 0) Extract and validate timestamp (first part, no prefix)
@@ -276,14 +237,15 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
     nextSignal = "";
 
     // 1) Signal type
-    signalType = ToUpperCase(Trim(parts[1]));
+    signalType = parts[1];
+    StringToUpper(signalType);
     if(signalType != "BUY" && signalType != "SELL") {
         PrintLog(eaName + ": Invalid signal type '" + signalType + "', expected BUY or SELL");
         return(false);
     }
 
     // 2) Symbol validation
-    symbol = Trim(parts[2]) + symbolPostfix;
+    symbol = parts[2] + symbolPostfix;
     if(MarketInfo(symbol, MODE_TIME) == 0) {
         PrintLog(eaName + ": Invalid symbol '" + symbol + "', skipping");
         return(false);
@@ -321,12 +283,7 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
         }
         tpLevels[i] = NormalizeDouble(StrToDouble(tpsArr[i]), MarketInfo(symbol, MODE_DIGITS));
     }
-    
-    // Set backward compatibility values for first 3 TPs
-    tp1 = tpLevels[0];
-    tp2 = tpCount > 1 ? tpLevels[1] : tpLevels[0];
-    tp3 = tpCount > 2 ? tpLevels[2] : tpLevels[0];
-    
+
     // Validate TP order and remove duplicates
     bool shouldBuy = signalType == "BUY";
     for(int i=0; i<tpCount; i++) {
@@ -397,7 +354,7 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
 
     // 7) Channel Name (new field) - clean and truncate to 4 letters
     if(ArraySize(parts) >= 8) {
-        string rawChannelName = Trim(parts[7]);
+        string rawChannelName = parts[7];
         if(StringLen(rawChannelName) == 0) rawChannelName = "UNKNOWN";
         channelName = CleanChannelName(rawChannelName);
     } else {
@@ -419,7 +376,8 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
 void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, string channelName)
 {
     // Skip XAUUSD (Gold) trades to avoid interfering with independent trades from same group
-    if(StringFind(ToUpperCase(symbol), "XAUUSD") >= 0 || StringFind(ToUpperCase(symbol), "GOLD") >= 0)
+    StringToUpper(symbol);
+    if(StringFind(symbol, "XAUUSD") >= 0 || StringFind(symbol, "GOLD") >= 0)
     {
         if(debugMode) PrintLog(eaName + ": Skipping UpdateExistingOrdersSL for Gold symbol: " + symbol + 
                               " - avoiding interference with independent trades");
@@ -446,7 +404,7 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, stri
         // Parse the order's comment to get channel information
         int orderGid;
         string orderChannelName;
-        if(!ParseOrderCommentFull(OrderComment(), orderGid, orderChannelName)) {
+        if(!ParseOrderGidChannel(OrderComment(), orderGid, orderChannelName)) {
             if (debugMode) PrintLog(eaName + ": Failed to parse order comment for ticket " + IntegerToString(OrderTicket()) + ": " + OrderComment());
             continue;
         }
@@ -480,10 +438,10 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, stri
 }
 
 //+------------------------------------------------------------------+
-//| SendOrders: Place three market or limit orders with SL & TP        |
+//| SendOrders: Place up to four market orders with SL & TP        |
 //+------------------------------------------------------------------+
 void SendOrders(string signalType, string symbol,
-                      double entryPrice, double stopLoss, double tp1, double tp2, double tp3,
+                      double entryPrice, double stopLoss,
                       int groupId, string channelName, double &tpLevels[], int tpCount)
 {
     // Simple check for immediate entry (entry price = 0)
@@ -509,23 +467,20 @@ void SendOrders(string signalType, string symbol,
     RefreshRates();
     double ask = MarketInfo(symbol, MODE_ASK);
     double bid = MarketInfo(symbol, MODE_BID);
-    double price;
     bool shouldBuy = signalType == "BUY";
-    double midPrice = (entryPrice + tp1) / 2.0; // Midpoint for limit order logic
-    // mid price is halfway between entry and TP1
-    // between entry and mid price, market orders are used
-    // between mid price and TP1, limit orders are used for the mid price
-    bool shouldUseLimitOrders = useLimitOrders && (shouldBuy ? ask > midPrice : bid < midPrice);
+    double tp1 = tpLevels[0];
 
-    int orderType;
-    if(shouldUseLimitOrders) {
-        price = midPrice;
-        orderType = (shouldBuy) ? OP_BUYLIMIT : OP_SELLLIMIT;
-    } else {
-        price = shouldBuy ? ask : bid;
-        orderType = (shouldBuy) ? OP_BUY : OP_SELL;
-    }
+    double price = shouldBuy ? ask : bid;
+    int orderType = (shouldBuy) ? OP_BUY : OP_SELL;
     price = NormalizeDouble(price, digits);
+    
+    if(shouldBuy && price > tp1 || !shouldBuy && price < tp1) {
+      PrintLog(eaName + ": Entry price " + DoubleToString(price, digits) +
+            " is beyond TP1 " + DoubleToString(tp1, digits) + 
+            " for GID=" + IntegerToString(groupId) + 
+            ", skipping order creation");
+      return;
+    }
 
     // Always use the original stop loss from signal
     double rawSL = NormalizeDouble(stopLoss, digits);
@@ -560,19 +515,17 @@ void SendOrders(string signalType, string symbol,
     double lotSize = (symbol == "BTCUSD") ? fixedLotSizeBitcoin :
                         (symbol == "XAUUSD") ? fixedLotSizeGold : fixedLotSize;
 
-    // Create orders for each TP level
-    for(int k=0; k<tpCount; k++)
+    // Create orders for each TP level, at most 4
+    for(int k=0; k<MathMin(tpCount, 4); k++)
     {
-        if(!shouldUseLimitOrders) {
-            // we intend to place all limit orders at the same spot
-            // however, for market orders we want to get the correct current price
-            // to avoid off-quotes errors
-            RefreshRates();
-            ask = MarketInfo(symbol, MODE_ASK);
-            bid = MarketInfo(symbol, MODE_BID);
-            price = (shouldBuy) ? ask : bid;
-        }
-        string comment = FormatMT4Comment(groupId, channelName, tp1, tpLevels[k], symbol);
+         // for market orders we want to get the correct current price
+         // to avoid off-quotes errors
+         RefreshRates();
+         ask = MarketInfo(symbol, MODE_ASK);
+         bid = MarketInfo(symbol, MODE_BID);
+         price = (shouldBuy) ? ask : bid;
+         // when k=0 (TP1) - no TP in comment, when k=1, shows TP1 etc.
+        string comment = FormatMT4Comment(groupId, channelName, tpLevels, k, symbol);
     
         PrintLog(eaName + ": Order[" + IntegerToString(k) + "] parameters: " +
         "Symbol=" + symbol +
@@ -584,23 +537,16 @@ void SendOrders(string signalType, string symbol,
         " Comment=" + comment);
 
         int colorIndex = k % 6; // Cycle through available colors
-        datetime expiration = 0;
-        if((orderType == OP_BUYLIMIT || orderType == OP_SELLLIMIT) && limitOrderExpirationSec > 0) {
-            expiration = TimeCurrent() + limitOrderExpirationSec;
-        }
         int ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
-                               rawSL, tpLevels[k], comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
+                               rawSL, tpLevels[k], comment, MAGIC_NUMBER, 0 /* expiration */, cols[colorIndex]);
                                 
         if(ticket < 0) {
             PrintLog(eaName + ": Error creating order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket) + " error=" + IntegerToString(GetLastError()));
-        }
-        
-        if(ticket < 0 && GetLastError() == ERR_INVALID_STOPS)
-        {
+            Sleep(1000);
             RefreshRates();
             PrintLog(eaName + ": Retrying with fallback SL=" + DoubleToString(fallbackSL, digits));
             ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
-                               fallbackSL, tpLevels[k], comment, MAGIC_NUMBER, expiration, cols[colorIndex]);
+                               fallbackSL, tpLevels[k], comment, MAGIC_NUMBER, 0 /* expiration */, cols[colorIndex]);
         }
         
         PrintLog(eaName + ": Order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket));
@@ -686,124 +632,63 @@ void ProcessExternalSLUpdates()
 }
 
 //+------------------------------------------------------------------+
-//| ParseOrderCommentFull: extracts GID and channel from comment    |
+//| ParseOrderGidChannel: Extract GID and channel name from order comment |
 //+------------------------------------------------------------------+
-bool ParseOrderCommentFull(string comment, int &groupId, string &channelName)
+bool ParseOrderGidChannel(string comment, int &groupId, string &channelName)
 {
-    // New format: 1234|ABCD|1.2550|1.2600 (GID|CHANNEL|TP1|ORDER_TP)
-    // Old format compatibility: GID:1234|SL:1.2345 or 1234|ABCD|1.2345
-    // We only care about GID and CHANNEL for identification purposes
+    // 1234|ABCD|1.2550,1.2600 (GID|CHANNEL|TP1,TP2,...)
     
-    // Check if it's the old format with GID: prefix
-    if(StringFind(comment, "GID:") == 0) {
-        // Old format handling: GID:xxxx|...
-        int p1 = StringFind(comment, "GID:");
-        if(p1 != 0) {
-            if(debugMode) PrintLog(eaName + ": Invalid old comment format, no GID found: " + comment);
-            return(false);
-        }
-        
-        // Find first pipe after GID
-        int firstPipe = StringFind(comment, "|", 4);
-        if(firstPipe < 0) {
-            if(debugMode) PrintLog(eaName + ": Invalid old comment format, no pipe separator found: " + comment);
-            return(false);
-        }
-        
-        // Extract GID
-        groupId = StrToInteger(StringSubstr(comment, 4, firstPipe-4));
-        if(groupId <= 0) {
-            if(debugMode) PrintLog(eaName + ": Invalid GID in old comment: " + comment);
-            return(false);
-        }
-        
-        // For old format, use legacy channel name
-        channelName = "LEGC"; // Old format default
-        
-        if(debugMode) {
-            PrintLog(eaName + ": Parsed old comment (legacy) - GID:" + IntegerToString(groupId) + " Channel:" + channelName);
-        }
-        
-        return(true);
-    }
-    
-    // New format: 1234|ABCD|... (we only need the first two parts)
-    int firstPipe = StringFind(comment, "|");
-    if(firstPipe < 0) {
-        if(debugMode) PrintLog(eaName + ": Invalid new comment format, no first pipe found: " + comment);
+    string parts[];
+    if(StringSplit(comment, '|', parts) < 2) {
+        PrintLog(eaName + ": Invalid comment format, expected at least 2 parts but got " + IntegerToString(ArraySize(parts)));
         return(false);
     }
-    
-    int secondPipe = StringFind(comment, "|", firstPipe + 1);
-    if(secondPipe < 0) {
-        if(debugMode) PrintLog(eaName + ": Invalid new comment format, no second pipe found: " + comment);
-        return(false);
-    }
-    
+
     // Extract GID (first part)
-    groupId = StrToInteger(StringSubstr(comment, 0, firstPipe));
+    groupId = StrToInteger(parts[0]);
     if(groupId <= 0) {
-        if(debugMode) PrintLog(eaName + ": Invalid GID in new comment: " + comment);
+        if(debugMode) PrintLog(eaName + ": Invalid GID in comment: " + comment);
         return(false);
     }
     
     // Extract channel name (second part, should be 4 letters)
-    channelName = StringSubstr(comment, firstPipe + 1, secondPipe - firstPipe - 1);
+    channelName = parts[1];
     if(StringLen(channelName) != 4) {
         if(debugMode) PrintLog(eaName + ": Invalid channel name length in new comment: " + comment);
         channelName = "UNKN"; // Fallback
     }
-    
-    if(debugMode) {
-        PrintLog(eaName + ": Parsed comment - GID:" + IntegerToString(groupId) + " Channel:" + channelName);
-    }
-    
+
     return(true);
 }
 
 //+------------------------------------------------------------------+
-//| CheckStopLevel: validate new SL against market constraints      |
+//| ParseOrderTpLevels: extracts TP levels from order comment, returns TP count       |
 //+------------------------------------------------------------------+
-bool CheckStopLevel(string symbol, int orderType,
-                    double sl, double ask, double bid)
+int ParseOrderTpLevels(string comment, double &tpLevels[])
 {
-    if(sl <= 0) return(true);
-    int digits = MarketInfo(symbol, MODE_DIGITS);
-    double point= MarketInfo(symbol, MODE_POINT);
-    double minStopLevelDist = MarketInfo(symbol, MODE_STOPLEVEL) * point + point;
-    bool valid;
-    if(orderType == OP_BUY || orderType == OP_BUYLIMIT)
-         // For buy orders, SL must be below the bid price
-         valid = (sl < bid && bid - sl >= minStopLevelDist);
-    else if(orderType == OP_SELL || orderType == OP_SELLLIMIT)
-         // For sell orders, SL must be above the ask price
-         valid = (sl > ask && sl - ask >= minStopLevelDist);
-    else valid = false;
-    if(!valid)
-        PrintLog(eaName + ": invalid SL " + DoubleToString(sl, digits));
-    return(valid);
-}
+    // 1234|ABCD|1.2550,1.2600 (GID|CHANNEL|TP1,TP2,...)
+    
+    string parts[];
+    StringSplit(comment, '|', parts);
 
-//+------------------------------------------------------------------+
-//| CheckFreezeLevel: ensure open price respects freeze level      |
-//+------------------------------------------------------------------+
-bool CheckFreezeLevel(string symbol,
-                      double openPrice, double ask, double bid)
-{
-    double freezePts = MarketInfo(symbol, MODE_FREEZELEVEL);
-    if(freezePts <= 0) return(true);
-    double freezeDist= freezePts * MarketInfo(symbol, MODE_POINT);
-    if(ask <= bid || ask <= 0 || bid <= 0)
-    {
-        PrintLog(eaName + ": price freeze err");
-        return(false);
+    int tpCount = 0;
+    // Extract TP levels (third part, comma-separated)
+    if(ArraySize(parts) > 2) {
+        string tpPart = parts[2];
+        string tpLevelsString[];
+        if(StringSplit(tpPart, ',', tpLevelsString) > 0) {
+            for(int i=0; i<ArraySize(tpLevelsString); i++) {
+                if(IsValidDouble(tpLevelsString[i])) {
+                    ArrayResize(tpLevels, tpCount + 1);
+                    tpLevels[tpCount++] = StrToDouble(tpLevelsString[i]);
+                }
+            }
+        }
+    } else {
+      return(0); // No TP levels found
     }
-    if(MathAbs(openPrice-ask) < freezeDist || MathAbs(openPrice-bid) < freezeDist)
-    {
-        PrintLog(eaName + ": freeze violation");
-        return(false);
-    }
-    return(true);
+
+    return(tpCount);
 }
 
 //+------------------------------------------------------------------+
@@ -849,34 +734,6 @@ bool FileExists(string filename)
         return(true);
     }
     return(false);
-}
-
-//+------------------------------------------------------------------+
-//| Trim: remove whitespace from string ends                        |
-//+------------------------------------------------------------------+
-string Trim(string s)
-{
-    int len = StringLen(s);
-    int start = 0, end = len - 1;
-    while(start < len && StringGetCharacter(s, start) <= 32) start++;
-    while(end > start && StringGetCharacter(s, end) <= 32) end--;
-    return StringSubstr(s, start, end - start + 1);
-}
-
-//+------------------------------------------------------------------+
-//| ToUpperCase: convert string to uppercase                        |
-//+------------------------------------------------------------------+
-string ToUpperCase(string s)
-{
-    string result = "";
-    int length = StringLen(s);
-    for(int i = 0; i < length; i++)
-    {
-        int code = StringGetCharacter(s, i);
-        if(code >= 'a' && code <= 'z') code -= 32;
-        result += CharToStr(code);
-    }
-    return result;
 }
 
 //+------------------------------------------------------------------+
@@ -945,172 +802,37 @@ string CleanChannelName(string channelName)
 
 //+------------------------------------------------------------------+
 //| FormatMT4Comment: Format comment string within 31 char limit    |
-//| New format: 1234|ABCD|1.2550|1.2600 (GID|CHANNEL|TP1|ORDER_TP)|
+//| Format: 1234|ABCD|1.2550,1.2600 (GID|CHANNEL|TP1,TP2,TP3)      |
 //+------------------------------------------------------------------+
-string FormatMT4Comment(int groupId, string channelName, double tp1, double tp2, string symbol)
+string FormatMT4Comment(int groupId, string channelName, double &tpLevels[], int tpCount, string symbol)
 {
     string cleanChannel = CleanChannelName(channelName);
     
     // Determine decimal precision based on symbol type
     int precision = 4; // Default for Forex
-    string upperSymbol = ToUpperCase(symbol);
-    
-    if(StringFind(upperSymbol, "XAUUSD") >= 0 || StringFind(upperSymbol, "GOLD") >= 0) {
+    StringToUpper(symbol);
+
+    if(StringFind(symbol, "XAUUSD") >= 0 || StringFind(symbol, "GOLD") >= 0) {
         precision = 1; // Gold: 3366.9 (1 decimal, total 6 chars)
-    } else if(StringFind(upperSymbol, "BTCUSD") >= 0 || StringFind(upperSymbol, "BTC") >= 0) {
+    } else if(StringFind(symbol, "BTCUSD") >= 0 || StringFind(symbol, "BTC") >= 0) {
         precision = 0; // Bitcoin: 118710 (no decimals, total 6 chars)
     } else {
         precision = 4; // Forex: 1.2550 (4 decimals, total 6 chars)
     }
-    
-    // Format TP values with appropriate precision
-    string tp1Str = DoubleToString(tp1, precision);
-    string tp2Str = DoubleToString(tp2, precision);
-    
-    // Remove trailing zeros if needed (except for the required format)
-    if(precision > 0) {
-        // For decimal numbers, ensure we maintain the required format length
-        while(StringLen(tp1Str) > 1 && StringGetCharacter(tp1Str, StringLen(tp1Str)-1) == '0' && StringFind(tp1Str, ".") >= 0)
-        {
-            tp1Str = StringSubstr(tp1Str, 0, StringLen(tp1Str)-1);
-        }
-        if(StringLen(tp1Str) > 1 && StringGetCharacter(tp1Str, StringLen(tp1Str)-1) == '.')
-        {
-            tp1Str = StringSubstr(tp1Str, 0, StringLen(tp1Str)-1);
-        }
-        
-        while(StringLen(tp2Str) > 1 && StringGetCharacter(tp2Str, StringLen(tp2Str)-1) == '0' && StringFind(tp2Str, ".") >= 0)
-        {
-            tp2Str = StringSubstr(tp2Str, 0, StringLen(tp2Str)-1);
-        }
-        if(StringLen(tp2Str) > 1 && StringGetCharacter(tp2Str, StringLen(tp2Str)-1) == '.')
-        {
-            tp2Str = StringSubstr(tp2Str, 0, StringLen(tp2Str)-1);
-        }
-    }
-    
-    // Build the comment: GID|CHANNEL|TP1|TP2
-    string comment = IntegerToString(groupId) + "|" + cleanChannel + "|" + tp1Str + "|" + tp2Str;
-    
-    // Ensure comment fits within MT4's 31-character limit
-    if(StringLen(comment) > 31)
-    {
-        // If too long, truncate precision further
-        if(precision > 0) {
-            precision = MathMax(0, precision - 1);
-            tp1Str = DoubleToString(tp1, precision);
-            tp2Str = DoubleToString(tp2, precision);
-            comment = IntegerToString(groupId) + "|" + cleanChannel + "|" + tp1Str + "|" + tp2Str;
-        }
-        
-        // If still too long, truncate the TP strings
-        if(StringLen(comment) > 31) {
-            int maxTPLen = (31 - StringLen(IntegerToString(groupId)) - StringLen(cleanChannel) - 3) / 2; // -3 for pipes
-            if(maxTPLen > 0) {
-                tp1Str = StringSubstr(tp1Str, 0, maxTPLen);
-                tp2Str = StringSubstr(tp2Str, 0, maxTPLen);
-                comment = IntegerToString(groupId) + "|" + cleanChannel + "|" + tp1Str + "|" + tp2Str;
-            }
-        }
-    }
-    
-    return comment;
-}
 
-//+------------------------------------------------------------------+
-//| CheckAndCleanExpiredLimitOrders: Delete limit orders if price passed TP1 |
-//+------------------------------------------------------------------+
-void CheckAndCleanExpiredLimitOrders()
-{
-    for(int i = OrdersTotal() - 1; i >= 0; i--) // Reverse loop for safe deletion
+    string formattedTpLevels[3];
+    for (int i = 0; i < MathMin(tpCount, 3); i++)
     {
-        if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
-            if(debugMode) PrintLog(eaName + ": Failed to select order at index " + IntegerToString(i) + " for limit check");
-            continue;
-        }
-        
-        // Only check our limit orders
-        if(OrderMagicNumber() != MAGIC_NUMBER) continue;
-        if(OrderType() != OP_BUYLIMIT && OrderType() != OP_SELLLIMIT) continue;
-        
-        // Parse order comment to extract TP1
-        string comment = OrderComment();
-        int groupId;
-        string channelName;
-        if(!ParseOrderCommentFull(comment, groupId, channelName)) {
-            if(debugMode) PrintLog(eaName + ": Failed to parse comment for limit order cleanup: " + comment);
-            continue;
-        }
-        
-        // Extract TP1 from comment (new format: GID|CHANNEL|TP1|ORDER_TP)
-        double tp1 = 0;
-        int firstPipe = StringFind(comment, "|");
-        if(firstPipe >= 0) {
-            int secondPipe = StringFind(comment, "|", firstPipe + 1);
-            if(secondPipe >= 0) {
-                int thirdPipe = StringFind(comment, "|", secondPipe + 1);
-                if(thirdPipe >= 0) {
-                    // Extract TP1 (third part of comment)
-                    string tp1Str = StringSubstr(comment, secondPipe + 1, thirdPipe - secondPipe - 1);
-                    if(IsValidDouble(tp1Str)) {
-                        tp1 = StrToDouble(tp1Str);
-                    }
-                }
-            }
-        }
-        
-        // If we couldn't extract TP1, skip this order
-        if(tp1 <= 0) {
-            if(debugMode) PrintLog(eaName + ": Could not extract TP1 from comment: " + comment);
-            continue;
-        }
-        
-        // Get current market prices
-        RefreshRates();
-        string symbol = OrderSymbol();
-        double ask = MarketInfo(symbol, MODE_ASK);
-        double bid = MarketInfo(symbol, MODE_BID);
-        
-        if(ask <= 0 || bid <= 0) {
-            if(debugMode) PrintLog(eaName + ": Invalid market prices for " + symbol + " - ask: " + DoubleToString(ask, 5) + " bid: " + DoubleToString(bid, 5));
-            continue;
-        }
-        
-        bool shouldDelete = false;
-        string reason = "";
-        
-        if(OrderType() == OP_BUYLIMIT) {
-            // For BUY LIMIT: if current ASK price is higher than TP1, delete the order
-            // (price moved up beyond TP1, no longer want to enter)
-            if(ask > tp1) {
-                shouldDelete = true;
-                reason = "BUY LIMIT: ask (" + DoubleToString(ask, MarketInfo(symbol, MODE_DIGITS)) + 
-                        ") > TP1 (" + DoubleToString(tp1, MarketInfo(symbol, MODE_DIGITS)) + ")";
-            }
-        }
-        else if(OrderType() == OP_SELLLIMIT) {
-            // For SELL LIMIT: if current BID price is lower than TP1, delete the order
-            // (price moved down beyond TP1, no longer want to enter)
-            if(bid < tp1) {
-                shouldDelete = true;
-                reason = "SELL LIMIT: bid (" + DoubleToString(bid, MarketInfo(symbol, MODE_DIGITS)) + 
-                        ") < TP1 (" + DoubleToString(tp1, MarketInfo(symbol, MODE_DIGITS)) + ")";
-            }
-        }
-        
-        if(shouldDelete) {
-            int ticket = OrderTicket();
-            bool deleted = OrderDelete(ticket);
-            if(deleted) {
-                PrintLog(eaName + ": Deleted expired limit order #" + IntegerToString(ticket) + 
-                       " GID:" + IntegerToString(groupId) + " Channel:" + channelName + 
-                       " Reason: " + reason);
-            } else {
-                PrintLog(eaName + ": Failed to delete expired limit order #" + IntegerToString(ticket) + 
-                       " Error: " + IntegerToString(GetLastError()));
-            }
-        }
+         string tpStr = DoubleToString(tpLevels[i], precision);
+         formattedTpLevels[i] = tpStr;
     }
+
+    string result[3];
+    result[0] = IntegerToString(groupId);
+    result[1] = cleanChannel;
+    result[2] = StringJoin(formattedTpLevels, 3, ",");
+
+    return StringJoin(result, 3, "|");
 }
 
 //+------------------------------------------------------------------+
@@ -1118,213 +840,42 @@ void CheckAndCleanExpiredLimitOrders()
 //+------------------------------------------------------------------+
 void ProcessDynamicTrailingStop()
 {
-    // Clean up inactive trailing stops first
-    CleanupInactiveTrailingStops();
-    
-    // Update all active trailing stop states based on history
-    for(int i = 0; i < gTrailingStopsCount; i++)
-    {
-        UpdateTrailingStopState(gTrailingStops[i].gid, gTrailingStops[i].channel);
-    }
-}
 
-//+------------------------------------------------------------------+
-//| CleanupInactiveTrailingStops: Remove GIDs with no open orders  |
-//+------------------------------------------------------------------+
-void CleanupInactiveTrailingStops()
-{
-    for(int i = gTrailingStopsCount - 1; i >= 0; i--) // Reverse loop for safe removal
+    for(int o = 0; o < OrdersTotal(); o++)
     {
-        bool hasOpenOrders = false;
-        
-        // Check if this GID has any open orders
-        for(int o = 0; o < OrdersTotal(); o++)
-        {
-            if(!OrderSelect(o, SELECT_BY_POS, MODE_TRADES)) continue;
-            if(OrderMagicNumber() != MAGIC_NUMBER) continue;
-            if(OrderSymbol() != gTrailingStops[i].symbol) continue;
-            
-            int orderGid;
-            string orderChannel;
-            if(!ParseOrderCommentFull(OrderComment(), orderGid, orderChannel)) continue;
-            if(orderGid == gTrailingStops[i].gid && orderChannel == gTrailingStops[i].channel) {
-                hasOpenOrders = true;
-                break;
+      if(!OrderSelect(o, SELECT_BY_POS, MODE_TRADES)) continue;
+      if(OrderMagicNumber() != MAGIC_NUMBER) continue;
+      
+      double tpLevels[3];
+      int tpCount = ParseOrderTpLevels(OrderComment(), tpLevels);
+      if(tpCount <= 0) continue; // No TP levels found, skip TS for this order
+      
+      int tpHitLevel = 0;
+      for (int i = 0; i < tpCount; i++)
+      {
+          if((OrderType() == OP_BUY && OrderClosePrice() >= tpLevels[i]) ||
+             (OrderType() == OP_SELL && OrderClosePrice() <= tpLevels[i]))
+          {
+              tpHitLevel = i + 1; // TP levels are 1-based
+          }
+      }
+      if(tpHitLevel <= 0) continue; // No TPs hit yet, skip TS for this order
+      
+      double newSL = CalculateNewSL(tpHitLevel, OrderOpenPrice(), OrderStopLoss(), tpLevels, tpCount, OrderSymbol(), OrderType() == OP_BUY);
+      double currentSL = OrderStopLoss();
+      if(MathAbs(currentSL - newSL) > SL_MODIFY_THRESHOLD)
+      {
+            bool modified = OrderModify(OrderTicket(), OrderOpenPrice(), newSL, 
+                                    OrderTakeProfit(), 0, clrOrange);
+            if(modified) {
+               PrintLog(eaName + ": Trailing SL updated for ticket:" + IntegerToString(OrderTicket()) +
+                     " from " + DoubleToString(currentSL, MarketInfo(OrderSymbol(), MODE_DIGITS)) + 
+                     " to " + DoubleToString(newSL, MarketInfo(OrderSymbol(), MODE_DIGITS)));
+            } else {
+               PrintLog(eaName + ": Failed to update trailing SL for ticket:" + IntegerToString(OrderTicket()) +
+                     " Error:" + IntegerToString(GetLastError()));
             }
-        }
-        
-        // If no open orders and more than 5 minutes old, remove from array
-        if(!hasOpenOrders && TimeCurrent() - gTrailingStops[i].lastUpdate > 300) {
-            // Shift array elements down to remove this entry
-            for(int j = i; j < gTrailingStopsCount - 1; j++) {
-                gTrailingStops[j] = gTrailingStops[j + 1];
-            }
-            gTrailingStopsCount--;
-        }
-    }
-}
-
-//+------------------------------------------------------------------+
-//| InitializeTrailingStop: Set up new trailing stop state         |
-//+------------------------------------------------------------------+
-void InitializeTrailingStop(int gid, string channel, string symbol, bool isBuy, 
-                           double entry, double sl, double &tpLevels[], int tpCount)
-{
-    // Check if this GID already exists
-    int existingIndex = GetTrailingStopIndex(gid, channel);
-    if(existingIndex >= 0) {
-        return;
-    }
-    
-    // Add new trailing stop state
-    if(gTrailingStopsCount >= 100) {
-        PrintLog(eaName + ": Warning: Maximum trailing stop entries reached, skipping GID:" + IntegerToString(gid));
-        return;
-    }
-    
-    TrailingStopState newState;
-    newState.gid = gid;
-    newState.channel = channel;
-    newState.symbol = symbol;
-    newState.isBuy = isBuy;
-    newState.originalEntry = entry;
-    newState.originalSL = sl;
-    newState.tpHitLevel = 0; // No TPs hit yet
-    newState.tpCount = tpCount;
-    newState.lastUpdate = TimeCurrent();
-    
-    // Copy TP levels
-    for(int i = 0; i < tpCount && i < 20; i++) {
-        newState.tpLevels[i] = tpLevels[i];
-    }
-    
-    gTrailingStops[gTrailingStopsCount] = newState;
-    gTrailingStopsCount++;
-    
-    PrintLog(eaName + ": Trailing stop initialized for GID:" + IntegerToString(gid) + 
-           " Channel:" + channel + " TPCount:" + IntegerToString(tpCount) + 
-           " Entry:" + DoubleToString(entry, MarketInfo(symbol, MODE_DIGITS)) +
-           " SL:" + DoubleToString(sl, MarketInfo(symbol, MODE_DIGITS)));
-    
-    // Debug: print all TP levels
-    if(debugMode) {
-        for(int j = 0; j < tpCount && j < 20; j++) {
-            PrintLog(eaName + ": TP[" + IntegerToString(j+1) + "] = " + 
-                   DoubleToString(newState.tpLevels[j], MarketInfo(symbol, MODE_DIGITS)));
-        }
-    }
-}
-
-//+------------------------------------------------------------------+
-//| UpdateTrailingStopState: Check history and update SL           |
-//+------------------------------------------------------------------+
-void UpdateTrailingStopState(int gid, string channel)
-{
-    int index = GetTrailingStopIndex(gid, channel);
-    if(index < 0) return;
-    
-    if(debugMode) PrintLog(eaName + ": Updating trailing stop state for GID:" + IntegerToString(gid) + 
-                          " Channel:" + channel + " Current level:" + IntegerToString(gTrailingStops[index].tpHitLevel));
-    
-    int newTpHitLevel = 0;
-    
-    // Check history for closed orders with profit (TP hits)
-    int historyTotal = OrdersHistoryTotal();
-    for(int h = 0; h < historyTotal; h++)
-    {
-        if(!OrderSelect(h, SELECT_BY_POS, MODE_HISTORY)) continue;
-        if(OrderMagicNumber() != MAGIC_NUMBER) continue;
-        if(OrderSymbol() != gTrailingStops[index].symbol) continue;
-        
-        // Parse order comment to check if it belongs to our GID
-        int orderGid;
-        string orderChannel;
-        if(!ParseOrderCommentFull(OrderComment(), orderGid, orderChannel)) continue;
-        if(orderGid != gid || orderChannel != channel) continue;
-        
-        // Check if order was closed with profit (TP hit) after our last update
-        datetime closeTime = OrderCloseTime();
-        double profit = OrderProfit();
-        
-        if(closeTime > gTrailingStops[index].lastUpdate && profit > 0 && closeTime > 0) {
-            // Extract the TP level this order was targeting from comment
-            // Comment format: GID|CHANNEL|TP1|ORDER_TP
-            string comment = OrderComment();
-            
-            // Parse comment step by step to avoid nested StringFind errors
-            int firstPipe = StringFind(comment, "|");
-            if(firstPipe >= 0) {
-                int secondPipe = StringFind(comment, "|", firstPipe + 1);
-                if(secondPipe >= 0) {
-                    int thirdPipe = StringFind(comment, "|", secondPipe + 1);
-                    if(thirdPipe >= 0) {
-                        string orderTPStr = StringSubstr(comment, thirdPipe + 1);
-                        double orderTP = StrToDouble(orderTPStr);
-                        
-                        if(debugMode) PrintLog(eaName + ": Analyzing closed order TP: " + DoubleToString(orderTP, MarketInfo(gTrailingStops[index].symbol, MODE_DIGITS)) + 
-                                              " Profit: " + DoubleToString(profit, 2));
-                        
-                        // Find which TP level this corresponds to
-                        for(int tp = 0; tp < gTrailingStops[index].tpCount && tp < 20; tp++) {
-                            double diff = MathAbs(orderTP - gTrailingStops[index].tpLevels[tp]);
-                            if(debugMode) PrintLog(eaName + ": Comparing with TP[" + IntegerToString(tp+1) + "] = " + 
-                                                  DoubleToString(gTrailingStops[index].tpLevels[tp], MarketInfo(gTrailingStops[index].symbol, MODE_DIGITS)) + 
-                                                  " Diff: " + DoubleToString(diff, 8));
-                            if(diff <= 0.00001) {
-                                int detectedLevel = tp + 1; // TP levels are 1-indexed
-                                newTpHitLevel = MathMax(newTpHitLevel, detectedLevel);
-                                if(debugMode) PrintLog(eaName + ": MATCH FOUND! TP" + IntegerToString(detectedLevel) + " hit, new level: " + IntegerToString(newTpHitLevel));
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    // If new TP level was hit, update SL for remaining orders
-    if(newTpHitLevel > gTrailingStops[index].tpHitLevel) {
-        gTrailingStops[index].tpHitLevel = newTpHitLevel;
-        gTrailingStops[index].lastUpdate = TimeCurrent();
-        
-        double newSL = CalculateNewSL(gTrailingStops[index].tpHitLevel, gTrailingStops[index].originalEntry, gTrailingStops[index].originalSL, 
-                                     gTrailingStops[index].tpLevels, gTrailingStops[index].tpCount, gTrailingStops[index].symbol, gTrailingStops[index].isBuy);
-        
-        PrintLog(eaName + ": TP" + IntegerToString(newTpHitLevel) + " hit for GID:" + IntegerToString(gid) + 
-               " - Moving SL to:" + DoubleToString(newSL, MarketInfo(gTrailingStops[index].symbol, MODE_DIGITS)));
-        
-        // Update SL for all remaining open orders of this GID
-        for(int o = 0; o < OrdersTotal(); o++)
-        {
-            if(!OrderSelect(o, SELECT_BY_POS, MODE_TRADES)) continue;
-            if(OrderMagicNumber() != MAGIC_NUMBER) continue;
-            if(OrderSymbol() != gTrailingStops[index].symbol) continue;
-            
-            int orderGid;
-            string orderChannel;
-            if(!ParseOrderCommentFull(OrderComment(), orderGid, orderChannel)) continue;
-            if(orderGid != gid || orderChannel != channel) continue;
-            
-            // Only update market positions (not pending orders)
-            if(OrderType() != OP_BUY && OrderType() != OP_SELL) continue;
-            
-            double currentSL = OrderStopLoss();
-            if(MathAbs(currentSL - newSL) > SL_MODIFY_THRESHOLD)
-            {
-                bool modified = OrderModify(OrderTicket(), OrderOpenPrice(), newSL, 
-                                          OrderTakeProfit(), 0, clrOrange);
-                if(modified) {
-                    PrintLog(eaName + ": Trailing SL updated for ticket:" + IntegerToString(OrderTicket()) +
-                           " GID:" + IntegerToString(gid) + " from " + 
-                           DoubleToString(currentSL, MarketInfo(gTrailingStops[index].symbol, MODE_DIGITS)) + 
-                           " to " + DoubleToString(newSL, MarketInfo(gTrailingStops[index].symbol, MODE_DIGITS)));
-                } else {
-                    PrintLog(eaName + ": Failed to update trailing SL for ticket:" + IntegerToString(OrderTicket()) +
-                           " Error:" + IntegerToString(GetLastError()));
-                }
-            }
-        }
+      }
     }
 }
 
@@ -1340,9 +891,12 @@ double CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL,
     double newSL = originalSL;
     
     switch(tpHitLevel) {
-        case 1: // TP1 hit -> move SL to (SL+entry)/2
-            newSL = (originalSL + originalEntry) / 2.0;
+        case 1: // TP1 hit -> move SL to entry
+        {
+            double diff = MathAbs(originalEntry - tpLevels[0]) * 2;
+            newSL = isBuy ? originalEntry - diff : originalEntry + diff;
             break;
+      }
             
         case 2: // TP2 hit -> move SL to TP1
             newSL = tpLevels[0];
@@ -1358,12 +912,9 @@ double CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL,
             else return originalSL;
             break;
             
-        default: // TP5+ hit -> move SL to previous TP level
-            if(tpHitLevel > 4 && tpHitLevel <= tpCount) {
-                int targetIndex = tpHitLevel - 2; // Previous TP level (0-indexed)
-                if(targetIndex >= 0 && targetIndex < tpCount && targetIndex < 20) {
-                    newSL = tpLevels[targetIndex];
-                } else return originalSL;
+        default: // TP5+ not supported, use last TP level as fallback
+            if(tpHitLevel > 4) {
+               newSL = tpLevels[tpCount - 1];
             } else return originalSL;
             break;
     }
@@ -1371,7 +922,6 @@ double CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL,
     // Validate SL direction for BUY/SELL - ensure it moves in favorable direction only
     if(isBuy) {
         // For BUY: new SL should be higher than current SL (more favorable)
-        // But allow equal SL in case of breakeven moves
         if(newSL < originalSL) {
             if(debugMode) PrintLog(eaName + ": BUY - New SL " + DoubleToString(newSL, digits) + 
                                   " would be worse than original " + DoubleToString(originalSL, digits) + ", keeping original");
@@ -1379,7 +929,6 @@ double CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL,
         }
     } else {
         // For SELL: new SL should be lower than current SL (more favorable)  
-        // But allow equal SL in case of breakeven moves
         if(newSL > originalSL) {
             if(debugMode) PrintLog(eaName + ": SELL - New SL " + DoubleToString(newSL, digits) + 
                                   " would be worse than original " + DoubleToString(originalSL, digits) + ", keeping original");
@@ -1393,19 +942,6 @@ double CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL,
                           " Direction:" + (isBuy ? "BUY" : "SELL"));
     
     return NormalizeDouble(newSL, digits);
-}
-
-//+------------------------------------------------------------------+
-//| GetTrailingStopIndex: Find index of GID in trailing stop array |
-//+------------------------------------------------------------------+
-int GetTrailingStopIndex(int gid, string channel)
-{
-    for(int i = 0; i < gTrailingStopsCount; i++) {
-        if(gTrailingStops[i].gid == gid && gTrailingStops[i].channel == channel) {
-            return i;
-        }
-    }
-    return -1;
 }
 
 //+------------------------------------------------------------------+
@@ -1431,3 +967,16 @@ void PrintLog(string msg)
     Print(msg);
 }
 
+//+------------------------------------------------------------------+
+//| StringJoin: Join array of strings with a delimiter              |
+//+------------------------------------------------------------------+
+string StringJoin(string &arr[], int size, string delimiter)
+{
+    string result = "";
+    for(int i = 0; i < size; i++)
+    {
+        if(i > 0 && StringLen(arr[i]) > 0) result += delimiter;
+        result += arr[i];
+    }
+    return result;
+}
