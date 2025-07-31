@@ -74,7 +74,8 @@ void    UpdateTrailingStopState(int gid, string channel);
 double  CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL, 
                       double &tpLevels[], int tpCount, string symbol, bool isBuy);
 int     GetTrailingStopIndex(int gid, string channel);
-bool    ParseOrderComment(string comment, int &groupId, string &channelName);
+bool    ParseOrderGidChannel(string comment, int &groupId, string &channelName);
+int     ParseOrderTpLevels(string comment, double &tpLevels[]);
 
 // Utility functions
 bool    IsSignalTooOld(long signalTimestampMs);
@@ -147,7 +148,7 @@ int start()
                     {
                         int orderGid;
                         string orderChannel;
-                        if(ParseOrderComment(OrderComment(), orderGid, orderChannel))
+                        if(ParseOrderGidChannel(OrderComment(), orderGid, orderChannel))
                         {
                             if(orderGid == groupId && orderChannel == channelName)
                             {
@@ -434,7 +435,7 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, stri
         // Parse the order's comment to get channel information
         int orderGid;
         string orderChannelName;
-        if(!ParseOrderComment(OrderComment(), orderGid, orderChannelName)) {
+        if(!ParseOrderGidChannel(OrderComment(), orderGid, orderChannelName)) {
             if (debugMode) PrintLog(eaName + ": Failed to parse order comment for ticket " + IntegerToString(OrderTicket()) + ": " + OrderComment());
             continue;
         }
@@ -468,7 +469,7 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, stri
 }
 
 //+------------------------------------------------------------------+
-//| SendOrders: Place three market orders with SL & TP        |
+//| SendOrders: Place up to four market orders with SL & TP        |
 //+------------------------------------------------------------------+
 void SendOrders(string signalType, string symbol,
                       double entryPrice, double stopLoss,
@@ -545,8 +546,8 @@ void SendOrders(string signalType, string symbol,
     double lotSize = (symbol == "BTCUSD") ? fixedLotSizeBitcoin :
                         (symbol == "XAUUSD") ? fixedLotSizeGold : fixedLotSize;
 
-    // Create orders for each TP level
-    for(int k=0; k<tpCount; k++)
+    // Create orders for each TP level, at most 4
+    for(int k=0; k<MathMin(tpCount, 4); k++)
     {
          // for market orders we want to get the correct current price
          // to avoid off-quotes errors
@@ -662,15 +663,15 @@ void ProcessExternalSLUpdates()
 }
 
 //+------------------------------------------------------------------+
-//| ParseOrderCommentFull: extracts GID and channel from comment    |
+//| ParseOrderGidChannel: Extract GID and channel name from order comment |
 //+------------------------------------------------------------------+
-bool ParseOrderComment(string comment, int &groupId, string &channelName)
+bool ParseOrderGidChannel(string comment, int &groupId, string &channelName)
 {
     // 1234|ABCD|1.2550,1.2600 (GID|CHANNEL|TP1,TP2,...)
     
     string parts[];
     if(StringSplit(comment, '|', parts) < 2) {
-        PrintLog(eaName + ": Invalid comment format, expected 2 parts but got " + IntegerToString(ArraySize(parts)));
+        PrintLog(eaName + ": Invalid comment format, expected at least 2 parts but got " + IntegerToString(ArraySize(parts)));
         return(false);
     }
 
@@ -687,12 +688,38 @@ bool ParseOrderComment(string comment, int &groupId, string &channelName)
         if(debugMode) PrintLog(eaName + ": Invalid channel name length in new comment: " + comment);
         channelName = "UNKN"; // Fallback
     }
-    
-    if(debugMode) {
-        PrintLog(eaName + ": Parsed comment - GID:" + IntegerToString(groupId) + " Channel:" + channelName);
-    }
-    
+
     return(true);
+}
+
+//+------------------------------------------------------------------+
+//| ParseOrderTpLevels: extracts TP levels from order comment, returns TP count       |
+//+------------------------------------------------------------------+
+int ParseOrderTpLevels(string comment, double &tpLevels[])
+{
+    // 1234|ABCD|1.2550,1.2600 (GID|CHANNEL|TP1,TP2,...)
+    
+    string parts[];
+    StringSplit(comment, '|', parts);
+
+    int tpCount = 0;
+    // Extract TP levels (third part, comma-separated)
+    if(ArraySize(parts) > 2) {
+        string tpPart = parts[2];
+        string tpLevelsString[];
+        if(StringSplit(tpPart, ',', tpLevelsString) > 0) {
+            for(int i=0; i<ArraySize(tpLevelsString); i++) {
+                if(IsValidDouble(tpLevelsString[i])) {
+                    ArrayResize(tpLevels, tpCount + 1);
+                    tpLevels[tpCount++] = StrToDouble(tpLevelsString[i]);
+                }
+            }
+        }
+    } else {
+      return(0); // No TP levels found
+    }
+
+    return(tpCount);
 }
 
 //+------------------------------------------------------------------+
@@ -873,7 +900,7 @@ void CleanupInactiveTrailingStops()
             
             int orderGid;
             string orderChannel;
-            if(!ParseOrderComment(OrderComment(), orderGid, orderChannel)) continue;
+            if(!ParseOrderGidChannel(OrderComment(), orderGid, orderChannel)) continue;
             if(orderGid == gTrailingStops[i].gid && orderChannel == gTrailingStops[i].channel) {
                 hasOpenOrders = true;
                 break;
@@ -966,7 +993,7 @@ void UpdateTrailingStopState(int gid, string channel)
         // Parse order comment to check if it belongs to our GID
         int orderGid;
         string orderChannel;
-        if(!ParseOrderComment(OrderComment(), orderGid, orderChannel)) continue;
+        if(!ParseOrderGidChannel(OrderComment(), orderGid, orderChannel)) continue;
         if(orderGid != gid || orderChannel != channel) continue;
         
         // Check if order was closed with profit (TP hit) after our last update
@@ -1030,7 +1057,7 @@ void UpdateTrailingStopState(int gid, string channel)
             
             int orderGid;
             string orderChannel;
-            if(!ParseOrderComment(OrderComment(), orderGid, orderChannel)) continue;
+            if(!ParseOrderGidChannel(OrderComment(), orderGid, orderChannel)) continue;
             if(orderGid != gid || orderChannel != channel) continue;
             
             // Only update market positions (not pending orders)
