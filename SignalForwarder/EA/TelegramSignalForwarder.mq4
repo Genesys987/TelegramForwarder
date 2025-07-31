@@ -858,7 +858,6 @@ void ProcessDynamicTrailingStop()
              (OrderType() == OP_SELL && OrderClosePrice() <= tpLevels[i]))
           {
               tpHitLevel = i + 1; // TP levels are 1-based
-              break;
           }
       }
       if(tpHitLevel <= 0) continue; // No TPs hit yet, skip TS for this order
