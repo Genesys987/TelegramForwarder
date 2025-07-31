@@ -5,6 +5,7 @@
 3. Set up MT4 strategy tester
      - Date: from 2025.06.25. to 2025.06.26.
      - Symbol: EURUSD
+     - Time frame: H1
      - Model: Every tick
      - Use visual mode: checked
      - Expert properties: load from `testing.set` file
