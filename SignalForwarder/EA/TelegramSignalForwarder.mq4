@@ -15,6 +15,7 @@ extern string symbolPostfix           = "";     // Broker-specific symbol postfi
 extern double fixedLotSize              = 0.02;  // Default lot size for FX orders
 extern double fixedLotSizeBitcoin       = 0.02;  // Default lot size for Bitcoin orders
 extern double fixedLotSizeGold          = 0.02;  // Default lot size for Gold orders
+extern double stopLossMultiplier           = 2.0;   // Factor to adjust SL when TP1 is hit, if less than zero, SL will not be adjusted
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -880,10 +881,14 @@ double CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL,
 
   int digits = MarketInfo(symbol, MODE_DIGITS);
   double newSL = originalSL;
+  
+  if(stopLossMultiplier <= 0) {
+   return NormalizeDouble(originalSL, digits); // No multiplier set, return original SL
+  }
 
   switch(tpHitLevel) {
   case 1: { // TP1 hit -> move SL to entry
-    double diff = MathAbs(originalEntry - tpLevels[0]) * 2;
+    double diff = MathAbs(originalEntry - tpLevels[0]) * stopLossMultiplier;
     newSL = isBuy ? originalEntry - diff : originalEntry + diff;
     break;
   }
