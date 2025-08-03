@@ -44,7 +44,7 @@ struct Signal {
 //|--- Global State Variables                                       |
 //+------------------------------------------------------------------+
 string   eaName               = "TelegramSignalForwarder";
-int      fh = -1;                  // File handle for reading signals
+int      signalFileHandle = -1;                  // File handle for reading signals in test mode
 string   storedTestSignal = "";
 
 //+------------------------------------------------------------------+
@@ -152,32 +152,33 @@ Signal ReadSignalFile()
   Signal signal;
   string line = "";
   if(StringLen(storedTestSignal) == 0) {
-    if(fh == -1) {
+    if(signalFileHandle == -1) {
       if(!FileExists(gSignalFile))
         return signal;
-      fh = FileOpen(gSignalFile, FILE_READ|FILE_SHARE_READ | FILE_TXT | FILE_ANSI);
+      signalFileHandle = FileOpen(gSignalFile, FILE_READ|FILE_SHARE_READ | FILE_TXT | FILE_ANSI);
       PrintLog(eaName + ": Opening signal file " + gSignalFile);
-      if(fh == INVALID_HANDLE) {
+      if(signalFileHandle == INVALID_HANDLE) {
         PrintLog(eaName + ": Failed to open signal file");
         return signal;
       }
     }
 
-    if(fh == INVALID_HANDLE) {
+    if(signalFileHandle == INVALID_HANDLE) {
       PrintLog(eaName + ": Failed to open temp file for reading");
       return signal;
     }
-    if(IsTesting() && FileIsEnding(fh)) {
-      FileClose(fh);
+    // in test mode, we keep the file open to read multiple signals
+    if(IsTesting() && FileIsEnding(signalFileHandle)) {
+      FileClose(signalFileHandle);
       return signal;
     }
-    line = FileReadString(fh);
+    line = FileReadString(signalFileHandle);
     if(debugMode) {
       PrintLog(eaName + ": Read signal line: [" + line + "]");
     }
     if(!IsTesting()) {
-      FileClose(fh);
-      fh = -1;
+      FileClose(signalFileHandle);
+      signalFileHandle = -1;
       FileDelete(gSignalFile);
     }
   } else {
@@ -188,9 +189,9 @@ Signal ReadSignalFile()
   }
 
   Signal result = readSignalLine(line, true);
-  if(result.isValid) 
+  if(result.isValid)
     storedTestSignal = "";
-  
+
   return result;
 }
 
@@ -529,15 +530,15 @@ void ProcessExternalSLUpdates()
 {
   if(!FileExists(gExternalSLFile))
     return;
-  if(fh == -1) {
-    fh = FileOpen(gExternalSLFile, FILE_READ|FILE_SHARE_READ|FILE_TXT|FILE_ANSI);
+  if(signalFileHandle == -1) {
+    signalFileHandle = FileOpen(gExternalSLFile, FILE_READ|FILE_SHARE_READ|FILE_TXT|FILE_ANSI);
   }
-  if(fh == INVALID_HANDLE)
+  if(signalFileHandle == INVALID_HANDLE)
     return;
-  string cmd = FileReadString(fh);
+  string cmd = FileReadString(signalFileHandle);
   if(!IsTesting()) {
-    FileClose(fh);
-    fh = -1;
+    FileClose(signalFileHandle);
+    signalFileHandle = -1;
     FileDelete(gExternalSLFile);
   }
 
@@ -934,6 +935,11 @@ double CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL,
 //+------------------------------------------------------------------+
 void PrintLog(string msg)
 {
+  if(IsTesting()) {
+    Print(msg);
+    return;
+  }
+
   datetime currentTime = TimeCurrent() - (brokerTimeOffsetMinutes * 60);
   string dateStr = TimeToString(currentTime, TIME_DATE);
   string y = StringSubstr(dateStr, 0, 4);
