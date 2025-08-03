@@ -11,11 +11,12 @@
 extern bool   debugMode                = true;  // Enable detailed logging
 extern int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC in minutes (e.g., UTC+2 = 120)
 extern int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
-extern string symbolPostfix           = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
-extern double fixedLotSize              = 0.02;  // Default lot size for FX orders
-extern double fixedLotSizeBitcoin       = 0.02;  // Default lot size for Bitcoin orders
-extern double fixedLotSizeGold          = 0.02;  // Default lot size for Gold orders
-extern double stopLossMultiplier           = 0.5;   // Factor to adjust SL at TP1 - 0.0 = entry, 1.0 = keep original SL
+extern string symbolPostfix            = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
+extern double fixedLotSize             = 0.02;  // Default lot size for FX orders
+extern double fixedLotSizeBitcoin      = 0.02;  // Default lot size for Bitcoin orders
+extern double fixedLotSizeGold         = 0.02;  // Default lot size for Gold orders
+extern double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0.0 = entry, 1.0 = keep original SL
+extern string signalFile               = "signals.txt";       // Incoming signal file
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -23,7 +24,6 @@ extern double stopLossMultiplier           = 0.5;   // Factor to adjust SL at TP
 #define MAGIC_NUMBER          123456             // Unique EA identifier
 #define SL_MODIFY_THRESHOLD   0.00001            // Minimum SL diff to apply
 
-static string gSignalFile     = "signals.txt";       // Incoming signal file
 static string gTempFile       = "processing.txt";     // Temp file to avoid re-read
 static string gExternalSLFile = "stoploss_update.txt";// External SL updates
 
@@ -152,10 +152,10 @@ Signal ReadSignalFile()
   string line = "";
   if(StringLen(storedTestSignal) == 0) {
     if(signalFileHandle == -1) {
-      if(!FileExists(gSignalFile))
+      if(!FileExists(signalFile))
         return signal;
-      signalFileHandle = FileOpen(gSignalFile, FILE_READ|FILE_SHARE_READ | FILE_TXT | FILE_ANSI);
-      PrintLog(eaName + ": Opening signal file " + gSignalFile);
+      signalFileHandle = FileOpen(signalFile, FILE_READ|FILE_SHARE_READ | FILE_TXT | FILE_ANSI);
+      PrintLog(eaName + ": Opening signal file " + signalFile);
       if(signalFileHandle == INVALID_HANDLE) {
         PrintLog(eaName + ": Failed to open signal file");
         return signal;
@@ -178,7 +178,7 @@ Signal ReadSignalFile()
     if(!IsTesting()) {
       FileClose(signalFileHandle);
       signalFileHandle = -1;
-      FileDelete(gSignalFile);
+      FileDelete(signalFile);
     }
   } else {
     line = storedTestSignal;
