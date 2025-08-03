@@ -191,6 +191,14 @@ Signal ReadSignalFile()
   if(StringLen(line) == 0) {
     return signal;
   }
+
+  return readSignalLine(line, true);
+}
+
+Signal readSignalLine(string line, bool shouldValidate)
+{
+  Signal signal;
+  signal.tpCount = 0;
 // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3,...|SL|GID:<id>|CHANNEL_NAME
   string parts[];
   if(StringSplit(line, '|', parts) < 8) {
@@ -205,7 +213,7 @@ Signal ReadSignalFile()
   string timestampStr = parts[0];
   long signalTimestamp = StrToInteger(timestampStr);
   signal.timestamp = signalTimestamp;
-  if(IsSignalTooOld(signalTimestamp)) {
+  if(shouldValidate && IsSignalTooOld(signalTimestamp)) {
     if(!IsTesting()) {
       PrintLog(eaName + ": Signal too old, skipping. Timestamp=" + IntegerToString(signalTimestamp));
     } else {
@@ -214,7 +222,8 @@ Signal ReadSignalFile()
     }
   }
 
-  storedTestSignal = "";
+  if(shouldValidate)
+    storedTestSignal = "";
 
 // 1) Signal type
   signal.type = parts[1];
@@ -286,15 +295,9 @@ Signal ReadSignalFile()
     }
   }
 
-// 5) Stop loss, remove brackets
+// 5) Stop loss
   string rawSL = parts[5];
-  while(StringFind(rawSL, "[") >= 0) {
-    int b1 = StringFind(rawSL, "[");
-    int b2 = StringFind(rawSL, "]", b1);
-    if(b2 < 0)
-      break;
-    rawSL = StringSubstr(rawSL, 0, b1) + StringSubstr(rawSL, b2+1);
-  }
+
   if(!IsValidDouble(rawSL)) {
     PrintLog(eaName + ": Invalid stop loss '" + rawSL + "', skipping");
     return signal;
@@ -324,7 +327,7 @@ Signal ReadSignalFile()
 
 // Check if this signal was already processed to avoid duplicates
   datetime currentTime = TimeCurrent();
-  if(signal.groupId == lastProcessedGroupId && currentTime - lastProcessedTime < 60) {
+  if(shouldValidate && signal.groupId == lastProcessedGroupId && currentTime - lastProcessedTime < 60) {
     if(debugMode)
       PrintLog(eaName + ": Signal GID=" + IntegerToString(signal.groupId) + " already processed recently, skipping");
     return signal;
