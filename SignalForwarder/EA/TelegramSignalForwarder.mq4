@@ -821,7 +821,7 @@ double CalculateNewSL(int tpHitLevel, Signal &signal)
   int digits = MarketInfo(signal.symbol, MODE_DIGITS);
   double newSL = signal.stopLoss;
 
-  if(stopLossMultiplier <= 0) {
+  if(stopLossMultiplier < 0) {
     return NormalizeDouble(signal.stopLoss, digits); // No multiplier set, return original SL
   }
 
