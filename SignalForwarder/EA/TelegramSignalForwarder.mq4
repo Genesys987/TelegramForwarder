@@ -16,7 +16,6 @@ extern double fixedLotSize             = 0.02;  // Default lot size for FX order
 extern double fixedLotSizeBitcoin      = 0.02;  // Default lot size for Bitcoin orders
 extern double fixedLotSizeGold         = 0.02;  // Default lot size for Gold orders
 extern double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0.0 = entry, 1.0 = keep original SL
-extern string signalFile               = "signals.txt";       // Incoming signal file
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -26,6 +25,7 @@ extern string signalFile               = "signals.txt";       // Incoming signal
 
 static string gTempFile       = "processing.txt";     // Temp file to avoid re-read
 static string gExternalSLFile = "stoploss_update.txt";// External SL updates
+static string gSignalFile               = "signals.txt";       // Incoming signal file
 
 struct Signal {
   long               timestamp;
@@ -150,50 +150,64 @@ Signal ReadSignalFile()
 {
   Signal signal;
   string line = "";
-  if(StringLen(storedTestSignal) == 0) {
-    if(signalFileHandle == -1) {
-      if(!FileExists(signalFile))
-        return signal;
-      signalFileHandle = FileOpen(signalFile, FILE_READ|FILE_SHARE_READ | FILE_TXT | FILE_ANSI);
-      PrintLog(eaName + ": Opening signal file " + signalFile);
+  bool shouldKeepReading = false;
+  do {
+    if(StringLen(storedTestSignal) == 0) {
+      if(signalFileHandle == -1) {
+        if(!FileExists(gSignalFile))
+          return signal;
+        signalFileHandle = FileOpen(gSignalFile, FILE_READ|FILE_SHARE_READ | FILE_TXT | FILE_ANSI);
+        PrintLog(eaName + ": Opening signal file " + gSignalFile);
+        if(signalFileHandle == INVALID_HANDLE) {
+          PrintLog(eaName + ": Failed to open signal file");
+          return signal;
+        }
+      }
+
       if(signalFileHandle == INVALID_HANDLE) {
-        PrintLog(eaName + ": Failed to open signal file");
+        PrintLog(eaName + ": Failed to open temp file for reading");
         return signal;
       }
+      // in test mode, we keep the file open to read multiple signals
+      if(IsTesting() && FileIsEnding(signalFileHandle)) {
+        FileClose(signalFileHandle);
+        return signal;
+      }
+      line = FileReadString(signalFileHandle);
+      if(debugMode) {
+        PrintLog(eaName + ": Read signal line: [" + line + "]");
+      }
+      if(!IsTesting()) {
+        FileClose(signalFileHandle);
+        signalFileHandle = -1;
+        FileDelete(gSignalFile);
+      }
+    } else {
+      line = storedTestSignal;
     }
-
-    if(signalFileHandle == INVALID_HANDLE) {
-      PrintLog(eaName + ": Failed to open temp file for reading");
+    if(StringLen(line) == 0) {
+      PrintLog(eaName + ": Empty signal line, skipping");
       return signal;
     }
-    // in test mode, we keep the file open to read multiple signals
-    if(IsTesting() && FileIsEnding(signalFileHandle)) {
-      FileClose(signalFileHandle);
-      return signal;
-    }
-    line = FileReadString(signalFileHandle);
-    if(debugMode) {
-      PrintLog(eaName + ": Read signal line: [" + line + "]");
-    }
-    if(!IsTesting()) {
-      FileClose(signalFileHandle);
-      signalFileHandle = -1;
-      FileDelete(signalFile);
-    }
-  } else {
-    line = storedTestSignal;
-  }
-  if(StringLen(line) == 0) {
-    return signal;
-  }
 
-  Signal result = ReadSignalLine(line, true);
-  if(result.isValid) {
+    signal = ReadSignalLine(line, true);
+
+    bool isSymbolMatching = signal.symbol == Symbol();
+    shouldKeepReading = IsTesting() && signal.isValid && !isSymbolMatching && !FileIsEnding(signalFileHandle);
+    if(shouldKeepReading) {
+      storedTestSignal = "";
+      PrintLog(eaName + ": Continuing to read next signal line for testing - current symbol: " + Symbol() +
+               ", signal symbol: " + signal.symbol);
+    }
+  } while(shouldKeepReading);
+
+  if(signal.isValid) {
+    PrintLog(eaName + ": Found valid signal: " + line);
     storedTestSignal = "";
-    SaveSignalToFile(line, result.groupId);
+    SaveSignalToFile(line, signal.groupId);
   }
 
-  return result;
+  return signal;
 }
 
 //+------------------------------------------------------------------+
