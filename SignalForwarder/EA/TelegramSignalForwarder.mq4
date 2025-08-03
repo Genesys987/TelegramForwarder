@@ -27,12 +27,24 @@ static string gSignalFile     = "signals.txt";       // Incoming signal file
 static string gTempFile       = "processing.txt";     // Temp file to avoid re-read
 static string gExternalSLFile = "stoploss_update.txt";// External SL updates
 
+struct Signal {
+  long               timestamp;
+  string             type;
+  string             symbol;
+  double             entry;
+  double             tpLevels[20];
+  int                tpCount;
+  double             stopLoss;
+  int                groupId;
+  string             channelName;
+};
+
 //+------------------------------------------------------------------+
 //|--- Global State Variables                                       |
 //+------------------------------------------------------------------+
 string   eaName               = "TelegramSignalForwarder";
 int      fh = -1;                  // File handle for reading signals
-string   nextSignal = "";
+string   storedTestSignal = "";
 int      lastProcessedGroupId = -1; // Track last processed signal to avoid duplicates
 datetime lastProcessedTime = 0;     // Track last processed time for additional safety
 
@@ -40,13 +52,9 @@ datetime lastProcessedTime = 0;     // Track last processed time for additional 
 //|--- Function Prototypes                                          |
 //+------------------------------------------------------------------+
 void    PrintLog(string message);
-bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
-                    double &stopLoss,
-                    int &groupId, string &channelName, double &tpLevels[], int &tpCount);
-void    UpdateExistingOrdersSL(string symbol, string signalType, double newSL, string channelName);
-void    SendOrders(string signalType, string symbol,
-                   double entryPrice, double stopLoss,
-                   int groupId, string channelName, double &tpLevels[], int tpCount);
+Signal ReadSignalFile();
+void    UpdateExistingOrdersSL(Signal &signal);
+void    SendOrders(Signal &signal);
 void    ProcessExternalSLUpdates();
 void    ProcessDynamicTrailingStop();
 double  CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL,
@@ -95,20 +103,15 @@ int deinit()
 //+------------------------------------------------------------------+
 int start()
 {
-  string signalType, symbol, channelName;
-  double entryPrice, stopLoss;
-  int    groupId, tpCount;
-  double tpLevels[20]; // Support up to 20 TP levels
-
   if(IsTradeAllowed() && IsConnected() && !IsStopped()) {
     // Process dynamic trailing stop for existing positions
     ProcessDynamicTrailingStop();
 
     // Process new signal
-    if(ReadSignalFile(signalType, symbol, entryPrice,
-                      stopLoss, groupId, channelName, tpLevels, tpCount)) {
+    Signal signal = ReadSignalFile();
+    if(signal.tpCount > 0 && signal.groupId > 0 && StringLen(signal.type) > 0) {
       if(debugMode)
-        PrintLog(eaName + ": Processing NEW signal from channel '" + channelName + "' - GID=" + IntegerToString(groupId) + " with " + IntegerToString(tpCount) + " TP levels");
+        PrintLog(eaName + ": Processing NEW signal from channel '" + signal.channelName + "' - GID=" + IntegerToString(signal.groupId) + " with " + IntegerToString(signal.tpCount) + " TP levels");
 
       // Check if orders with this GID already exist
       bool hasExistingOrders = false;
@@ -118,7 +121,7 @@ int start()
             int orderGid;
             string orderChannel;
             if(ParseOrderGidChannel(OrderComment(), orderGid, orderChannel)) {
-              if(orderGid == groupId && orderChannel == channelName) {
+              if(orderGid == signal.groupId && orderChannel == signal.channelName) {
                 hasExistingOrders = true;
                 break;
               }
@@ -129,15 +132,13 @@ int start()
 
       if(hasExistingOrders) {
         if(debugMode)
-          PrintLog(eaName + ": Orders with GID=" + IntegerToString(groupId) + " already exist, only updating SL");
-        UpdateExistingOrdersSL(symbol, signalType, stopLoss, channelName);
+          PrintLog(eaName + ": Orders with GID=" + IntegerToString(signal.groupId) + " already exist, only updating SL");
+        UpdateExistingOrdersSL(signal);
       } else {
         if(debugMode)
           PrintLog(eaName + ": No existing orders found, creating new orders");
-        UpdateExistingOrdersSL(symbol, signalType, stopLoss, channelName);
-        SendOrders(signalType, symbol,
-                   entryPrice, stopLoss,
-                   groupId, channelName, tpLevels, tpCount);
+        UpdateExistingOrdersSL(signal);
+        SendOrders(signal);
       }
     }
   }
@@ -150,30 +151,30 @@ int start()
 //+------------------------------------------------------------------+
 //| ReadSignalFile: Parses a signal line from file                   |
 //+------------------------------------------------------------------+
-bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
-                    double &stopLoss,
-                    int &groupId, string &channelName, double &tpLevels[], int &tpCount)
+Signal ReadSignalFile()
 {
+  Signal signal;
+  signal.tpCount = 0;
   string line = "";
-  if(StringLen(nextSignal) == 0) {
+  if(StringLen(storedTestSignal) == 0) {
     if(fh == -1) {
       if(!FileExists(gSignalFile))
-        return(false);
+        return signal;
       fh = FileOpen(gSignalFile, FILE_READ|FILE_SHARE_READ | FILE_TXT | FILE_ANSI);
       PrintLog(eaName + ": Opening signal file " + gSignalFile);
       if(fh == INVALID_HANDLE) {
         PrintLog(eaName + ": Failed to open signal file");
-        return(false);
+        return signal;
       }
     }
 
     if(fh == INVALID_HANDLE) {
       PrintLog(eaName + ": Failed to open temp file for reading");
-      return(false);
+      return signal;
     }
     if(IsTesting() && FileIsEnding(fh)) {
       FileClose(fh);
-      return(false);
+      return signal;
     }
     line = FileReadString(fh);
     if(debugMode) {
@@ -185,20 +186,17 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
       FileDelete(gSignalFile);
     }
   } else {
-    line = nextSignal;
+    line = storedTestSignal;
   }
-
   if(StringLen(line) == 0) {
-    return(false);
+    return signal;
   }
-
 // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3,...|SL|GID:<id>|CHANNEL_NAME
   string parts[];
   if(StringSplit(line, '|', parts) < 8) {
     PrintLog(eaName + ": Invalid signal format, expected 8 parts but got " + IntegerToString(ArraySize(parts)));
-    return(false);
+    return signal;
   }
-
   for(int i = 0; i < ArraySize(parts); i++) {
     parts[i] = StringTrimLeft(StringTrimRight(parts[i]));
   }
@@ -206,87 +204,85 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
 // 0) Extract and validate timestamp (first part, no prefix)
   string timestampStr = parts[0];
   long signalTimestamp = StrToInteger(timestampStr);
-
+  signal.timestamp = signalTimestamp;
   if(IsSignalTooOld(signalTimestamp)) {
     if(!IsTesting()) {
       PrintLog(eaName + ": Signal too old, skipping. Timestamp=" + IntegerToString(signalTimestamp));
     } else {
-      nextSignal = line; // Store for next call in testing mode
-      return(false);
+      storedTestSignal = line;
+      return signal;
     }
   }
 
-  nextSignal = "";
+  storedTestSignal = "";
 
 // 1) Signal type
-  signalType = parts[1];
-  StringToUpper(signalType);
-  if(signalType != "BUY" && signalType != "SELL") {
-    PrintLog(eaName + ": Invalid signal type '" + signalType + "', expected BUY or SELL");
-    return(false);
+  signal.type = parts[1];
+  StringToUpper(signal.type);
+  if(signal.type != "BUY" && signal.type != "SELL") {
+    PrintLog(eaName + ": Invalid signal type '" + signal.type + "', expected BUY or SELL");
+    return signal;
   }
 
 // 2) Symbol validation
-  symbol = parts[2] + symbolPostfix;
-  if(MarketInfo(symbol, MODE_TIME) == 0) {
-    PrintLog(eaName + ": Invalid symbol '" + symbol + "', skipping");
-    return(false);
+  signal.symbol = parts[2] + symbolPostfix;
+  if(MarketInfo(signal.symbol, MODE_TIME) == 0) {
+    PrintLog(eaName + ": Invalid symbol '" + signal.symbol + "', skipping");
+    return signal;
   }
 
 // 3) Entry price
   if(!IsValidDouble(parts[3])) {
     PrintLog(eaName + ": Invalid entry price '" + parts[3] + "', skipping");
-    return(false);
+    return signal;
   }
-  entryPrice = NormalizeDouble(StrToDouble(parts[3]), MarketInfo(symbol, MODE_DIGITS));
+  signal.entry = NormalizeDouble(StrToDouble(parts[3]), MarketInfo(signal.symbol, MODE_DIGITS));
 
 // 4) TP levels - dynamic parsing with bounds checking
   string tpsArr[];
-  tpCount = StringSplit(parts[4], ',', tpsArr);
-  if(tpCount < 1) {
+  signal.tpCount = StringSplit(parts[4], ',', tpsArr);
+  if(signal.tpCount < 1) {
     PrintLog(eaName + ": Invalid TP levels '" + parts[4] + "', skipping");
-    return(false);
+    return signal;
   }
 
 // Enforce maximum TP count limit (array size is 20)
-  if(tpCount > 20) {
-    PrintLog(eaName + ": Warning: TP count " + IntegerToString(tpCount) + " exceeds maximum 20, truncating");
-    tpCount = 20;
+  if(signal.tpCount > 20) {
+    PrintLog(eaName + ": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum 20, truncating");
+    signal.tpCount = 20;
   }
 
 // Resize array to hold all TPs (up to maximum)
-  ArrayResize(tpLevels, tpCount);
-
+  ArrayResize(signal.tpLevels, signal.tpCount);
 // Parse all TP levels
-  for(int i=0; i<tpCount; i++) {
+  for(int i=0; i<signal.tpCount; i++) {
     if(!IsValidDouble(tpsArr[i])) {
       PrintLog(eaName + ": Invalid TP level[" + IntegerToString(i) + "] '" + tpsArr[i] + "', skipping");
-      return(false);
+      return signal;
     }
-    tpLevels[i] = NormalizeDouble(StrToDouble(tpsArr[i]), MarketInfo(symbol, MODE_DIGITS));
+    signal.tpLevels[i] = NormalizeDouble(StrToDouble(tpsArr[i]), MarketInfo(signal.symbol, MODE_DIGITS));
   }
 
 // Validate TP order and remove duplicates
-  bool shouldBuy = signalType == "BUY";
-  for(int i=0; i<tpCount; i++) {
-    // Check TP order (ascending for BUY, descending for SELL)
+  bool shouldBuy = signal.type == "BUY";
+  for(int i=0; i<signal.tpCount; i++) {
     if(i > 0) {
-      if(shouldBuy && tpLevels[i] <= tpLevels[i-1]) {
-        PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(tpLevels[i], MarketInfo(symbol, MODE_DIGITS)) +
-                 " should be higher than TP[" + IntegerToString(i-1) + "] " + DoubleToString(tpLevels[i-1], MarketInfo(symbol, MODE_DIGITS)) + " for BUY");
-      } else if(!shouldBuy && tpLevels[i] >= tpLevels[i-1]) {
-        PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(tpLevels[i], MarketInfo(symbol, MODE_DIGITS)) +
-                 " should be lower than TP[" + IntegerToString(i-1) + "] " + DoubleToString(tpLevels[i-1], MarketInfo(symbol, MODE_DIGITS)) + " for SELL");
+      if(shouldBuy && signal.tpLevels[i] <= signal.tpLevels[i-1]) {
+        PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+                 " should be higher than TP[" + IntegerToString(i-1) + "] " + DoubleToString(signal.tpLevels[i-1], MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
+      } else if(!shouldBuy && signal.tpLevels[i] >= signal.tpLevels[i-1]) {
+        PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+                 " should be lower than TP[" + IntegerToString(i-1) + "] " + DoubleToString(signal.tpLevels[i-1], MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
       }
     }
 
     // Check TP direction relative to entry
-    if(shouldBuy && tpLevels[i] <= entryPrice) {
-      PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(tpLevels[i], MarketInfo(symbol, MODE_DIGITS)) +
-               " should be higher than entry " + DoubleToString(entryPrice, MarketInfo(symbol, MODE_DIGITS)) + " for BUY");
-    } else if(!shouldBuy && tpLevels[i] >= entryPrice) {
-      PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(tpLevels[i], MarketInfo(symbol, MODE_DIGITS)) +
-               " should be lower than entry " + DoubleToString(entryPrice, MarketInfo(symbol, MODE_DIGITS)) + " for SELL");
+    if(shouldBuy && signal.tpLevels[i] <= signal.entry) {
+      PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+               " should be higher than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
+    } else if(!shouldBuy && signal.tpLevels[i] >= signal.entry) {
+      PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+               " should be lower than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
     }
   }
 
@@ -301,37 +297,37 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
   }
   if(!IsValidDouble(rawSL)) {
     PrintLog(eaName + ": Invalid stop loss '" + rawSL + "', skipping");
-    return(false);
+    return signal;
   }
-  stopLoss = NormalizeDouble(StrToDouble(rawSL), MarketInfo(symbol, MODE_DIGITS));
 
+  signal.stopLoss = NormalizeDouble(StrToDouble(rawSL), MarketInfo(signal.symbol, MODE_DIGITS));
 // Validate SL position relative to entry price
-  if(shouldBuy && stopLoss >= entryPrice) {
-    PrintLog(eaName + ": Warning: SL " + DoubleToString(stopLoss, MarketInfo(symbol, MODE_DIGITS)) +
-             " should be below entry " + DoubleToString(entryPrice, MarketInfo(symbol, MODE_DIGITS)) + " for BUY");
-  } else if(!shouldBuy && stopLoss <= entryPrice) {
-    PrintLog(eaName + ": Warning: SL " + DoubleToString(stopLoss, MarketInfo(symbol, MODE_DIGITS)) +
-             " should be above entry " + DoubleToString(entryPrice, MarketInfo(symbol, MODE_DIGITS)) + " for SELL");
+  if(shouldBuy && signal.stopLoss >= signal.entry) {
+    PrintLog(eaName + ": Warning: SL " + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
+             " should be below entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
+  } else if(!shouldBuy && signal.stopLoss <= signal.entry) {
+    PrintLog(eaName + ": Warning: SL " + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
+             " should be above entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
   }
 
-// 6) Group ID
   string gidPart = parts[6];
   if(StringFind(gidPart, "GID:") != 0) {
     PrintLog(eaName + ": Invalid group ID format '" + gidPart + "', skipping");
-    return(false);
+    return signal;
   }
-  groupId = (int)StrToInteger(StringSubstr(gidPart, 4));
-  if(groupId <= 0) {
-    PrintLog(eaName + ": Invalid group ID '" + IntegerToString(groupId) + "', skipping");
-    return(false);
+
+  signal.groupId = (int)StrToInteger(StringSubstr(gidPart, 4));
+  if(signal.groupId <= 0) {
+    PrintLog(eaName + ": Invalid group ID '" + IntegerToString(signal.groupId) + "', skipping");
+    return signal;
   }
 
 // Check if this signal was already processed to avoid duplicates
   datetime currentTime = TimeCurrent();
-  if(groupId == lastProcessedGroupId && currentTime - lastProcessedTime < 60) {
+  if(signal.groupId == lastProcessedGroupId && currentTime - lastProcessedTime < 60) {
     if(debugMode)
-      PrintLog(eaName + ": Signal GID=" + IntegerToString(groupId) + " already processed recently, skipping");
-    return(false);
+      PrintLog(eaName + ": Signal GID=" + IntegerToString(signal.groupId) + " already processed recently, skipping");
+    return signal;
   }
 
 // 7) Channel Name (new field) - clean and truncate to 4 letters
@@ -339,26 +335,26 @@ bool ReadSignalFile(string &signalType, string &symbol, double &entryPrice,
     string rawChannelName = parts[7];
     if(StringLen(rawChannelName) == 0)
       rawChannelName = "UNKNOWN";
-    channelName = CleanChannelName(rawChannelName);
+    signal.channelName = CleanChannelName(rawChannelName);
   } else {
-    channelName = "LEGC"; // For backward compatibility with old signals (4 letters)
+    signal.channelName = "LEGC";
   }
 
-  PrintLog(eaName + ": Parsed signal GID=" + IntegerToString(groupId) + " from channel '" + channelName + "'");
+  PrintLog(eaName + ": Parsed signal GID=" + IntegerToString(signal.groupId) + " from channel '" + signal.channelName + "'");
 
 // Mark this signal as processed to avoid duplicates
-  lastProcessedGroupId = groupId;
+  lastProcessedGroupId = signal.groupId;
   lastProcessedTime = TimeCurrent();
 
-  return(true);
+  return signal;
 }
 
 //+------------------------------------------------------------------+
 //| UpdateExistingOrdersSL: Update SL of existing orders from same channel |
 //+------------------------------------------------------------------+
-void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, string channelName)
+void UpdateExistingOrdersSL(Signal &signal)
 {
-// Skip XAUUSD (Gold) trades to avoid interfering with independent trades from same group
+  string symbol = signal.symbol;
   StringToUpper(symbol);
   if(StringFind(symbol, "XAUUSD") >= 0 || StringFind(symbol, "GOLD") >= 0) {
     if(debugMode)
@@ -367,7 +363,7 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, stri
     return;
   }
 
-  int targetOrderType = (signalType == "BUY") ? OP_BUY : OP_SELL;
+  int targetOrderType = (signal.type == "BUY") ? OP_BUY : OP_SELL;
 
   for(int i=0; i<OrdersTotal(); i++) {
     if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
@@ -396,22 +392,22 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, stri
     }
 
     // Only update SL if the order is from the same channel
-    if(orderChannelName != channelName) {
+    if(orderChannelName != signal.channelName) {
       if(debugMode)
         PrintLog(eaName + ": Ignoring order ticket " + IntegerToString(OrderTicket()) +
-                 " - different channel (order='" + orderChannelName + "', signal='" + channelName + "')");
+                 " - different channel (order='" + orderChannelName + "', signal='" + signal.channelName + "')");
       continue;
     }
 
     double currSL = OrderStopLoss();
-    if(MathAbs(currSL - newSL) > SL_MODIFY_THRESHOLD) {
+    if(MathAbs(currSL - signal.stopLoss) > SL_MODIFY_THRESHOLD) {
       double openP = OrderOpenPrice();
       double tp    = OrderTakeProfit();
-      bool ok = OrderModify(OrderTicket(), openP, newSL, tp, 0, clrBlue);
+      bool ok = OrderModify(OrderTicket(), openP, signal.stopLoss, tp, 0, clrBlue);
       if(ok)
         PrintLog(eaName + ": Updated SL for ticket=" + IntegerToString(OrderTicket()) +
-                 " from channel '" + channelName + "' (" + DoubleToString(currSL, MarketInfo(symbol, MODE_DIGITS)) +
-                 " -> " + DoubleToString(newSL, MarketInfo(symbol, MODE_DIGITS)) + ")");
+                 " from channel '" + signal.channelName + "' (" + DoubleToString(currSL, MarketInfo(symbol, MODE_DIGITS)) +
+                 " -> " + DoubleToString(signal.stopLoss, MarketInfo(symbol, MODE_DIGITS)) + ")");
       else
         PrintLog(eaName + ": SL update failed ticket=" + IntegerToString(OrderTicket()) +
                  " err=" + IntegerToString(GetLastError()));
@@ -419,7 +415,7 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, stri
       if(debugMode)
         PrintLog(eaName + ": SL change too small for ticket " + IntegerToString(OrderTicket()) +
                  " - current=" + DoubleToString(currSL, MarketInfo(symbol, MODE_DIGITS)) +
-                 " new=" + DoubleToString(newSL, MarketInfo(symbol, MODE_DIGITS)));
+                 " new=" + DoubleToString(signal.stopLoss, MarketInfo(symbol, MODE_DIGITS)));
     }
   }
 }
@@ -427,35 +423,32 @@ void UpdateExistingOrdersSL(string symbol, string signalType, double newSL, stri
 //+------------------------------------------------------------------+
 //| SendOrders: Place up to four market orders with SL & TP        |
 //+------------------------------------------------------------------+
-void SendOrders(string signalType, string symbol,
-                double entryPrice, double stopLoss,
-                int groupId, string channelName, double &tpLevels[], int tpCount)
+void SendOrders(Signal &signal)
 {
-// Simple check for immediate entry (entry price = 0)
-  if(entryPrice == 0.0) {
+// Use signal struct fields directly
+  if(signal.entry == 0.0) {
     RefreshRates();
-    double currentAsk = MarketInfo(symbol, MODE_ASK);
-    double currentBid = MarketInfo(symbol, MODE_BID);
+    double currentAsk = MarketInfo(signal.symbol, MODE_ASK);
+    double currentBid = MarketInfo(signal.symbol, MODE_BID);
 
-    // Replace 0 with current market price
-    entryPrice = (signalType == "BUY") ? currentAsk : currentBid;
+    signal.entry = (signal.type == "BUY") ? currentAsk : currentBid;
 
     if(debugMode) {
       PrintLog(eaName + ": IMMEDIATE ENTRY detected - Using market price: " +
-               DoubleToString(entryPrice, MarketInfo(symbol, MODE_DIGITS)) +
-               " for GID=" + IntegerToString(groupId));
+               DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) +
+               " for GID=" + IntegerToString(signal.groupId));
     }
   }
 
-  int digits    = MarketInfo(symbol, MODE_DIGITS);
-  double point  = MarketInfo(symbol, MODE_POINT);
-  int stopLevel = MarketInfo(symbol, MODE_STOPLEVEL);
+  int digits    = MarketInfo(signal.symbol, MODE_DIGITS);
+  double point  = MarketInfo(signal.symbol, MODE_POINT);
+  int stopLevel = MarketInfo(signal.symbol, MODE_STOPLEVEL);
 
   RefreshRates();
-  double ask = MarketInfo(symbol, MODE_ASK);
-  double bid = MarketInfo(symbol, MODE_BID);
-  bool shouldBuy = signalType == "BUY";
-  double tp1 = tpLevels[0];
+  double ask = MarketInfo(signal.symbol, MODE_ASK);
+  double bid = MarketInfo(signal.symbol, MODE_BID);
+  bool shouldBuy = signal.type == "BUY";
+  double tp1 = signal.tpLevels[0];
 
   double price = shouldBuy ? ask : bid;
   int orderType = (shouldBuy) ? OP_BUY : OP_SELL;
@@ -464,16 +457,16 @@ void SendOrders(string signalType, string symbol,
   if(shouldBuy && price > tp1 || !shouldBuy && price < tp1) {
     PrintLog(eaName + ": Entry price " + DoubleToString(price, digits) +
              " is beyond TP1 " + DoubleToString(tp1, digits) +
-             " for GID=" + IntegerToString(groupId) +
+             " for GID=" + IntegerToString(signal.groupId) +
              ", skipping order creation");
     return;
   }
 
 // Always use the original stop loss from signal
-  double rawSL = NormalizeDouble(stopLoss, digits);
+  double rawSL = NormalizeDouble(signal.stopLoss, digits);
   double fallbackSL = (shouldBuy)
-                      ? price - MathAbs(entryPrice - stopLoss)
-                      : price + MathAbs(stopLoss - entryPrice);
+                      ? price - MathAbs(signal.entry - signal.stopLoss)
+                      : price + MathAbs(signal.stopLoss - signal.entry);
   fallbackSL = NormalizeDouble(fallbackSL, digits);
 
 // Apply minimum distance for SL if needed
@@ -485,55 +478,54 @@ void SendOrders(string signalType, string symbol,
   fallbackSL = NormalizeDouble(fallbackSL, digits);
 
 // Normalize all TP levels and ensure minimum distance
-  for(int j=0; j<tpCount; j++) {
-    tpLevels[j] = NormalizeDouble(tpLevels[j], digits);
-    double dist = MathAbs(tpLevels[j] - entryPrice);
+  for(int j=0; j<signal.tpCount; j++) {
+    signal.tpLevels[j] = NormalizeDouble(signal.tpLevels[j], digits);
+    double dist = MathAbs(signal.tpLevels[j] - signal.entry);
     if(dist < minDist)
-      tpLevels[j] = (shouldBuy) ? price + minDist : price - minDist;
-    tpLevels[j] = NormalizeDouble(tpLevels[j], digits);
+      signal.tpLevels[j] = (shouldBuy) ? price + minDist : price - minDist;
+    signal.tpLevels[j] = NormalizeDouble(signal.tpLevels[j], digits);
   }
 
-  PrintLog(eaName + ": Sending orders for GID=" + IntegerToString(groupId) +
-           " from channel '" + channelName + "'" +
+  PrintLog(eaName + ": Sending orders for GID=" + IntegerToString(signal.groupId) +
+           " from channel '" + signal.channelName + "'" +
            " Using SL=" + DoubleToString(rawSL, digits) +
-           " TP Count=" + IntegerToString(tpCount));
+           " TP Count=" + IntegerToString(signal.tpCount));
 
   int slippage = 20;
   color cols[6] = { clrBlue, clrGreen, clrRed, clrYellow, clrMagenta, clrCyan };
-  double lotSize = (symbol == "BTCUSD") ? fixedLotSizeBitcoin :
-                   (symbol == "XAUUSD") ? fixedLotSizeGold : fixedLotSize;
+  double lotSize = (signal.symbol == "BTCUSD") ? fixedLotSizeBitcoin :
+                   (signal.symbol == "XAUUSD") ? fixedLotSizeGold : fixedLotSize;
 
 // Create orders for each TP level, at most 4
-  for(int k=0; k<MathMin(tpCount, 4); k++) {
+  for(int k=0; k<MathMin(signal.tpCount, 4); k++) {
     // for market orders we want to get the correct current price
     // to avoid off-quotes errors
     RefreshRates();
-    ask = MarketInfo(symbol, MODE_ASK);
-    bid = MarketInfo(symbol, MODE_BID);
+    ask = MarketInfo(signal.symbol, MODE_ASK);
+    bid = MarketInfo(signal.symbol, MODE_BID);
     price = (shouldBuy) ? ask : bid;
     // when k=0 (TP1) - no TP in comment, when k=1, shows TP1 etc.
-    string comment = FormatMT4Comment(groupId, channelName, tpLevels, k, symbol);
-
+    string comment = FormatMT4Comment(signal.groupId, signal.channelName, signal.tpLevels, k, signal.symbol);
     PrintLog(eaName + ": Order[" + IntegerToString(k) + "] parameters: " +
-             "Symbol=" + symbol +
+             "Symbol=" + signal.symbol +
              " Type=" + IntegerToString(orderType) +
              " Lots=" + DoubleToString(lotSize, 2) +
              " Price=" + DoubleToString(price, digits) +
              " SL=" + DoubleToString(rawSL, digits) +
-             " TP=" + DoubleToString(tpLevels[k], digits) +
+             " TP=" + DoubleToString(signal.tpLevels[k], digits) +
              " Comment=" + comment);
 
-    int colorIndex = k % 6; // Cycle through available colors
-    int ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
-                           rawSL, tpLevels[k], comment, MAGIC_NUMBER, 0 /* expiration */, cols[colorIndex]);
+    int colorIndex = k % 6;
+    int ticket = OrderSend(signal.symbol, orderType, lotSize, price, slippage,
+                           rawSL, signal.tpLevels[k], comment, MAGIC_NUMBER, 0 /* expiration */, cols[colorIndex]);
 
     if(ticket < 0) {
       PrintLog(eaName + ": Error creating order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket) + " error=" + IntegerToString(GetLastError()));
       Sleep(1000);
       RefreshRates();
       PrintLog(eaName + ": Retrying with fallback SL=" + DoubleToString(fallbackSL, digits));
-      ticket = OrderSend(symbol, orderType, lotSize, price, slippage,
-                         fallbackSL, tpLevels[k], comment, MAGIC_NUMBER, 0 /* expiration */, cols[colorIndex]);
+      ticket = OrderSend(signal.symbol, orderType, lotSize, price, slippage,
+                         fallbackSL, signal.tpLevels[k], comment, MAGIC_NUMBER, 0 /* expiration */, cols[colorIndex]);
     }
 
     PrintLog(eaName + ": Order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket));
@@ -881,9 +873,9 @@ double CalculateNewSL(int tpHitLevel, double originalEntry, double originalSL,
 
   int digits = MarketInfo(symbol, MODE_DIGITS);
   double newSL = originalSL;
-  
+
   if(stopLossMultiplier <= 0) {
-   return NormalizeDouble(originalSL, digits); // No multiplier set, return original SL
+    return NormalizeDouble(originalSL, digits); // No multiplier set, return original SL
   }
 
   switch(tpHitLevel) {
@@ -981,5 +973,22 @@ string StringJoin(string &arr[], int size, string delimiter)
     result += arr[i];
   }
   return result;
+}
+
+//+------------------------------------------------------------------+
+//| saveSignal: Save a signal struct to signals/<GID>.txt          |
+//+------------------------------------------------------------------+
+void saveSignal(string signal, int groupId)
+{
+  string dir = "signals";
+  string filename = dir + "/" + IntegerToString(groupId) + ".txt";
+  int handle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI);
+  if(handle == INVALID_HANDLE) {
+    Print("saveSignal: Failed to open file: ", filename);
+    return;
+  }
+  FileWrite(handle, signal);
+  FileFlush(handle);
+  FileClose(handle);
 }
 //+------------------------------------------------------------------+
