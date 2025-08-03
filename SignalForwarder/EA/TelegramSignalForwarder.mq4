@@ -32,12 +32,26 @@ struct Signal {
   string             type;
   string             symbol;
   double             entry;
-  double             tpLevels[20];
+  double             tpLevels[6];
   int                tpCount;
   double             stopLoss;
   int                groupId;
   string             channelName;
   bool               isValid;
+
+                     Signal()
+  {
+    timestamp    = 0;
+    type         = "";
+    symbol       = "";
+    entry        = 0.0;
+    ArrayInitialize(tpLevels, 0.0);
+    tpCount      = 0;
+    stopLoss     = 0.0;
+    groupId      = 0;
+    channelName  = "";
+    isValid      = false;
+  }
 };
 
 //+------------------------------------------------------------------+
@@ -78,7 +92,7 @@ int init()
     eaName = customName;
 
   if(debugMode)
-    PrintLog(eaName + ": Initialized with trailing stop support");
+    PrintLog(eaName + ": Initialized");
 
   return(0);
 }
@@ -216,7 +230,6 @@ Signal ReadSignalFile()
 Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
 {
   Signal signal;
-  signal.isValid = false;
 // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3,...|SL|GID:<id>|CHANNEL_NAME
   string parts[];
   if(StringSplit(line, '|', parts) < 8) {
@@ -270,10 +283,10 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
     return signal;
   }
 
-// Enforce maximum TP count limit (array size is 20)
-  if(signal.tpCount > 20) {
-    PrintLog(eaName + ": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum 20, truncating");
-    signal.tpCount = 20;
+// Enforce maximum TP count limit (array size is 6)
+  if(signal.tpCount > 6) {
+    PrintLog(eaName + ": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum 6, truncating");
+    signal.tpCount = 6;
   }
 
 // Resize array to hold all TPs (up to maximum)
@@ -795,7 +808,7 @@ void ProcessDynamicTrailingStop()
       continue;
     }
 
-    double tpLevels[20];
+    double tpLevels[6];
 
     int tpHitLevel = 0;
     for(int i = 0; i < signal.tpCount; i++) {
@@ -944,7 +957,6 @@ void SaveSignalToFile(string signal, int groupId)
 Signal GetSignalFromFile(int groupId)
 {
   Signal signal;
-  signal.isValid = false;
   string dir = "signals";
   string filename = dir + "/" + IntegerToString(groupId) + ".txt";
   if(!FileExists(filename)) {
