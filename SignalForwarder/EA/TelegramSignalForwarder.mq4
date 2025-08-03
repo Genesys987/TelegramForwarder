@@ -37,6 +37,7 @@ struct Signal {
   double             stopLoss;
   int                groupId;
   string             channelName;
+  bool               isValid;
 };
 
 //+------------------------------------------------------------------+
@@ -149,7 +150,6 @@ int start()
 Signal ReadSignalFile()
 {
   Signal signal;
-  signal.tpCount = 0;
   string line = "";
   if(StringLen(storedTestSignal) == 0) {
     if(fh == -1) {
@@ -187,16 +187,19 @@ Signal ReadSignalFile()
     return signal;
   }
 
-  return readSignalLine(line, true);
+  Signal result = readSignalLine(line, true);
+  if(result.isValid) 
+    storedTestSignal = "";
+  
+  return result;
 }
 
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
-Signal readSignalLine(string line, bool shouldValidate)
+Signal readSignalLine(string line, bool shouldValidateTimestamp = false)
 {
   Signal signal;
-  signal.tpCount = 0;
 // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3,...|SL|GID:<id>|CHANNEL_NAME
   string parts[];
   if(StringSplit(line, '|', parts) < 8) {
@@ -211,7 +214,7 @@ Signal readSignalLine(string line, bool shouldValidate)
   string timestampStr = parts[0];
   long signalTimestamp = StrToInteger(timestampStr);
   signal.timestamp = signalTimestamp;
-  if(shouldValidate && IsSignalTooOld(signalTimestamp)) {
+  if(shouldValidateTimestamp && IsSignalTooOld(signalTimestamp)) {
     if(!IsTesting()) {
       PrintLog(eaName + ": Signal too old, skipping. Timestamp=" + IntegerToString(signalTimestamp));
     } else {
@@ -219,9 +222,6 @@ Signal readSignalLine(string line, bool shouldValidate)
       return signal;
     }
   }
-
-  if(shouldValidate)
-    storedTestSignal = "";
 
 // 1) Signal type
   signal.type = parts[1];
@@ -335,6 +335,7 @@ Signal readSignalLine(string line, bool shouldValidate)
 
   PrintLog(eaName + ": Parsed signal GID=" + IntegerToString(signal.groupId) + " from channel '" + signal.channelName + "'");
 
+  signal.isValid = true;
   return signal;
 }
 
@@ -979,5 +980,32 @@ void saveSignal(string signal, int groupId)
   FileWrite(handle, signal);
   FileFlush(handle);
   FileClose(handle);
+}
+
+//+------------------------------------------------------------------+
+//| getSignal: Load and parse signal for a given groupId           |
+//+------------------------------------------------------------------+
+Signal getSignal(int groupId)
+{
+  Signal signal;
+  string dir = "signals";
+  string filename = dir + "/" + IntegerToString(groupId) + ".txt";
+  if(!FileExists(filename)) {
+    PrintLog(eaName + ": getSignal: File not found for GID=" + IntegerToString(groupId));
+    return signal;
+  }
+  int handle = FileOpen(filename, FILE_READ|FILE_SHARE_READ|FILE_TXT|FILE_ANSI);
+  if(handle == INVALID_HANDLE) {
+    PrintLog(eaName + ": getSignal: Failed to open file: " + filename);
+    return signal;
+  }
+  string line = FileReadString(handle);
+  FileClose(handle);
+  if(StringLen(line) == 0) {
+    PrintLog(eaName + ": getSignal: Empty signal file for GID=" + IntegerToString(groupId));
+    return signal;
+  }
+  signal = readSignalLine(line, false);
+  return signal;
 }
 //+------------------------------------------------------------------+
