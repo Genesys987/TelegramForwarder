@@ -99,44 +99,44 @@ int deinit()
 //+------------------------------------------------------------------+
 int start()
 {
-  if(IsTradeAllowed() && IsConnected() && !IsStopped()) {
-    // Process dynamic trailing stop for existing positions
-    ProcessDynamicTrailingStop();
+  if (!IsTradeAllowed() || !IsConnected() || IsStopped()) {
+    return(0);
+  }
+// Process dynamic trailing stop for existing positions
+  ProcessDynamicTrailingStop();
 
-    // Process new signal
-    Signal signal = ReadSignalFile();
-    if(signal.tpCount > 0 && signal.groupId > 0 && StringLen(signal.type) > 0) {
-      if(debugMode)
-        PrintLog(eaName + ": Processing NEW signal from channel '" + signal.channelName + "' - GID=" + IntegerToString(signal.groupId) + " with " + IntegerToString(signal.tpCount) + " TP levels");
+// Process new signal
+  Signal signal = ReadSignalFile();
+  if(!signal.isValid) return(0);
+  if(debugMode)
+    PrintLog(eaName + ": Processing NEW signal from channel '" + signal.channelName + "' - GID=" + IntegerToString(signal.groupId) + " with " + IntegerToString(signal.tpCount) + " TP levels");
 
-      // Check if orders with this GID already exist
-      bool hasExistingOrders = false;
-      for(int i=0; i<OrdersTotal(); i++) {
-        if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
-          if(OrderMagicNumber() == MAGIC_NUMBER) {
-            int orderGid;
-            string orderChannel;
-            if(ParseOrderGidChannel(OrderComment(), orderGid, orderChannel)) {
-              if(orderGid == signal.groupId && orderChannel == signal.channelName) {
-                hasExistingOrders = true;
-                break;
-              }
-            }
+// Check if orders with this GID already exist
+  bool hasExistingOrders = false;
+  for(int i=0; i<OrdersTotal(); i++) {
+    if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+      if(OrderMagicNumber() == MAGIC_NUMBER) {
+        int orderGid;
+        string orderChannel;
+        if(ParseOrderGidChannel(OrderComment(), orderGid, orderChannel)) {
+          if(orderGid == signal.groupId && orderChannel == signal.channelName) {
+            hasExistingOrders = true;
+            break;
           }
         }
       }
-
-      if(hasExistingOrders) {
-        if(debugMode)
-          PrintLog(eaName + ": Orders with GID=" + IntegerToString(signal.groupId) + " already exist, only updating SL");
-        UpdateExistingOrdersSL(signal);
-      } else {
-        if(debugMode)
-          PrintLog(eaName + ": No existing orders found, creating new orders");
-        UpdateExistingOrdersSL(signal);
-        SendOrders(signal);
-      }
     }
+  }
+
+  if(hasExistingOrders) {
+    if(debugMode)
+      PrintLog(eaName + ": Orders with GID=" + IntegerToString(signal.groupId) + " already exist, only updating SL");
+    UpdateExistingOrdersSL(signal);
+  } else {
+    if(debugMode)
+      PrintLog(eaName + ": No existing orders found, creating new orders");
+    UpdateExistingOrdersSL(signal);
+    SendOrders(signal);
   }
 
 // Process external SL updates
@@ -201,6 +201,7 @@ Signal ReadSignalFile()
 Signal readSignalLine(string line, bool shouldValidateTimestamp = false)
 {
   Signal signal;
+  signal.isValid = false;
 // Expect: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3,...|SL|GID:<id>|CHANNEL_NAME
   string parts[];
   if(StringSplit(line, '|', parts) < 8) {
