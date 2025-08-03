@@ -4,7 +4,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.0.1"
+#property version "2.1.0"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -21,7 +21,6 @@ extern double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
 //+------------------------------------------------------------------+
-#define MAGIC_NUMBER          123456             // Unique EA identifier
 #define SL_MODIFY_THRESHOLD   0.00001            // Minimum SL diff to apply
 
 static string gTempFile       = "processing.txt";     // Temp file to avoid re-read
@@ -81,6 +80,7 @@ bool    FileExists(string filename);
 bool    IsValidDouble(string s);
 string  CleanChannelName(string channelName);
 string  FormatMT4Comment(int groupId, string channelName, int tpLevel);
+int     GetMagic(string channelName);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -129,14 +129,12 @@ int start()
   bool hasExistingOrders = false;
   for(int i=0; i<OrdersTotal(); i++) {
     if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
-      if(OrderMagicNumber() == MAGIC_NUMBER) {
-        int orderGid;
-        string orderChannel;
-        if(ParseOrderComment(OrderComment(), orderGid, orderChannel)) {
-          if(orderGid == signal.groupId && orderChannel == signal.channelName) {
-            hasExistingOrders = true;
-            break;
-          }
+      int orderGid;
+      string orderChannel;
+      if(ParseOrderComment(OrderComment(), orderGid, orderChannel)) {
+        if(orderGid == signal.groupId && orderChannel == signal.channelName) {
+          hasExistingOrders = true;
+          break;
         }
       }
     }
@@ -395,11 +393,6 @@ void UpdateExistingOrdersSL(Signal &signal)
         PrintLog(eaName + ": Failed to select order at index " + IntegerToString(i) + " - error=" + IntegerToString(GetLastError()));
       continue;
     }
-    if(OrderMagicNumber() != MAGIC_NUMBER) {
-      if(debugMode)
-        PrintLog(eaName + ": Ignoring order at index " + IntegerToString(i) + " - wrong magic number");
-      continue;
-    }
     if(OrderSymbol() != symbol || OrderType() != targetOrderType) {
       if(debugMode)
         PrintLog(eaName + ": Ignoring order at index " + IntegerToString(i) + " - symbol/type mismatch");
@@ -527,6 +520,7 @@ void SendOrders(Signal &signal)
     bid = MarketInfo(signal.symbol, MODE_BID);
     price = (shouldBuy) ? ask : bid;
     string comment = FormatMT4Comment(signal.groupId, signal.channelName, k + 1);
+    int magicNumber = GetMagic(signal.channelName);
     PrintLog(eaName + ": Order[" + IntegerToString(k) + "] parameters: " +
              "Symbol=" + signal.symbol +
              " Type=" + IntegerToString(orderType) +
@@ -534,11 +528,12 @@ void SendOrders(Signal &signal)
              " Price=" + DoubleToString(price, digits) +
              " SL=" + DoubleToString(rawSL, digits) +
              " TP=" + DoubleToString(signal.tpLevels[k], digits) +
-             " Comment=" + comment);
+             " Comment=" + comment +
+             " Magic=" + magicNumber);
 
     int colorIndex = k % 6;
     int ticket = OrderSend(signal.symbol, orderType, lotSize, price, slippage,
-                           rawSL, signal.tpLevels[k], comment, MAGIC_NUMBER, 0 /* expiration */, cols[colorIndex]);
+                           rawSL, signal.tpLevels[k], comment, magicNumber, 0 /* expiration */, cols[colorIndex]);
 
     if(ticket < 0) {
       PrintLog(eaName + ": Error creating order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket) + " error=" + IntegerToString(GetLastError()));
@@ -546,7 +541,7 @@ void SendOrders(Signal &signal)
       RefreshRates();
       PrintLog(eaName + ": Retrying with fallback SL=" + DoubleToString(fallbackSL, digits));
       ticket = OrderSend(signal.symbol, orderType, lotSize, price, slippage,
-                         fallbackSL, signal.tpLevels[k], comment, MAGIC_NUMBER, 0 /* expiration */, cols[colorIndex]);
+                         fallbackSL, signal.tpLevels[k], comment, magicNumber, 0 /* expiration */, cols[colorIndex]);
     }
 
     PrintLog(eaName + ": Order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket));
@@ -600,11 +595,6 @@ void ProcessExternalSLUpdates()
   for(int i=0; i<total; i++) {
     if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
       PrintLog(eaName + ": ext SL order select failed at index " + IntegerToString(i));
-      continue;
-    }
-    if(OrderMagicNumber() != MAGIC_NUMBER) {
-      if(debugMode)
-        PrintLog(eaName + ": Ignoring order at index " + IntegerToString(i) + " - wrong magic number");
       continue;
     }
     // Check if order belongs to the GID (handle both old and new formats)
@@ -800,14 +790,12 @@ void ProcessDynamicTrailingStop()
   for(int o = 0; o < OrdersTotal(); o++) {
     if(!OrderSelect(o, SELECT_BY_POS, MODE_TRADES))
       continue;
-    if(OrderMagicNumber() != MAGIC_NUMBER)
-      continue;
-
     Signal signal = GetSignalFromFile(OrderComment());
     if(!signal.isValid) {
       PrintLog(eaName + ": cannot find signal in file for GID " + IntegerToString(signal.groupId) + ", skipping TS update");
       continue;
     }
+
     if(signal.entry == 0.0)
       signal.entry = OrderOpenPrice(); // Use current open price if not set
 
@@ -979,5 +967,20 @@ Signal GetSignalFromFile(int groupId)
   }
   signal = ReadSignalLine(line, false);
   return signal;
+}
+
+//+------------------------------------------------------------------+
+//| GetMagic: Generate a magic number from a 4-letter channel name |
+//+------------------------------------------------------------------+
+int GetMagic(string channelName)
+{
+  if(StringLen(channelName) != 4)
+    return 123456; // fallback to default
+
+  int magic = 0;
+  for(int i = 0; i < 4; i++) {
+    magic = magic * 100 + StringGetCharacter(channelName, i);
+  }
+  return magic;
 }
 //+------------------------------------------------------------------+
