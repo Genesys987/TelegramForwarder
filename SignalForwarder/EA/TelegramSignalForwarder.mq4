@@ -45,8 +45,6 @@ struct Signal {
 string   eaName               = "TelegramSignalForwarder";
 int      fh = -1;                  // File handle for reading signals
 string   storedTestSignal = "";
-int      lastProcessedGroupId = -1; // Track last processed signal to avoid duplicates
-datetime lastProcessedTime = 0;     // Track last processed time for additional safety
 
 //+------------------------------------------------------------------+
 //|--- Function Prototypes                                          |
@@ -74,9 +72,6 @@ string FormatMT4Comment(int groupId, string channelName, double &tpLevels[], int
 //+------------------------------------------------------------------+
 int init()
 {
-  lastProcessedGroupId = -1; // Initialize to -1 to allow first signal
-  lastProcessedTime = 0;     // Initialize to 0 to allow first signal
-
 // Use chart's expert name if provided
   string customName = WindowExpertName();
   if(StringLen(customName) > 0)
@@ -195,6 +190,9 @@ Signal ReadSignalFile()
   return readSignalLine(line, true);
 }
 
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 Signal readSignalLine(string line, bool shouldValidate)
 {
   Signal signal;
@@ -325,14 +323,6 @@ Signal readSignalLine(string line, bool shouldValidate)
     return signal;
   }
 
-// Check if this signal was already processed to avoid duplicates
-  datetime currentTime = TimeCurrent();
-  if(shouldValidate && signal.groupId == lastProcessedGroupId && currentTime - lastProcessedTime < 60) {
-    if(debugMode)
-      PrintLog(eaName + ": Signal GID=" + IntegerToString(signal.groupId) + " already processed recently, skipping");
-    return signal;
-  }
-
 // 7) Channel Name (new field) - clean and truncate to 4 letters
   if(ArraySize(parts) >= 8) {
     string rawChannelName = parts[7];
@@ -344,10 +334,6 @@ Signal readSignalLine(string line, bool shouldValidate)
   }
 
   PrintLog(eaName + ": Parsed signal GID=" + IntegerToString(signal.groupId) + " from channel '" + signal.channelName + "'");
-
-// Mark this signal as processed to avoid duplicates
-  lastProcessedGroupId = signal.groupId;
-  lastProcessedTime = TimeCurrent();
 
   return signal;
 }
