@@ -4,7 +4,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.0.0"
+#property version "2.0.1"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -333,13 +333,15 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
   }
 
   signal.stopLoss = NormalizeDouble(StrToDouble(rawSL), MarketInfo(signal.symbol, MODE_DIGITS));
-// Validate SL position relative to entry price
-  if(shouldBuy && signal.stopLoss >= signal.entry) {
-    PrintLog(eaName + ": Warning: SL " + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
-             " should be below entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
-  } else if(!shouldBuy && signal.stopLoss <= signal.entry) {
-    PrintLog(eaName + ": Warning: SL " + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
-             " should be above entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
+// Validate SL position relative to entry price (if not market erntry
+  if(signal.entry != 0.0) {
+    if(shouldBuy && signal.stopLoss >= signal.entry) {
+      PrintLog(eaName + ": Warning: SL " + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
+               " should be below entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
+    } else if(!shouldBuy && signal.stopLoss <= signal.entry) {
+      PrintLog(eaName + ": Warning: SL " + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
+               " should be above entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
+    }
   }
 
   string gidPart = parts[6];
@@ -447,19 +449,17 @@ void UpdateExistingOrdersSL(Signal &signal)
 //+------------------------------------------------------------------+
 void SendOrders(Signal &signal)
 {
-// Use signal struct fields directly
   if(signal.entry == 0.0) {
+    // using market entry
     RefreshRates();
     double currentAsk = MarketInfo(signal.symbol, MODE_ASK);
     double currentBid = MarketInfo(signal.symbol, MODE_BID);
 
     signal.entry = (signal.type == "BUY") ? currentAsk : currentBid;
 
-    if(debugMode) {
-      PrintLog(eaName + ": IMMEDIATE ENTRY detected - Using market price: " +
-               DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) +
-               " for GID=" + IntegerToString(signal.groupId));
-    }
+    PrintLog(eaName + ": IMMEDIATE ENTRY detected - Using market price: " +
+             DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) +
+             " for GID=" + IntegerToString(signal.groupId));
   }
 
   int digits    = MarketInfo(signal.symbol, MODE_DIGITS);
@@ -808,6 +808,8 @@ void ProcessDynamicTrailingStop()
       PrintLog(eaName + ": cannot find signal in file for GID " + IntegerToString(signal.groupId) + ", skipping TS update");
       continue;
     }
+    if(signal.entry == 0.0)
+      signal.entry = OrderOpenPrice(); // Use current open price if not set
 
     double tpLevels[6];
 
