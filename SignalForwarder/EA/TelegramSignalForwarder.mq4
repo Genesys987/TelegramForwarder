@@ -4,7 +4,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.1.0"
+#property version "2.1.1"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -853,7 +853,7 @@ double CalculateNewSL(int tpHitLevel, Signal &signal)
                ", using original SL");
       return signal.stopLoss;
     }
-    newSL = signal.tpLevels[tpHitLevel - 1]; // Convert to 0-based index
+    newSL = signal.tpLevels[tpHitLevel - 2]; // If TP2 is hit (tpHitLevel is 2), use TP1 as new SL (array index 0)
   }
 
 // Validate SL direction for BUY/SELL - ensure it moves in favorable direction only
