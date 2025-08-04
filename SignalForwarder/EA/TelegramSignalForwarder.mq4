@@ -4,7 +4,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.1.1"
+#property version "2.1.2"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -810,8 +810,8 @@ void ProcessDynamicTrailingStop()
     }
     if(tpHitLevel <= 0)
       continue; // No TPs hit yet, skip TS for this order
-    double newSL = CalculateNewSL(tpHitLevel, signal);
     double currentSL = OrderStopLoss();
+    double newSL = CalculateNewSL(tpHitLevel, currentSL, signal);
     if(MathAbs(currentSL - newSL) > SL_MODIFY_THRESHOLD) {
       bool modified = OrderModify(OrderTicket(), OrderOpenPrice(), newSL,
                                   OrderTakeProfit(), 0, clrOrange);
@@ -830,17 +830,17 @@ void ProcessDynamicTrailingStop()
 //+------------------------------------------------------------------+
 //| CalculateNewSL: Calculate new SL based on TP hit level         |
 //+------------------------------------------------------------------+
-double CalculateNewSL(int tpHitLevel, Signal &signal)
+double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal)
 {
+  double newSL = currentStop;
   bool isBuy = (signal.type == "BUY");
   if(tpHitLevel <= 0 || signal.tpCount <= 0)
-    return signal.stopLoss;
+    return currentStop;
 
   int digits = MarketInfo(signal.symbol, MODE_DIGITS);
-  double newSL = signal.stopLoss;
 
   if(stopLossMultiplier < 0) {
-    return NormalizeDouble(signal.stopLoss, digits); // No multiplier set, return original SL
+    return NormalizeDouble(currentStop, digits); // No multiplier set, return original SL
   }
 
   if (tpHitLevel == 1) {
@@ -851,7 +851,7 @@ double CalculateNewSL(int tpHitLevel, Signal &signal)
       PrintLog(eaName + ": Invalid TP hit level " + IntegerToString(tpHitLevel) +
                " for GID=" + IntegerToString(signal.groupId) +
                ", using original SL");
-      return signal.stopLoss;
+      return currentStop;
     }
     newSL = signal.tpLevels[tpHitLevel - 2]; // If TP2 is hit (tpHitLevel is 2), use TP1 as new SL (array index 0)
   }
@@ -859,25 +859,25 @@ double CalculateNewSL(int tpHitLevel, Signal &signal)
 // Validate SL direction for BUY/SELL - ensure it moves in favorable direction only
   if(isBuy) {
     // For BUY: new SL should be higher than current SL (more favorable)
-    if(newSL < signal.stopLoss) {
+    if(newSL < currentStop) {
       if(debugMode)
         PrintLog(eaName + ": BUY - New SL " + DoubleToString(newSL, digits) +
-                 " would be worse than original " + DoubleToString(signal.stopLoss, digits) + ", keeping original");
-      return signal.stopLoss;
+                 " would be worse than original " + DoubleToString(currentStop, digits) + ", keeping original");
+      return currentStop;
     }
   } else {
     // For SELL: new SL should be lower than current SL (more favorable)
-    if(newSL > signal.stopLoss) {
+    if(newSL > currentStop) {
       if(debugMode)
         PrintLog(eaName + ": SELL - New SL " + DoubleToString(newSL, digits) +
-                 " would be worse than original " + DoubleToString(signal.stopLoss, digits) + ", keeping original");
-      return signal.stopLoss;
+                 " would be worse than original " + DoubleToString(currentStop, digits) + ", keeping original");
+      return currentStop;
     }
   }
 
   if(debugMode)
     PrintLog(eaName + ": SL calculation successful - Level:" + IntegerToString(tpHitLevel) +
-             " Original:" + DoubleToString(signal.stopLoss, digits) +
+             " Original:" + DoubleToString(currentStop, digits) +
              " New:" + DoubleToString(newSL, digits) +
              " Direction:" + (isBuy ? "BUY" : "SELL"));
 
@@ -951,7 +951,8 @@ Signal GetSignalFromFile(int groupId)
   string dir = "signals";
   string filename = dir + "/" + IntegerToString(groupId) + ".txt";
   if(!FileExists(filename)) {
-    PrintLog(eaName + ": GetSignalFromFile: File not found for GID=" + IntegerToString(groupId));
+    if(debugMode)
+      PrintLog(eaName + ": GetSignalFromFile: File not found for GID=" + IntegerToString(groupId));
     return signal;
   }
   int handle = FileOpen(filename, FILE_READ|FILE_SHARE_READ|FILE_TXT|FILE_ANSI);
