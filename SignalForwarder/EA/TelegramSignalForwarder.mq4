@@ -4,7 +4,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.1.2"
+#property version "2.2.0"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -13,9 +13,8 @@ extern bool   debugMode                = true;  // Enable detailed logging
 extern int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC in minutes (e.g., UTC+2 = 120)
 extern int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
 extern string symbolPostfix            = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
-extern double fixedLotSize             = 0.02;  // Default lot size for FX orders
-extern double fixedLotSizeBitcoin      = 0.02;  // Default lot size for Bitcoin orders
-extern double fixedLotSizeGold         = 0.02;  // Default lot size for Gold orders
+extern double fallbackLotSize             = 0.02;  // Default lot size for FX orders
+extern double accountRiskPercentage = 1.0; // Risk percentage per trade
 extern double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0.0 = entry, 1.0 = keep original SL
 
 //+------------------------------------------------------------------+
@@ -81,6 +80,7 @@ bool    IsValidDouble(string s);
 string  CleanChannelName(string channelName);
 string  FormatMT4Comment(int groupId, string channelName, int tpLevel);
 int     GetMagic(string channelName);
+double  GetPositionSize(Signal &signal);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -313,12 +313,14 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
     }
 
     // Check TP direction relative to entry
-    if(shouldBuy && signal.tpLevels[i] <= signal.entry) {
-      PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
-               " should be higher than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
-    } else if(!shouldBuy && signal.tpLevels[i] >= signal.entry) {
-      PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
-               " should be lower than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
+    if (signal.entry != 0.0) {
+      if(shouldBuy && signal.tpLevels[i] <= signal.entry) {
+        PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+                 " should be higher than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
+      } else if(!shouldBuy && signal.tpLevels[i] >= signal.entry) {
+        PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+                 " should be lower than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
+      }
     }
   }
 
@@ -508,8 +510,7 @@ void SendOrders(Signal &signal)
 
   int slippage = 20;
   color cols[6] = { clrBlue, clrGreen, clrRed, clrYellow, clrMagenta, clrCyan };
-  double lotSize = (signal.symbol == "BTCUSD") ? fixedLotSizeBitcoin :
-                   (signal.symbol == "XAUUSD") ? fixedLotSizeGold : fixedLotSize;
+  double lotSize = GetPositionSize(signal);
 
 // Create orders for each TP level
   for(int k=0; k < signal.tpCount; k++) {
@@ -983,5 +984,54 @@ int GetMagic(string channelName)
     magic = magic * 100 + StringGetCharacter(channelName, i);
   }
   return magic;
+}
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| getPositionSize: Calculate position size based on risk management|
+//+------------------------------------------------------------------+
+double GetPositionSize(Signal &signal)
+{
+  double fallbackLotSize = (signal.symbol == "BTCUSD") ? fixedLotSizeBitcoin :
+                           (signal.symbol == "XAUUSD") ? fixedLotSizeGold : fallbackLotSize;
+  if(!signal.isValid || signal.tpCount <= 0) {
+    PrintLog(eaName + ": Invalid signal for position sizing");
+    return fallbackLotSize;
+  }
+
+  string symbol = signal.symbol;
+  double minLot = MarketInfo(symbol, MODE_MINLOT);
+  double maxLot = MarketInfo(symbol, MODE_MAXLOT);
+  double lotStep = MarketInfo(symbol, MODE_LOTSTEP);
+  double tickSize = MarketInfo(symbol, MODE_TICKSIZE);
+  double tickValue = MarketInfo(symbol, MODE_TICKVALUE);
+
+// the value of our risk per lot, in the quote currency
+  double riskedTicks = MathAbs(signal.entry - signal.stopLoss) / tickSize;
+  double riskValuePerLot = tickValue * riskedTicks;
+
+// Calculate maximum loss based on risk percentage (1%)
+  double riskAmount = AccountBalance() * accountRiskPercentage / 100.0;
+
+// Calculate total lot size based on risk
+  double totalLots = riskAmount / riskValuePerLot;
+
+// Divide across TP levels
+  double positionSize = totalLots / signal.tpCount;
+
+// Round down to the nearest valid lot step
+  positionSize = MathFloor(positionSize / lotStep) * lotStep;
+
+// Ensure lot size is within allowed range
+  positionSize = MathMax(minLot, MathMin(maxLot, positionSize));
+
+  PrintLog(eaName + ": Position sizing: " + symbol +
+           " RiskAmount=" + DoubleToString(riskAmount, 2) +
+           " RiskPerLot=" + DoubleToString(riskValuePerLot, 4) +
+           " TotalLots=" + DoubleToString(totalLots, 2) +
+           " PerTP=" + DoubleToString(positionSize, 2) +
+           " TPCount=" + IntegerToString(signal.tpCount));
+
+  return positionSize;
 }
 //+------------------------------------------------------------------+
