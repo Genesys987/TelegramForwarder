@@ -314,12 +314,14 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
     }
 
     // Check TP direction relative to entry
-    if(shouldBuy && signal.tpLevels[i] <= signal.entry) {
-      PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
-               " should be higher than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
-    } else if(!shouldBuy && signal.tpLevels[i] >= signal.entry) {
-      PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
-               " should be lower than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
+    if (signal.entry != 0.0) {
+      if(shouldBuy && signal.tpLevels[i] <= signal.entry) {
+        PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+                 " should be higher than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
+      } else if(!shouldBuy && signal.tpLevels[i] >= signal.entry) {
+        PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+                 " should be lower than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
+      }
     }
   }
 
