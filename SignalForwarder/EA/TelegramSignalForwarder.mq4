@@ -13,9 +13,8 @@ extern bool   debugMode                = true;  // Enable detailed logging
 extern int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC in minutes (e.g., UTC+2 = 120)
 extern int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
 extern string symbolPostfix            = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
-extern double fixedLotSize             = 0.02;  // Default lot size for FX orders
-extern double fixedLotSizeBitcoin      = 0.02;  // Default lot size for Bitcoin orders
-extern double fixedLotSizeGold         = 0.02;  // Default lot size for Gold orders
+extern double fallbackLotSize             = 0.05;  // Default lot size for FX orders
+extern double accountRiskPercentage = 1.0; // Risk percentage per trade
 extern double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0.0 = entry, 1.0 = keep original SL
 
 //+------------------------------------------------------------------+
@@ -993,8 +992,6 @@ int GetMagic(string channelName)
 //+------------------------------------------------------------------+
 double GetPositionSize(Signal &signal)
 {
-  double fallbackLotSize = (signal.symbol == "BTCUSD") ? fixedLotSizeBitcoin :
-                           (signal.symbol == "XAUUSD") ? fixedLotSizeGold : fixedLotSize;
   if(!signal.isValid || signal.tpCount <= 0) {
     PrintLog(eaName + ": Invalid signal for position sizing");
     return fallbackLotSize;
@@ -1012,7 +1009,7 @@ double GetPositionSize(Signal &signal)
   double riskValuePerLot = tickValue * riskedTicks;
 
 // Calculate maximum loss based on risk percentage (1%)
-  double riskAmount = AccountBalance() * 0.01; // 1% risk
+  double riskAmount = AccountBalance() * accountRiskPercentage / 100.0;
 
 // Calculate total lot size based on risk
   double totalLots = riskAmount / riskValuePerLot;
