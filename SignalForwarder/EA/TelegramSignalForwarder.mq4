@@ -992,87 +992,45 @@ int GetMagic(string channelName)
 double GetPositionSize(Signal &signal)
 {
   double fallbackLotSize = (signal.symbol == "BTCUSD") ? fixedLotSizeBitcoin :
-                   (signal.symbol == "XAUUSD") ? fixedLotSizeGold : fixedLotSize;
+                           (signal.symbol == "XAUUSD") ? fixedLotSizeGold : fixedLotSize;
   if(!signal.isValid || signal.tpCount <= 0) {
     PrintLog(eaName + ": Invalid signal for position sizing");
     return fallbackLotSize;
   }
-  
+
   string symbol = signal.symbol;
-  int digits = MarketInfo(symbol, MODE_DIGITS);
-  double point = MarketInfo(symbol, MODE_POINT);
   double minLot = MarketInfo(symbol, MODE_MINLOT);
   double maxLot = MarketInfo(symbol, MODE_MAXLOT);
   double lotStep = MarketInfo(symbol, MODE_LOTSTEP);
-  double contractSize = MarketInfo(symbol, MODE_LOTSIZE);
-  
-  // Calculate risk in pips
-  double riskPoints = MathAbs(signal.entry - signal.stopLoss) / point;
-  if(riskPoints <= 0) {
-    PrintLog(eaName + ": Invalid risk distance for " + symbol);
-    return fallbackLotSize;
-  }
-  
-  // Calculate value per pip in account currency
+  double tickSize = MarketInfo(symbol, MODE_TICKSIZE);
   double tickValue = MarketInfo(symbol, MODE_TICKVALUE);
-  // TODO check how this should be done, converting tick value
-  tickValue *= 10; // Adjust for 3/5 digit brokers
-  double pipValue = tickValue * (contractSize / MarketInfo(symbol, MODE_TICKSIZE));
 
-  PrintLog("tick size" + DoubleToString(MarketInfo(symbol, MODE_TICKSIZE), 8) +
-           " tick value=" + DoubleToString(tickValue, 4) +
-           " contract size=" + DoubleToString(contractSize, 2) +
-           " pip value=" + DoubleToString(pipValue, 4) + " point size=" + DoubleToString(point, 8));
-  
-  // Account for currency conversion if needed
-  string accountCurrency = AccountCurrency();
-  string symbolBase = StringSubstr(symbol, 0, 3);
-  string symbolQuote = StringSubstr(symbol, 3, 3);
-  
-  // Convert pip value to account currency if needed
-  if(symbolQuote != accountCurrency) {
-    string conversionPair = symbolQuote + accountCurrency;
-    double conversionRate = 1.0;
-    
-    // Try direct conversion pair first
-    if(MarketInfo(conversionPair, MODE_TIME) != 0) {
-      conversionRate = MarketInfo(conversionPair, MODE_BID);
-    } 
-    // Try inverse pair if direct pair doesn't exist
-    else {
-      conversionPair = accountCurrency + symbolQuote;
-      if(MarketInfo(conversionPair, MODE_TIME) != 0) {
-        conversionRate = 1.0 / MarketInfo(conversionPair, MODE_BID);
-      }
-    }
-    
-    pipValue *= conversionRate;
-  }
-  
-  // Calculate maximum loss based on risk percentage (1%)
+// the value of our risk per lot, in the quote currency
+  double riskedTicks = MathAbs(signal.entry - signal.stopLoss) / tickSize;
+  double riskValuePerLot = tickValue * riskedTicks;
+
+// Calculate maximum loss based on risk percentage (1%)
   double riskAmount = AccountBalance() * 0.01; // 1% risk
-  
-  // Calculate total lot size based on risk
-  double totalLots = riskAmount / (riskPoints * pipValue);
-  
-  // Divide across TP levels
-  double lotSize = totalLots / signal.tpCount;
-  
-  // Round down to the nearest valid lot step
-  lotSize = MathFloor(lotSize / lotStep) * lotStep;
-  
-  // Ensure lot size is within allowed range
-  lotSize = MathMax(minLot, MathMin(maxLot, lotSize));
-  
-  if(debugMode) {
-    PrintLog(eaName + ": Position sizing: " + symbol + 
-             " Risk=" + DoubleToString(riskAmount, 2) + " " + accountCurrency +
-             " RiskPips=" + DoubleToString(riskPoints, 1) + 
-             " PipValue=" + DoubleToString(pipValue, 4) +
-             " TotalLots=" + DoubleToString(totalLots, 2) +
-             " PerTP=" + DoubleToString(lotSize, 2) +
-             " TPCount=" + IntegerToString(signal.tpCount));
-  }
-  
-  return lotSize;
+
+// Calculate total lot size based on risk
+  double totalLots = riskAmount / riskValuePerLot;
+
+// Divide across TP levels
+  double positionSize = totalLots / signal.tpCount;
+
+// Round down to the nearest valid lot step
+  positionSize = MathFloor(positionSize / lotStep) * lotStep;
+
+// Ensure lot size is within allowed range
+  positionSize = MathMax(minLot, MathMin(maxLot, positionSize));
+
+  PrintLog(eaName + ": Position sizing: " + symbol +
+           " RiskAmount=" + DoubleToString(riskAmount, 2) +
+           " RiskPerLot=" + DoubleToString(riskValuePerLot, 4) +
+           " TotalLots=" + DoubleToString(totalLots, 2) +
+           " PerTP=" + DoubleToString(positionSize, 2) +
+           " TPCount=" + IntegerToString(signal.tpCount));
+
+  return positionSize;
 }
+//+------------------------------------------------------------------+
