@@ -31,7 +31,7 @@ struct Signal {
   string             type;
   string             symbol;
   double             entry;
-  double             tpLevels[6];
+  double             tpLevels[10];
   int                tpCount;
   double             stopLoss;
   int                groupId;
@@ -282,10 +282,10 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
     return signal;
   }
 
-// Enforce maximum TP count limit (array size is 6)
-  if(signal.tpCount > 6) {
-    PrintLog(eaName + ": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum 6, truncating");
-    signal.tpCount = 6;
+// Enforce maximum TP count limit (array size is 10)
+  if(signal.tpCount > 10) {
+    PrintLog(eaName + ": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum 10, truncating");
+    signal.tpCount = 10;
   }
 
 // Resize array to hold all TPs (up to maximum)
@@ -800,7 +800,7 @@ void ProcessDynamicTrailingStop()
     if(signal.entry == 0.0)
       signal.entry = OrderOpenPrice(); // Use current open price if not set
 
-    double tpLevels[6];
+    double tpLevels[10];
 
     int tpHitLevel = 0;
     for(int i = 0; i < signal.tpCount; i++) {
