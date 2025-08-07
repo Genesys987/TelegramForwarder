@@ -992,8 +992,6 @@ int GetMagic(string channelName)
 //+------------------------------------------------------------------+
 double GetPositionSize(Signal &signal)
 {
-  double fallbackLotSize = (signal.symbol == "BTCUSD") ? fixedLotSizeBitcoin :
-                           (signal.symbol == "XAUUSD") ? fixedLotSizeGold : fallbackLotSize;
   if(!signal.isValid || signal.tpCount <= 0) {
     PrintLog(eaName + ": Invalid signal for position sizing");
     return fallbackLotSize;
