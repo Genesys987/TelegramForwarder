@@ -181,7 +181,7 @@ async def run_userbot():
                         command_written = process_stoploss_reply(message_text, original_message_text, retrieved_group_id)
                         if command_written: 
                           logger.info(f"   ✅ SL parancs kiírva.")
-                          await forward_to_archive(message, chat_title)
+                          await forward_to_archive(message, chat_title, retrieved_group_id)
                         else: logger.error(f"   ❌ SL parancs hiba.")
                     else: logger.warning(f"   FIGYELEM: Nem található GID (ID: {reply_to_msg_id}). SL válasz nem feldolgozható!")
                 else: logger.info(f"   Nem SL állításnak tűnő válasz.")
@@ -191,21 +191,21 @@ async def run_userbot():
         # === Standard szignál feldolgozás ===
         else:
             try:
-                result = await process_new_standard_signal(message_text, message_id, message.date, chat_title)
-                if result is not None: await forward_to_archive(message, chat_title)
+                group_id = await process_new_standard_signal(message_text, message_id, message.date, chat_title)
+                if group_id is not None: await forward_to_archive(message, chat_title, group_id)
             except Exception as e:
                 logger.error(f"   Hiba process_new_standard_signal hívásakor: {e}"); traceback.print_exc()
 
     logger.info("🟢 Userbot elindult. Várakozás...")
     await client.run_until_disconnected()
 
-async def forward_to_archive(message, channel_name):
+async def forward_to_archive(message, channel_name, group_id):
     """
     Forward a message to the archive channel.
     """
     if ARCHIVE_CHANNEL:
         try:
-            cleaned_channel = "#" + clean_channel_name(channel_name)
+            cleaned_channel = f"#{clean_channel_name(channel_name)} - {group_id}"
             message_text = f"{cleaned_channel}\n\n{message.text}"
             await client.send_message(ARCHIVE_CHANNEL, message_text)
             logger.info(f"📤 Üzenet továbbítva az archív csatornára: {ARCHIVE_CHANNEL}")
