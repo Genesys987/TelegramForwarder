@@ -26,12 +26,15 @@ static string gTempFile       = "processing.txt";     // Temp file to avoid re-r
 static string gExternalSLFile = "stoploss_update.txt";// External SL updates
 static string gSignalFile               = "signals.txt";       // Incoming signal file
 
+datetime lastTrailingStopScanTime = 0;
+int trailingScanPeriodSeconds = 5;
+
 struct Signal {
   long               timestamp;
   string             type;
   string             symbol;
   double             entry;
-  double             tpLevels[10];
+  double             tpLevels[6];
   int                tpCount;
   double             stopLoss;
   int                groupId;
@@ -117,7 +120,10 @@ int start()
     return(0);
   }
 // Process dynamic trailing stop for existing positions
-  ProcessDynamicTrailingStop();
+  if (TimeCurrent() - lastTrailingStopScanTime >= trailingScanPeriodSeconds) {
+    lastTrailingStopScanTime = TimeCurrent();
+    ProcessDynamicTrailingStop();
+  }
 
 // Process new signal
   Signal signal = ReadSignalFile();
@@ -282,10 +288,10 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
     return signal;
   }
 
-// Enforce maximum TP count limit (array size is 10)
-  if(signal.tpCount > 10) {
-    PrintLog(eaName + ": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum 10, truncating");
-    signal.tpCount = 10;
+// Enforce maximum TP count limit (array size is 6)
+  if(signal.tpCount > 6) {
+    PrintLog(eaName + ": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum 6, truncating");
+    signal.tpCount = 6;
   }
 
 // Resize array to hold all TPs (up to maximum)
@@ -787,7 +793,6 @@ string FormatMT4Comment(int groupId, string channelName, int tpLevel)
 //+------------------------------------------------------------------+
 void ProcessDynamicTrailingStop()
 {
-
   for(int o = 0; o < OrdersTotal(); o++) {
     if(!OrderSelect(o, SELECT_BY_POS, MODE_TRADES))
       continue;
@@ -800,7 +805,7 @@ void ProcessDynamicTrailingStop()
     if(signal.entry == 0.0)
       signal.entry = OrderOpenPrice(); // Use current open price if not set
 
-    double tpLevels[10];
+    double tpLevels[6];
 
     int tpHitLevel = 0;
     for(int i = 0; i < signal.tpCount; i++) {
