@@ -4,7 +4,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.2.0"
+#property version "2.3.0"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -16,6 +16,7 @@ extern string symbolPostfix            = "";     // Broker-specific symbol postf
 extern double fallbackLotSize             = 0.02;  // Default lot size for FX orders
 extern double accountRiskPercentage = 1.0; // Risk percentage per trade
 extern double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0.0 = entry, 1.0 = keep original SL
+extern double marginBufferPercentage             = 70.0;   // Amount of free margin to use maximum
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -798,7 +799,8 @@ void ProcessDynamicTrailingStop()
       continue;
     Signal signal = GetSignalFromFile(OrderComment());
     if(!signal.isValid) {
-      PrintLog(eaName + ": cannot find signal in file for GID " + IntegerToString(signal.groupId) + ", skipping TS update");
+      if (signal.groupId != 0)
+        PrintLog(eaName + ": cannot find signal in file for GID " + IntegerToString(signal.groupId) + ", skipping TS update");
       continue;
     }
 
@@ -1019,10 +1021,29 @@ double GetPositionSize(Signal &signal)
 // Calculate total lot size based on risk
   double totalLots = riskAmount / riskValuePerLot;
 
-// Divide across TP levels
-  double positionSize = totalLots / signal.tpCount;
-
 // Round down to the nearest valid lot step
+  double positionSize = MathFloor(totalLots / lotStep) * lotStep;
+  double originalPositionSize = positionSize;
+
+// decrease position size until it fits existing margin
+  double minimumRemainingMargin = AccountFreeMargin() * (1 - marginBufferPercentage / 100.0);
+  int orderType = (signal.type == "BUY") ? OP_BUY : OP_SELL;
+  while(positionSize >= minLot) {
+    double freeMarginRemaining = AccountFreeMarginCheck(symbol, orderType, positionSize);
+    if (debugMode) {
+      PrintLog(eaName + ": Checking margin for " + symbol + " - Free remains: " + DoubleToString(freeMarginRemaining, 2) + ", Needed free: " + DoubleToString(minimumRemainingMargin, 2));
+    }
+    if(freeMarginRemaining >= 0 && freeMarginRemaining >= minimumRemainingMargin && GetLastError() == 0)
+      break;
+    positionSize -= lotStep;
+    positionSize = MathFloor(positionSize / lotStep) * lotStep;
+  }
+
+  if(positionSize != originalPositionSize)
+    PrintLog(eaName + ": Adjusted position size for " + symbol + " from " + DoubleToString(originalPositionSize, 2) + " to " + DoubleToString(positionSize, 2));
+
+// Divide across TP levels
+  positionSize = positionSize / signal.tpCount;
   positionSize = MathFloor(positionSize / lotStep) * lotStep;
 
 // Ensure lot size is within allowed range
