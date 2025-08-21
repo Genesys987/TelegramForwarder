@@ -9,8 +9,8 @@ from signal_parser import parse_signal
 
 class TestSignalParser(unittest.TestCase):
     
-    def test_all_11_user_signals(self):
-        """Test all 11 signal formats provided by the user"""
+    def test_all_14_user_signals(self):
+        """Test all 14 signal formats provided by the user (including 3 new ones)"""
         
         signals = [
             # Signal 1: Standard BUY format
@@ -55,7 +55,19 @@ class TestSignalParser(unittest.TestCase):
             
             # Signal 11: Slash-separated TPs format (NEW TEST CASE)
             ("GOLD BUY 3330/3327\n\nTP 3332/3334/3336/3338/3340\n\nSL 3317\n\nUSE RISK MANAGEMENT",
-             "BUY", "XAUUSD", 3327.0, [3332.0, 3334.0, 3336.0, 3338.0, 3340.0], 3317.0)
+             "BUY", "XAUUSD", 3327.0, [3332.0, 3334.0, 3336.0, 3338.0, 3340.0], 3317.0),
+            
+            # Signal 12: NEW - @ range format
+            ("Sell Gold @3339-3344\n\nSl :3346\n\nTp1 :3337\nTp2 :3335\n\nEnter Slowly-Layer with proper money management\n\nDo not rush your entries",
+             "SELL", "XAUUSD", 3344.0, [3337.0, 3335.0], 3346.0),
+            
+            # Signal 13: NEW - dash range format
+            ("Gold Sell 3341-3346\n\nSl :3348\n\nTp1 :3339\nTp2 :3336\n\nEnter Slowly-Layer with proper money management\n\nDo not rush your entries",
+             "SELL", "XAUUSD", 3346.0, [3339.0, 3336.0], 3348.0),
+            
+            # Signal 14: NEW - I'M SELLING with parentheses range
+            ("I'M SELLING XAUUSD NOW (3337 - 3340)\n\n💰TP1: 3334\n💰TP2: 3331\n\n🛑 STOP LOSS: 3343",
+             "SELL", "XAUUSD", 0, [3334.0, 3331.0], 3343.0),
         ]
         
         for i, (signal_text, expected_type, expected_symbol, expected_entry, expected_tps, expected_sl) in enumerate(signals, 1):
@@ -71,7 +83,7 @@ class TestSignalParser(unittest.TestCase):
                 self.assertEqual(result["take_profits"], expected_tps)
                 self.assertEqual(result["stop_loss"], expected_sl)
         
-        print("✅ All 11 user-provided signal formats passed!")
+        print("✅ All 14 user-provided signal formats passed!")
 
 
 if __name__ == '__main__':
