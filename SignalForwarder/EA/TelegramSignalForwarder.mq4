@@ -35,7 +35,7 @@ struct Signal {
   string             type;
   string             symbol;
   double             entry;
-  double             tpLevels[6];
+  double             tpLevels[10];
   int                tpCount;
   double             stopLoss;
   int                groupId;
@@ -123,7 +123,7 @@ int start()
 // Process dynamic trailing stop for existing positions
   if (TimeCurrent() - lastTrailingStopScanTime >= trailingScanPeriodSeconds) {
     lastTrailingStopScanTime = TimeCurrent();
-    ProcessDynamicTrailingStop();
+  ProcessDynamicTrailingStop();
   }
 
 // Process new signal
@@ -794,20 +794,21 @@ string FormatMT4Comment(int groupId, string channelName, int tpLevel)
 //+------------------------------------------------------------------+
 void ProcessDynamicTrailingStop()
 {
+
   for(int o = 0; o < OrdersTotal(); o++) {
     if(!OrderSelect(o, SELECT_BY_POS, MODE_TRADES))
       continue;
     Signal signal = GetSignalFromFile(OrderComment());
     if(!signal.isValid) {
       if (signal.groupId != 0)
-        PrintLog(eaName + ": cannot find signal in file for GID " + IntegerToString(signal.groupId) + ", skipping TS update");
+      PrintLog(eaName + ": cannot find signal in file for GID " + IntegerToString(signal.groupId) + ", skipping TS update");
       continue;
     }
 
     if(signal.entry == 0.0)
       signal.entry = OrderOpenPrice(); // Use current open price if not set
 
-    double tpLevels[6];
+    double tpLevels[10];
 
     int tpHitLevel = 0;
     for(int i = 0; i < signal.tpCount; i++) {
