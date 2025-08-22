@@ -52,11 +52,15 @@ def parse_entry_price(entry_text, signal_type):
     # Clean up the entry text - remove @ symbol and extra spaces
     entry_text = entry_text.strip().lstrip('@').strip()
     
-    # Handle different range separators
+    # Handle different range separators (including space-separated like "3340.5 -3338")
     if '/' in entry_text:
         split = entry_text.split('/')
     elif '-' in entry_text:
-        split = entry_text.split('-')
+        # Handle both "3339-3344" and "3340.5 -3338" formats
+        if ' -' in entry_text:
+            split = entry_text.split(' -')
+        else:
+            split = entry_text.split('-')
     else:
         # Single price
         try:
@@ -307,6 +311,16 @@ def parse_signal(text: str):
 
         # Signal Type and Symbol parsing - handle multiple formats
         if not signal.get("signal_type"):
+            # Format 0: NOW signals with emojis like "🚨 GOLD SELL NOW 🚨"
+            match_emoji_now = re.match(r'^🚨?\s*([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*🚨?', line, re.IGNORECASE)
+            if match_emoji_now:
+                raw_symbol = match_emoji_now.group(1).upper()
+                signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal["signal_type"] = match_emoji_now.group(2).upper()
+                # NOW signals have entry = 0
+                signal["entry"] = 0
+                continue
+                
             # Format 1: "GOLD SELL FROM 3313/3315" or "SYMBOL BUY FROM price" (check this first, it's more specific)
             match_symbol_type_from = re.match(r'^([\w\.\/\-]+)\s+(BUY|SELL)\s+FROM\s+([\d\/\.\-@]+)', line, re.IGNORECASE)
             if match_symbol_type_from:
@@ -342,13 +356,26 @@ def parse_signal(text: str):
                 continue
             
             # Format 3: "SYMBOL SIGNAL_TYPE" or "SYMBOL SIGNAL_TYPE entry_range" (e.g., "GOLD SELL 3334/3337", "Gold Sell 3341-3346")
-            match_symbol_type_alt = re.match(r'^([\w\.\/\-]+)\s+(BUY|SELL)\s*([\d\/\.\-@]*)', line, re.IGNORECASE)
+            # Note: Exclude colon format which is handled separately
+            match_symbol_type_alt = re.match(r'^([\w\.\/\-]+)\s+(BUY|SELL)(?!\s*:)\s*([\d\/\.\-@]*)', line, re.IGNORECASE)
             if match_symbol_type_alt:
                 raw_symbol = match_symbol_type_alt.group(1).upper()
                 signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
                 signal["signal_type"] = match_symbol_type_alt.group(2).upper()
                 # Capture the entry price if present (including range formats)
                 entry_text = match_symbol_type_alt.group(3).strip()
+                if entry_text:
+                    signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                continue
+                
+            # Format 3.5: "SYMBOL SIGNAL_TYPE : entry_range" (e.g., "Gold buy : 3340.5 -3338")
+            match_symbol_type_colon = re.match(r'^([\w\.\/\-]+)\s+(BUY|SELL)\s*:\s*([\d\/\.\-@\s]+)', line, re.IGNORECASE)
+            if match_symbol_type_colon:
+                raw_symbol = match_symbol_type_colon.group(1).upper()
+                signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal["signal_type"] = match_symbol_type_colon.group(2).upper()
+                # Capture the entry price with colon format
+                entry_text = match_symbol_type_colon.group(3).strip()
                 if entry_text:
                     signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
                 continue
@@ -400,11 +427,13 @@ def parse_signal(text: str):
         # Take Profits parsing - consolidated and improved
         # Check for various TP patterns in order of specificity
         tp_patterns = [
-            r'[🤑💰✅]\s*TP\d*\s*:?\s*([\d\.]+)',               # Emoji TP formats like "🤑TP1: 3289.0", "💰TP1: 3334", "✅TP1 109700"
-            r'TP\d+\s*:?\s*([\d\.]+)',                           # "TP1: 3289.0", "TP1 3420", "TP2 3423"
-            r'TP\s*:\s*([\d\.]+)',                               # "TP: 1.1455"
-            r'(?:TAKE\s*PROFIT)\s*\d*\s*(?:at\s+)?([\d\.]+)',    # "Take profit 1 at 89500.00"
-            r'TP\s+([\d\.]+(?:/[\d\.]+)*)',                      # "TP 3364" or "TP 3332/3334/3336/3338/3340"
+            r'[🤑💰✅]\s*TP\d*\s*:\s*([\d\.]+(?:/[\d\.]+)*|open)',   # Emoji TP formats like "💰TP1: 3289.0", "💰TP2: 3331" (with colon)
+            r'[🤑💰✅]\s*TP\d+\s+([\d\.]+(?:/[\d\.]+)*|open)',      # Emoji TP formats like "✅TP1 109700" (without colon)
+            r'TP\s*\d+\s*:\s*([\d\.]+|open)',                        # "TP1: 3289.0", "TP 2 : open", "Tp 1 : 3346" (with colon)
+            r'TP\d+\s+([\d\.]+|open)',                               # "TP1 3420", "TP2 3423" (without colon, with number)
+            r'TP\s*:\s*([\d\.]+|open)',                              # "TP: 1.1455", "TP: open"
+            r'(?:TAKE\s*PROFIT)\s*\d*\s*(?:at\s+)?([\d\.]+|open)',   # "Take profit 1 at 89500.00", "Take profit 2 at open"
+            r'TP\s+([\d\.]+(?:/[\d\.]+)*|open)',                     # "TP 3364" or "TP 3332/3334/3336/3338/3340" or "TP open" (without colon)
         ]
         
         tp_found = False
@@ -417,15 +446,23 @@ def parse_signal(text: str):
                         # Multiple TP values separated by slashes
                         tp_values = tp_values_text.split('/')
                         for tp_val in tp_values:
-                            tp_value = float(tp_val.strip())
-                            if tp_value > 0.1:  # Filter out very small numbers but allow forex values
-                                take_profits.append(tp_value)
+                            if tp_val.strip().lower() == 'open':
+                                # Store "open" as a special marker
+                                take_profits.append('open')
+                            else:
+                                tp_value = float(tp_val.strip())
+                                if tp_value > 0.1:  # Filter out very small numbers but allow forex values
+                                    take_profits.append(tp_value)
                         tp_found = True
                     else:
-                        # Single TP value
-                        tp_value = float(tp_values_text)
-                        if tp_value > 0.1:  # Filter out very small numbers but allow forex values
-                            take_profits.append(tp_value)
+                        # Single TP value or "open"
+                        if tp_values_text.strip().lower() == 'open':
+                            # Store "open" as a special marker
+                            take_profits.append('open')
+                        else:
+                            tp_value = float(tp_values_text)
+                            if tp_value > 0.1:  # Filter out very small numbers but allow forex values
+                                take_profits.append(tp_value)
                         tp_found = True
                     break
                 except ValueError:
@@ -476,6 +513,29 @@ def parse_signal(text: str):
 
     # Sort take profits and add to signal
     if take_profits:
+        # Process "open" TP values - calculate them based on previous TP and signal type
+        processed_tps = []
+        for i, tp in enumerate(take_profits):
+            if tp == 'open':
+                # Calculate "open" TP based on the previous TP (if exists)
+                if i > 0 and isinstance(processed_tps[i-1], (int, float)):
+                    prev_tp = processed_tps[i-1]
+                    if signal.get("signal_type") == "BUY":
+                        # For BUY: open TP should be higher (prev_tp + 4)
+                        calculated_tp = prev_tp + 4
+                    else:
+                        # For SELL: open TP should be lower (prev_tp - 4)
+                        calculated_tp = prev_tp - 4
+                    processed_tps.append(calculated_tp)
+                else:
+                    print(f"Warning: Cannot calculate 'open' TP - no previous numeric TP found")
+                    # Skip this TP
+                    continue
+            else:
+                processed_tps.append(tp)
+        
+        take_profits = processed_tps
+        
         # Sort TPs based on signal type
         if signal.get("signal_type") == "BUY":
             # For BUY signals, TPs should be in ascending order (higher prices)

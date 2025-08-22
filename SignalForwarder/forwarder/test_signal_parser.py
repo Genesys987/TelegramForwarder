@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple test suite for the signal parser - tests all 8 user-provided signal formats
+Simple test suite for the signal parser - tests all 15 user-provided signal formats
 """
 
 import unittest
@@ -9,8 +9,8 @@ from signal_parser import parse_signal
 
 class TestSignalParser(unittest.TestCase):
     
-    def test_all_14_user_signals(self):
-        """Test all 14 signal formats provided by the user (including 3 new ones)"""
+    def test_all_15_user_signals(self):
+        """Test all 15 signal formats provided by the user (including 4 new ones)"""
         
         signals = [
             # Signal 1: Standard BUY format
@@ -68,6 +68,10 @@ class TestSignalParser(unittest.TestCase):
             # Signal 14: NEW - I'M SELLING with parentheses range
             ("I'M SELLING XAUUSD NOW (3337 - 3340)\n\n💰TP1: 3334\n💰TP2: 3331\n\n🛑 STOP LOSS: 3343",
              "SELL", "XAUUSD", 0, [3334.0, 3331.0], 3343.0),
+            
+            # Signal 15: NEW - Colon entry format with "open" TP
+            ("Gold buy : 3340.5 -3338\n\nSl 3335\n\nTp 1 : 3346\nTp 2 : open",
+             "BUY", "XAUUSD", 3338.0, [3346.0, 3350.0], 3335.0),
         ]
         
         for i, (signal_text, expected_type, expected_symbol, expected_entry, expected_tps, expected_sl) in enumerate(signals, 1):
@@ -83,7 +87,7 @@ class TestSignalParser(unittest.TestCase):
                 self.assertEqual(result["take_profits"], expected_tps)
                 self.assertEqual(result["stop_loss"], expected_sl)
         
-        print("✅ All 14 user-provided signal formats passed!")
+        print("✅ All 15 user-provided signal formats passed!")
 
 
 if __name__ == '__main__':
