@@ -563,71 +563,75 @@ void ProcessExternalSLUpdates()
 {
   if(!FileExists(gExternalSLFile))
     return;
-  if(signalFileHandle == -1) {
-    signalFileHandle = FileOpen(gExternalSLFile, FILE_READ|FILE_SHARE_READ|FILE_TXT|FILE_ANSI);
-  }
-  if(signalFileHandle == INVALID_HANDLE)
+  int handle = FileOpen(gExternalSLFile, FILE_READ|FILE_SHARE_READ|FILE_TXT|FILE_ANSI);
+  if(handle == INVALID_HANDLE)
     return;
-  string cmd = FileReadString(signalFileHandle);
+  string cmd = FileReadString(handle);
+  FileClose(handle);
   if(!IsTesting()) {
-    FileClose(signalFileHandle);
-    signalFileHandle = -1;
     FileDelete(gExternalSLFile);
   }
 
-// Check for old format (GID:xxxx|NEW_SL:value) and new format (xxxx|NEW_SL:value)
-  int sep = StringFind(cmd, "|NEW_SL:");
-  int gid;
-
-  if(StringFind(cmd, "GID:") == 0 && sep > 0) {
-    // Old format: GID:xxxx|NEW_SL:value
-    gid = (int)StrToInteger(StringSubstr(cmd, 4, sep-4));
-  } else {
-    // New format: xxxx|NEW_SL:value
-    if(sep > 0) {
-      gid = (int)StrToInteger(StringSubstr(cmd, 0, sep));
-    } else {
-      PrintLog(eaName + "Not a valid SL modify command: " + cmd);
-      return;
-    }
+  if(StringLen(cmd) == 0) {
+    return;
   }
 
+  // Parse new format: xxxx|NEW_SL:value
+  int sep = StringFind(cmd, "|NEW_SL:");
+  if(sep <= 0) {
+    PrintLog(eaName + ": Invalid SL modify command format: " + cmd);
+    return;
+  }
+
+  int gid = (int)StrToInteger(StringSubstr(cmd, 0, sep));
   if(gid <= 0) {
-    PrintLog(eaName + "Invalid GID in SL modify command: " + cmd);
+    PrintLog(eaName + ": Invalid GID in SL modify command: " + cmd);
     return;
   }
 
   double newSL = StrToDouble(StringSubstr(cmd, sep+8));
+  if(newSL <= 0) {
+    PrintLog(eaName + ": Invalid SL value in command: " + cmd);
+    return;
+  }
+
+  PrintLog(eaName + ": Processing SL update - GID=" + IntegerToString(gid) + 
+           " NewSL=" + DoubleToString(newSL, 5));
 
   int total = OrdersTotal();
   for(int i=0; i<total; i++) {
     if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
-      PrintLog(eaName + ": ext SL order select failed at index " + IntegerToString(i));
       continue;
     }
-    // Check if order belongs to the GID (handle both old and new formats)
-    string orderComment = OrderComment();
-    bool gidMatch = false;
 
-    // Check old format: GID:xxxx|...
-    if(StringFind(orderComment, "GID:" + IntegerToString(gid)) >= 0) {
-      gidMatch = true;
-    }
-    // Check new format: xxxx|...
-    else if(StringFind(orderComment, IntegerToString(gid) + "|") == 0) {
-      gidMatch = true;
-    }
-
-    if(!gidMatch) {
-      if(debugMode)
-        PrintLog(eaName + ": Ignoring order at index " + IntegerToString(i) + " - GID mismatch");
+    // Parse order comment to check GID match
+    int orderGid;
+    string orderChannel;
+    if(!ParseOrderComment(OrderComment(), orderGid, orderChannel)) {
       continue;
     }
-    double op = OrderOpenPrice();
-    double tp = OrderTakeProfit();
-    if(!OrderModify(OrderTicket(), op, newSL, tp, 0, clrGold))
-      PrintLog(eaName + ": ext SL update fail GID=" + IntegerToString(gid) +
-               " err=" + IntegerToString(GetLastError()));
+
+    if(orderGid != gid) {
+      continue;
+    }
+
+    // Update SL for matching order
+    double currentSL = OrderStopLoss();
+    if(MathAbs(currentSL - newSL) > SL_MODIFY_THRESHOLD) {
+      double op = OrderOpenPrice();
+      double tp = OrderTakeProfit();
+      
+      if(OrderModify(OrderTicket(), op, newSL, tp, 0, clrGold)) {
+        PrintLog(eaName + ": SL updated for ticket " + IntegerToString(OrderTicket()) + 
+                 " GID=" + IntegerToString(gid) + 
+                 " from " + DoubleToString(currentSL, MarketInfo(OrderSymbol(), MODE_DIGITS)) + 
+                 " to " + DoubleToString(newSL, MarketInfo(OrderSymbol(), MODE_DIGITS)));
+      } else {
+        PrintLog(eaName + ": SL update failed for ticket " + IntegerToString(OrderTicket()) + 
+                 " GID=" + IntegerToString(gid) + 
+                 " error=" + IntegerToString(GetLastError()));
+      }
+    }
   }
 }
 

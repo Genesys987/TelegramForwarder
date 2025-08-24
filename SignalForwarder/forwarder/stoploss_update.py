@@ -48,7 +48,8 @@ def process_stoploss_reply(reply_text, original_text, group_id):
          logger.error(f"Hiba SL Process: Kinyert érték '{new_sl_value_str}' nem szám.")
          return None
 
-    command = f"GID:{group_id}|NEW_SL:{new_sl_value_formatted}"
+    # Use new format: xxxx|NEW_SL:value (without GID: prefix)
+    command = f"{group_id}|NEW_SL:{new_sl_value_formatted}"
 
     try:
         # Write to all stoploss update files
