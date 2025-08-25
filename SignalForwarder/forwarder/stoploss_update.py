@@ -56,8 +56,15 @@ def process_stoploss_reply(reply_text, original_text, group_id):
         success = True
         for sl_path in STOPLOSS_UPDATE_FILE_PATHS:
             try:
+                # Ensure the directory exists
+                os.makedirs(os.path.dirname(sl_path), exist_ok=True)
+                
+                # Write with explicit flush to ensure immediate write
                 with open(sl_path, "w", encoding='utf-8') as f:
                     f.write(command)
+                    f.flush()
+                    os.fsync(f.fileno())  # Force write to disk
+                    
                 logger.info(f"✅ SL Update parancs kiírva ('{os.path.basename(sl_path)}'): {command}")
             except IOError as e:
                 logger.error(f"❌ Hiba SL Update parancs írásakor ('{sl_path}'): {e}")

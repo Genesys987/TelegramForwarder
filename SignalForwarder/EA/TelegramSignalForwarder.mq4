@@ -123,39 +123,58 @@ int start()
 // Process dynamic trailing stop for existing positions
   if (TimeCurrent() - lastTrailingStopScanTime >= trailingScanPeriodSeconds) {
     lastTrailingStopScanTime = TimeCurrent();
-  ProcessDynamicTrailingStop();
+    ProcessDynamicTrailingStop();
   }
 
 // Process new signal
   Signal signal = ReadSignalFile();
-  if(!signal.isValid) return(0);
-  if(debugMode)
-    PrintLog(eaName + ": Processing NEW signal from channel '" + signal.channelName + "' - GID=" + IntegerToString(signal.groupId) + " with " + IntegerToString(signal.tpCount) + " TP levels");
+  bool isEATrigger = false;
+  
+  // Check if this was an EA trigger signal
+  if(!signal.isValid) {
+    // Check if we have a stoploss update file - if yes, this might be a trigger
+    if(FileExists(gExternalSLFile)) {
+      if(debugMode)
+        PrintLog(eaName + ": Invalid signal but SL file exists - treating as EA trigger");
+      isEATrigger = true;
+    } else {
+      return(0); // No valid signal and no SL file
+    }
+  }
+  
+  // Process normal signals
+  if(!isEATrigger) {
+    if(debugMode)
+      PrintLog(eaName + ": Processing NEW signal from channel '" + signal.channelName + "' - GID=" + IntegerToString(signal.groupId) + " with " + IntegerToString(signal.tpCount) + " TP levels");
 
-// Check if orders with this GID already exist
-  bool hasExistingOrders = false;
-  for(int i=0; i<OrdersTotal(); i++) {
-    if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
-      int orderGid;
-      string orderChannel;
-      if(ParseOrderComment(OrderComment(), orderGid, orderChannel)) {
-        if(orderGid == signal.groupId && orderChannel == signal.channelName) {
-          hasExistingOrders = true;
-          break;
+    // Check if orders with this GID already exist
+    bool hasExistingOrders = false;
+    for(int i=0; i<OrdersTotal(); i++) {
+      if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+        int orderGid;
+        string orderChannel;
+        if(ParseOrderComment(OrderComment(), orderGid, orderChannel)) {
+          if(orderGid == signal.groupId && orderChannel == signal.channelName) {
+            hasExistingOrders = true;
+            break;
+          }
         }
       }
     }
-  }
 
-  if(hasExistingOrders) {
-    if(debugMode)
-      PrintLog(eaName + ": Orders with GID=" + IntegerToString(signal.groupId) + " already exist, only updating SL");
-    UpdateExistingOrdersSL(signal);
+    if(hasExistingOrders) {
+      if(debugMode)
+        PrintLog(eaName + ": Orders with GID=" + IntegerToString(signal.groupId) + " already exist, only updating SL");
+      UpdateExistingOrdersSL(signal);
+    } else {
+      if(debugMode)
+        PrintLog(eaName + ": No existing orders found, creating new orders");
+      UpdateExistingOrdersSL(signal);
+      SendOrders(signal);
+    }
   } else {
     if(debugMode)
-      PrintLog(eaName + ": No existing orders found, creating new orders");
-    UpdateExistingOrdersSL(signal);
-    SendOrders(signal);
+      PrintLog(eaName + ": EA trigger detected - proceeding to SL updates only");
   }
 
 // Process external SL updates
@@ -207,6 +226,14 @@ Signal ReadSignalFile()
     }
     if(StringLen(line) == 0) {
       PrintLog(eaName + ": Empty signal line, skipping");
+      return signal;
+    }
+
+    // Check for EA trigger signal
+    if(StringFind(line, "TRIGGER_EA_PROCESSING") >= 0) {
+      if(debugMode)
+        PrintLog(eaName + ": EA trigger signal detected, processing SL updates");
+      // Return invalid signal but don't log error - this triggers ProcessExternalSLUpdates
       return signal;
     }
 
@@ -568,9 +595,12 @@ void ProcessExternalSLUpdates()
     return;
   string cmd = FileReadString(handle);
   FileClose(handle);
-  if(!IsTesting()) {
-    FileDelete(gExternalSLFile);
-  }
+  
+  // Debug: Show what we actually read from the file
+  PrintLog(eaName + ": Read SL command from file: '" + cmd + "'");
+  
+  // Only delete the file after successful processing to avoid race conditions
+  // We'll delete it at the end of this function if processing was successful
 
   if(StringLen(cmd) == 0) {
     return;
@@ -598,6 +628,7 @@ void ProcessExternalSLUpdates()
   PrintLog(eaName + ": Processing SL update - GID=" + IntegerToString(gid) + 
            " NewSL=" + DoubleToString(newSL, 5));
 
+  int updatedCount = 0;
   int total = OrdersTotal();
   for(int i=0; i<total; i++) {
     if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
@@ -617,21 +648,40 @@ void ProcessExternalSLUpdates()
 
     // Update SL for matching order
     double currentSL = OrderStopLoss();
-    if(MathAbs(currentSL - newSL) > SL_MODIFY_THRESHOLD) {
+    int digits = MarketInfo(OrderSymbol(), MODE_DIGITS);
+    double normalizedNewSL = NormalizeDouble(newSL, digits);
+    
+    if(MathAbs(currentSL - normalizedNewSL) > SL_MODIFY_THRESHOLD) {
       double op = OrderOpenPrice();
       double tp = OrderTakeProfit();
       
-      if(OrderModify(OrderTicket(), op, newSL, tp, 0, clrGold)) {
-        PrintLog(eaName + ": SL updated for ticket " + IntegerToString(OrderTicket()) + 
+      if(OrderModify(OrderTicket(), op, normalizedNewSL, tp, 0, clrGold)) {
+        PrintLog(eaName + ": ✅ SL updated for ticket " + IntegerToString(OrderTicket()) + 
                  " GID=" + IntegerToString(gid) + 
-                 " from " + DoubleToString(currentSL, MarketInfo(OrderSymbol(), MODE_DIGITS)) + 
-                 " to " + DoubleToString(newSL, MarketInfo(OrderSymbol(), MODE_DIGITS)));
+                 " from " + DoubleToString(currentSL, digits) + 
+                 " to " + DoubleToString(normalizedNewSL, digits));
+        updatedCount++;
       } else {
-        PrintLog(eaName + ": SL update failed for ticket " + IntegerToString(OrderTicket()) + 
+        PrintLog(eaName + ": ❌ SL update failed for ticket " + IntegerToString(OrderTicket()) + 
                  " GID=" + IntegerToString(gid) + 
                  " error=" + IntegerToString(GetLastError()));
       }
+    } else {
+      PrintLog(eaName + ": SL change too small for ticket " + IntegerToString(OrderTicket()) + 
+               " - current=" + DoubleToString(currentSL, digits) + 
+               " new=" + DoubleToString(normalizedNewSL, digits));
     }
+  }
+  
+  if(updatedCount == 0) {
+    PrintLog(eaName + ": ⚠️ No orders found with GID=" + IntegerToString(gid) + " for SL update");
+  } else {
+    PrintLog(eaName + ": ✅ Updated SL for " + IntegerToString(updatedCount) + " orders with GID=" + IntegerToString(gid));
+  }
+  
+  // Delete the file only after processing is complete
+  if(!IsTesting()) {
+    FileDelete(gExternalSLFile);
   }
 }
 
