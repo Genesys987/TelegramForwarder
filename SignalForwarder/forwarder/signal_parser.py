@@ -213,6 +213,7 @@ def parse_single_line_signal(text):
     # Extract all TP values using multiple patterns (enhanced for emojis)
     tp_patterns = [
         r'[🤑💰✅]\s*TP(\d*)\s*:?\s*([\d\.]+)',        # Emoji TP with number capture
+        r'T\.P(\d+)\s+([\d\.]+)',                       # T.P1 114600, T.P2 114500 (T.P format)
         r'TP(\d+)\s*:?\s*([\d\.]+)',                    # TP1: 3289.0 or TP1 3289.0
         r'TP\s*:\s*([\d\.]+)',                          # TP: 89500.00 (with colon)
         r'TP\s+([\d\.]+)',                              # TP 89500.00 (without colon)
@@ -238,6 +239,7 @@ def parse_single_line_signal(text):
     # Extract SL value using multiple patterns (enhanced for emojis)
     sl_patterns = [
         r'[🔴❌🛑]\s*(?:SL|Stop\s*Loss|STOP\s*LOSS)\s*:?\s*([\d\.]+)',  # Emoji SL
+        r'S\.L\s+([\d\.]+)',                                           # S.L   115900 (S.L format)
         r'SL\s*:\s*([\d\.]+)',                                         # SL: 88600.00 (with colon)
         r'SL\s+([\d\.]+)',                                             # SL 88600.00 (without colon)
         r'Stop\s+loss\s+(?:at\s+)?([\d\.]+)',                         # Stop loss at 88600.00
@@ -429,6 +431,7 @@ def parse_signal(text: str):
         tp_patterns = [
             r'[🤑💰✅]\s*TP\d*\s*:\s*([\d\.]+(?:/[\d\.]+)*|open)',   # Emoji TP formats like "💰TP1: 3289.0", "💰TP2: 3331" (with colon)
             r'[🤑💰✅]\s*TP\d+\s+([\d\.]+(?:/[\d\.]+)*|open)',      # Emoji TP formats like "✅TP1 109700" (without colon)
+            r'T\.P\d+\s+([\d\.]+|open)',                             # "T.P1 114600", "T.P2 114500" (T.P format)
             r'TP\s*\d+\s*:\s*([\d\.]+|open)',                        # "TP1: 3289.0", "TP 2 : open", "Tp 1 : 3346" (with colon)
             r'TP\d+\s+([\d\.]+|open)',                               # "TP1 3420", "TP2 3423" (without colon, with number)
             r'TP\s*:\s*([\d\.]+|open)',                              # "TP: 1.1455", "TP: open"
@@ -498,8 +501,9 @@ def parse_signal(text: str):
         if not signal.get("stop_loss"):
             sl_patterns = [
                 r'[🔴❌🛑]\s*(?:SL|Stop\s*Loss|STOP\s*LOSS)\s*:?\s*([\d\.]+)',      # Emoji SL formats
-                r'(?:STOP\s*LOSS|SL)\s*:?\s*(?:at\s+)?([\d\.]+)(?:\s*\([^)]*\))?',  # Regular SL with optional parentheses
+                r'(?:STOP\s*LOSS|SL|S\.L)\s*:?\s*(?:at\s+)?([\d\.]+)(?:\s*\([^)]*\))?',  # Regular SL with optional parentheses, including S.L format
                 r'SL\s*:\s*([\d\.]+)',                                              # "SL: 3298.8"
+                r'S\.L\s+([\d\.]+)',                                                # "S.L   115900" (S.L format)
             ]
             
             for sl_pattern in sl_patterns:

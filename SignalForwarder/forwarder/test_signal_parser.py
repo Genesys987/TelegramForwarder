@@ -9,8 +9,8 @@ from signal_parser import parse_signal
 
 class TestSignalParser(unittest.TestCase):
     
-    def test_all_15_user_signals(self):
-        """Test all 15 signal formats provided by the user (including 4 new ones)"""
+    def test_all_16_user_signals(self):
+        """Test all 16 signal formats provided by the user (including 5 new ones)"""
         
         signals = [
             # Signal 1: Standard BUY format
@@ -72,6 +72,10 @@ class TestSignalParser(unittest.TestCase):
             # Signal 15: NEW - Colon entry format with "open" TP
             ("Gold buy : 3340.5 -3338\n\nSl 3335\n\nTp 1 : 3346\nTp 2 : open",
              "BUY", "XAUUSD", 3338.0, [3346.0, 3350.0], 3335.0),
+            
+            # Signal 16: NEW - T.P format with numbered take profits
+            ("BTCUSD SELL 115000\nT.P1 1146000\nT.P2 1145000\nT.P3 1144000\nT.P4 1143000\nS.L   1159000",
+             "SELL", "BTCUSD", 115000.0, [1146000.0, 1145000.0, 1144000.0, 1143000.0], 1159000.0),
         ]
         
         for i, (signal_text, expected_type, expected_symbol, expected_entry, expected_tps, expected_sl) in enumerate(signals, 1):
@@ -87,7 +91,7 @@ class TestSignalParser(unittest.TestCase):
                 self.assertEqual(result["take_profits"], expected_tps)
                 self.assertEqual(result["stop_loss"], expected_sl)
         
-        print("✅ All 15 user-provided signal formats passed!")
+        print("✅ All 16 user-provided signal formats passed!")
 
 
 if __name__ == '__main__':

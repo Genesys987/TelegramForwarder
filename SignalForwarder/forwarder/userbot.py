@@ -28,6 +28,34 @@ try: from stoploss_update import process_stoploss_reply
 except ImportError: logger.error("Hiba: stoploss_update.py/process_stoploss_reply hiányzik."); exit()
 
 
+async def trigger_ea_processing():
+    """
+    Trigger EA to process immediately by writing a dummy signal file.
+    This forces the EA to run and process any pending SL updates.
+    """
+    try:
+        from config import MT4_SIGNAL_FILE_PATHS
+        dummy_content = "TRIGGER_EA_PROCESSING"
+        
+        for signal_path in MT4_SIGNAL_FILE_PATHS:
+            try:
+                # Ensure the directory exists
+                os.makedirs(os.path.dirname(signal_path), exist_ok=True)
+                
+                # Write dummy content to trigger EA
+                with open(signal_path, "w", encoding='utf-8') as f:
+                    f.write(dummy_content)
+                    f.flush()
+                    os.fsync(f.fileno())  # Force write to disk
+                    
+                logger.info(f"   🔄 EA trigger kiírva: {os.path.basename(signal_path)}")
+            except Exception as e:
+                logger.error(f"   ❌ Hiba EA trigger írásakor ({signal_path}): {e}")
+                
+    except Exception as e:
+        logger.error(f"   ❌ Váratlan hiba EA trigger során: {e}")
+
+
 # --- Perzisztens Group ID Számláló ---
 current_group_id = 1000
 def load_last_gid(): # Betöltés indításkor
@@ -181,6 +209,8 @@ async def run_userbot():
                         command_written = process_stoploss_reply(message_text, original_message_text, retrieved_group_id)
                         if command_written: 
                           logger.info(f"   ✅ SL parancs kiírva.")
+                          # Trigger EA to process SL update immediately
+                          await trigger_ea_processing()
                           await forward_to_archive(message, chat_title, retrieved_group_id)
                         else: logger.error(f"   ❌ SL parancs hiba.")
                     else: logger.warning(f"   FIGYELEM: Nem található GID (ID: {reply_to_msg_id}). SL válasz nem feldolgozható!")
