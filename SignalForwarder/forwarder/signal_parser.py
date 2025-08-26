@@ -382,10 +382,25 @@ def parse_signal(text: str):
                     signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
                 continue
             
-            # Format 4: "EURUSD BUY" or "XAUUSD BUY" or "XAUUSD BUY 3417" (symbol first, then type, optional price)
-            match_symbol_type_simple = re.match(r'^([\w\.\/\-]+)\s+(BUY|SELL)(?:\s+([\d\/\.\-@]+))?', line, re.IGNORECASE)
+            # Format 4: "EURUSD BUY" or "XAUUSD BUY" or "XAUUSD BUY 3417" or "XAUUSD / GOLD SELL" (symbol first, then type, optional price)
+            match_symbol_type_simple = re.match(r'^([\w\.\/\-]+(?:\s*/\s*[\w\.\/\-]+)?)\s+(BUY|SELL)(?:\s+([\d\/\.\-@]+))?', line, re.IGNORECASE)
             if match_symbol_type_simple:
                 raw_symbol = match_symbol_type_simple.group(1).upper()
+                # Handle compound symbols like "XAUUSD / GOLD" - use the first one or map appropriately
+                if '/' in raw_symbol:
+                    symbol_parts = [part.strip() for part in raw_symbol.split('/')]
+                    # Use the first symbol, but check if any part maps to a known symbol
+                    for part in symbol_parts:
+                        if part in symbol_mappings:
+                            raw_symbol = symbol_mappings[part]
+                            break
+                        elif part in ['XAUUSD', 'BTCUSD', 'EURUSD']:  # Known forex symbols take precedence
+                            raw_symbol = part
+                            break
+                    else:
+                        # If no mapping found, use the first symbol
+                        raw_symbol = symbol_parts[0]
+                
                 signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
                 signal["signal_type"] = match_symbol_type_simple.group(2).upper()
                 # Check if there's an entry price in the same line
@@ -425,6 +440,21 @@ def parse_signal(text: str):
                 entry_text = m.group(1)
                 signal["entry"] = parse_entry_price(entry_text, signal.get("signal_type", "BUY"))
                 continue
+            
+            # NEW: Check for standalone entry price line (just numbers with optional slash)
+            # This should be a line that looks like an entry price but not TPs
+            entry_standalone_pattern = r'^([\d\.]+(?:/[\d\.]+)?)$'
+            entry_match = re.match(entry_standalone_pattern, line.strip())
+            if entry_match and signal.get("signal_type") and signal.get("symbol"):
+                # Make sure this looks like an entry price and not TPs
+                entry_text = entry_match.group(1)
+                potential_entry = parse_entry_price(entry_text, signal.get("signal_type", "BUY"))
+                
+                # Simple heuristic: if it's a range (contains /), treat as entry
+                # or if it's a single reasonable value for the symbol
+                if '/' in entry_text or (isinstance(potential_entry, (int, float)) and potential_entry > 0):
+                    signal["entry"] = potential_entry
+                    continue
 
         # Take Profits parsing - consolidated and improved
         # Check for various TP patterns in order of specificity
@@ -474,16 +504,12 @@ def parse_signal(text: str):
         # NEW: Check for slash-separated TP values OR single numeric TP (e.g., "3332/3330/3328/3325" or "3340")
         if not tp_found:
             # Pattern for line containing only numbers separated by slashes OR single number
-            slash_tp_pattern = r'^([\d\.]+(?:/[\d\.]+)*)$'
+            # Prioritize lines with multiple values (likely TPs) over single values (could be entry)
+            slash_tp_pattern = r'^([\d\.]+(?:/[\d\.]+)+)$'  # Must have at least one slash (multiple values)
             slash_match = re.match(slash_tp_pattern, line.strip())
             if slash_match:
                 tp_values_text = slash_match.group(1)
-                if '/' in tp_values_text:
-                    # Multiple TP values separated by slashes
-                    tp_values = tp_values_text.split('/')
-                else:
-                    # Single TP value
-                    tp_values = [tp_values_text]
+                tp_values = tp_values_text.split('/')
                 
                 for tp_val in tp_values:
                     try:
@@ -493,6 +519,19 @@ def parse_signal(text: str):
                             tp_found = True
                     except ValueError:
                         print(f"Warning: Invalid TP value in numeric format: {tp_val}")
+            else:
+                # Also check for single numeric TP (but only if we already have signal info and entry)
+                single_tp_pattern = r'^([\d\.]+)$'
+                single_match = re.match(single_tp_pattern, line.strip())
+                if single_match and signal.get("signal_type") and signal.get("entry") is not None:
+                    # This is likely a single TP since we already have entry
+                    try:
+                        tp_value = float(single_match.group(1))
+                        if tp_value > 10:  # Filter out small numbers
+                            take_profits.append(tp_value)
+                            tp_found = True
+                    except ValueError:
+                        pass
         
         if tp_found:
             continue
