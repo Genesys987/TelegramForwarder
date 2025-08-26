@@ -4,7 +4,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.3.0"
+#property version "2.3.1"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -907,8 +907,9 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal)
   }
 
   if (tpHitLevel == 1) {
-    double diff = MathAbs(signal.entry - signal.stopLoss) * stopLossMultiplier;
-    newSL = isBuy ? signal.entry - diff : signal.entry + diff;
+    // Use OrderOpenPrice and not signal.entry, because of slippage, actual open price might differ slightly
+    double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * stopLossMultiplier;
+    newSL = isBuy ? OrderOpenPrice() - diff : OrderOpenPrice() + diff;
   } else {
     if (signal.tpCount < tpHitLevel) {
       PrintLog(eaName + ": Invalid TP hit level " + IntegerToString(tpHitLevel) +
