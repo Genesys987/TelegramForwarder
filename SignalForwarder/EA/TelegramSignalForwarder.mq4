@@ -4,7 +4,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.3.2"
+#property version "2.3.3"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -120,13 +120,13 @@ void OnTimer()
     return;
   }
 // Process dynamic trailing stop for existing positions
-    ProcessDynamicTrailingStop();
+  ProcessDynamicTrailingStop();
 
 // Process new signal
   Signal signal = ReadSignalFile();
   bool isEATrigger = false;
-  
-  // Check if this was an EA trigger signal
+
+// Check if this was an EA trigger signal
   if(!signal.isValid) {
     // Check if we have a stoploss update file - if yes, this might be a trigger
     if(FileExists(gExternalSLFile)) {
@@ -137,8 +137,8 @@ void OnTimer()
       return; // No valid signal and no SL file
     }
   }
-  
-  // Process normal signals
+
+// Process normal signals
   if(!isEATrigger) {
     if(debugMode)
       PrintLog(eaName + ": Processing NEW signal from channel '" + signal.channelName + "' - GID=" + IntegerToString(signal.groupId) + " with " + IntegerToString(signal.tpCount) + " TP levels");
@@ -591,18 +591,18 @@ void ProcessExternalSLUpdates()
     return;
   string cmd = FileReadString(handle);
   FileClose(handle);
-  
-  // Debug: Show what we actually read from the file
+
+// Debug: Show what we actually read from the file
   PrintLog(eaName + ": Read SL command from file: '" + cmd + "'");
-  
-  // Only delete the file after successful processing to avoid race conditions
-  // We'll delete it at the end of this function if processing was successful
+
+// Only delete the file after successful processing to avoid race conditions
+// We'll delete it at the end of this function if processing was successful
 
   if(StringLen(cmd) == 0) {
     return;
   }
 
-  // Parse new format: xxxx|NEW_SL:value
+// Parse new format: xxxx|NEW_SL:value
   int sep = StringFind(cmd, "|NEW_SL:");
   if(sep <= 0) {
     PrintLog(eaName + ": Invalid SL modify command format: " + cmd);
@@ -621,7 +621,7 @@ void ProcessExternalSLUpdates()
     return;
   }
 
-  PrintLog(eaName + ": Processing SL update - GID=" + IntegerToString(gid) + 
+  PrintLog(eaName + ": Processing SL update - GID=" + IntegerToString(gid) +
            " NewSL=" + DoubleToString(newSL, 5));
 
   int updatedCount = 0;
@@ -646,36 +646,36 @@ void ProcessExternalSLUpdates()
     double currentSL = OrderStopLoss();
     int digits = MarketInfo(OrderSymbol(), MODE_DIGITS);
     double normalizedNewSL = NormalizeDouble(newSL, digits);
-    
+
     if(MathAbs(currentSL - normalizedNewSL) > SL_MODIFY_THRESHOLD) {
       double op = OrderOpenPrice();
       double tp = OrderTakeProfit();
-      
+
       if(OrderModify(OrderTicket(), op, normalizedNewSL, tp, 0, clrGold)) {
-        PrintLog(eaName + ": ✅ SL updated for ticket " + IntegerToString(OrderTicket()) + 
-                 " GID=" + IntegerToString(gid) + 
-                 " from " + DoubleToString(currentSL, digits) + 
+        PrintLog(eaName + ": ✅ SL updated for ticket " + IntegerToString(OrderTicket()) +
+                 " GID=" + IntegerToString(gid) +
+                 " from " + DoubleToString(currentSL, digits) +
                  " to " + DoubleToString(normalizedNewSL, digits));
         updatedCount++;
       } else {
-        PrintLog(eaName + ": ❌ SL update failed for ticket " + IntegerToString(OrderTicket()) + 
-                 " GID=" + IntegerToString(gid) + 
+        PrintLog(eaName + ": ❌ SL update failed for ticket " + IntegerToString(OrderTicket()) +
+                 " GID=" + IntegerToString(gid) +
                  " error=" + IntegerToString(GetLastError()));
       }
     } else {
-      PrintLog(eaName + ": SL change too small for ticket " + IntegerToString(OrderTicket()) + 
-               " - current=" + DoubleToString(currentSL, digits) + 
+      PrintLog(eaName + ": SL change too small for ticket " + IntegerToString(OrderTicket()) +
+               " - current=" + DoubleToString(currentSL, digits) +
                " new=" + DoubleToString(normalizedNewSL, digits));
     }
   }
-  
+
   if(updatedCount == 0) {
     PrintLog(eaName + ": ⚠️ No orders found with GID=" + IntegerToString(gid) + " for SL update");
   } else {
     PrintLog(eaName + ": ✅ Updated SL for " + IntegerToString(updatedCount) + " orders with GID=" + IntegerToString(gid));
   }
-  
-  // Delete the file only after processing is complete
+
+// Delete the file only after processing is complete
   if(!IsTesting()) {
     FileDelete(gExternalSLFile);
   }
@@ -851,7 +851,7 @@ void ProcessDynamicTrailingStop()
     Signal signal = GetSignalFromFile(OrderComment());
     if(!signal.isValid) {
       if (signal.groupId != 0)
-      PrintLog(eaName + ": cannot find signal in file for GID " + IntegerToString(signal.groupId) + ", skipping TS update");
+        PrintLog(eaName + ": cannot find signal in file for GID " + IntegerToString(signal.groupId) + ", skipping TS update");
       continue;
     }
 
@@ -861,9 +861,11 @@ void ProcessDynamicTrailingStop()
     double tpLevels[10];
 
     int tpHitLevel = 0;
+    // check if the current M5 bar has touched the TP level
+    // it's possible that TP was a momentary spike
     for(int i = 0; i < signal.tpCount; i++) {
-      if((OrderType() == OP_BUY && OrderClosePrice() >= signal.tpLevels[i]) ||
-          (OrderType() == OP_SELL && OrderClosePrice() <= signal.tpLevels[i])) {
+      if((OrderType() == OP_BUY && iHigh(OrderSymbol(), PERIOD_M5, 0) >= signal.tpLevels[i]) ||
+          (OrderType() == OP_SELL && iLow(OrderSymbol(), PERIOD_M5, 0) <= signal.tpLevels[i])) {
         tpHitLevel = i + 1; // TP levels are 1-based
       }
     }
