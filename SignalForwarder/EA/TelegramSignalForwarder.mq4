@@ -4,7 +4,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.3.1"
+#property version "2.3.2"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -27,8 +27,7 @@ static string gTempFile       = "processing.txt";     // Temp file to avoid re-r
 static string gExternalSLFile = "stoploss_update.txt";// External SL updates
 static string gSignalFile               = "signals.txt";       // Incoming signal file
 
-datetime lastTrailingStopScanTime = 0;
-int trailingScanPeriodSeconds = 5;
+int trailingScanPeriodSeconds = 3;
 
 struct Signal {
   long               timestamp;
@@ -89,7 +88,7 @@ double  GetPositionSize(Signal &signal);
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
-int init()
+void OnInit()
 {
 // Use chart's expert name if provided
   string customName = WindowExpertName();
@@ -99,32 +98,29 @@ int init()
   if(debugMode)
     PrintLog(eaName + ": Initialized");
 
-  return(0);
+// Use event timer for events
+  EventSetTimer(trailingScanPeriodSeconds);
 }
 
 //+------------------------------------------------------------------+
 //| Expert deinitialization function                                 |
 //+------------------------------------------------------------------+
-int deinit()
+void OnDeinit()
 {
   if(debugMode)
     PrintLog(eaName + ": Deinitialized");
-  return(0);
 }
 
 //+------------------------------------------------------------------+
 //| Expert tick handler                                              |
 //+------------------------------------------------------------------+
-int start()
+void OnTimer()
 {
   if (!IsTradeAllowed() || !IsConnected() || IsStopped()) {
-    return(0);
+    return;
   }
 // Process dynamic trailing stop for existing positions
-  if (TimeCurrent() - lastTrailingStopScanTime >= trailingScanPeriodSeconds) {
-    lastTrailingStopScanTime = TimeCurrent();
     ProcessDynamicTrailingStop();
-  }
 
 // Process new signal
   Signal signal = ReadSignalFile();
@@ -138,7 +134,7 @@ int start()
         PrintLog(eaName + ": Invalid signal but SL file exists - treating as EA trigger");
       isEATrigger = true;
     } else {
-      return(0); // No valid signal and no SL file
+      return; // No valid signal and no SL file
     }
   }
   
@@ -179,7 +175,7 @@ int start()
 
 // Process external SL updates
   ProcessExternalSLUpdates();
-  return(0);
+  return;
 }
 
 //+------------------------------------------------------------------+
@@ -1082,12 +1078,13 @@ double GetPositionSize(Signal &signal)
   double originalPositionSize = positionSize;
 
 // decrease position size until it fits existing margin
+// e.g. if we want to use up 70% maximum, we need 100%-70% = 30% remaining
   double minimumRemainingMargin = AccountFreeMargin() * (1 - marginBufferPercentage / 100.0);
   int orderType = (signal.type == "BUY") ? OP_BUY : OP_SELL;
   while(positionSize >= minLot) {
     double freeMarginRemaining = AccountFreeMarginCheck(symbol, orderType, positionSize);
     if (debugMode) {
-      PrintLog(eaName + ": Checking margin for " + symbol + " - Free remains: " + DoubleToString(freeMarginRemaining, 2) + ", Needed free: " + DoubleToString(minimumRemainingMargin, 2));
+      PrintLog(eaName + ": Checking margin for " + symbol + ", lot size " + DoubleToString(positionSize, 2) + " - Free remains: " + DoubleToString(freeMarginRemaining, 2) + ", Needed free: " + DoubleToString(minimumRemainingMargin, 2));
     }
     if(freeMarginRemaining >= 0 && freeMarginRemaining >= minimumRemainingMargin && GetLastError() == 0)
       break;
