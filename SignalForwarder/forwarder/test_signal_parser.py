@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple test suite for the signal parser - tests all 15 user-provided signal formats
+Simple test suite for the signal parser - tests all 18 user-provided signal formats
 """
 
 import unittest
@@ -9,8 +9,8 @@ from signal_parser import parse_signal
 
 class TestSignalParser(unittest.TestCase):
     
-    def test_all_17_user_signals(self):
-        """Test all 17 signal formats provided by the user (including 6 new ones)"""
+    def test_all_19_user_signals(self):
+        """Test all 19 signal formats provided by the user"""
         
         signals = [
             # Signal 1: Standard BUY format
@@ -49,7 +49,7 @@ class TestSignalParser(unittest.TestCase):
             ("GOLD SELL 3334/3337\n\n3332/3330/3328/3325\n\n        SL 3345",
              "SELL", "XAUUSD", 3337.0, [3332.0, 3330.0, 3328.0, 3325.0], 3345.0),
             
-            # Signal 10: NOW signal with multiple TPs
+            # Signal 10: NOW signal with multiple TPs (no range = immediate)
             ("GOLD SELL NOW\n\nTP 3307\nTP 3305\nTP 3303\nTP 3300\nTP 3298\n\nSL 3322",
              "SELL", "XAUUSD", 0, [3307.0, 3305.0, 3303.0, 3300.0, 3298.0], 3322.0),
             
@@ -65,9 +65,9 @@ class TestSignalParser(unittest.TestCase):
             ("Gold Sell 3341-3346\n\nSl :3348\n\nTp1 :3339\nTp2 :3336\n\nEnter Slowly-Layer with proper money management\n\nDo not rush your entries",
              "SELL", "XAUUSD", 3346.0, [3339.0, 3336.0], 3348.0),
             
-            # Signal 14: NEW - I'M SELLING with parentheses range
+            # Signal 14: NEW - I'M SELLING with parentheses range (NOW with range should use range as entry)
             ("I'M SELLING XAUUSD NOW (3337 - 3340)\n\n💰TP1: 3334\n💰TP2: 3331\n\n🛑 STOP LOSS: 3343",
-             "SELL", "XAUUSD", 0, [3334.0, 3331.0], 3343.0),
+             "SELL", "XAUUSD", 3340.0, [3334.0, 3331.0], 3343.0),
             
             # Signal 15: NEW - Colon entry format with "open" TP
             ("Gold buy : 3340.5 -3338\n\nSl 3335\n\nTp 1 : 3346\nTp 2 : open",
@@ -80,6 +80,14 @@ class TestSignalParser(unittest.TestCase):
             # Signal 17: NEW - Multi-line GOLD/XAUUSD with entry range and slash-separated TPs
             ("XAUUSD / GOLD SELL\n 3367/3370\n\n3365/3363/3360/3357/3355\n\n\n             SL 3385",
              "SELL", "XAUUSD", 3370.0, [3365.0, 3363.0, 3360.0, 3357.0, 3355.0], 3385.0),
+             
+            # Signal 18: NEW - I'M SELLING with range and emoji TPs/SL (NOW with range should use range as entry)
+            ("I'M SELLING XAUUSD NOW (3330 - 3333)\n\n💰TP1: 3327\n💰TP2: 3324\n\n🛑 STOP LOSS: 3336",
+             "SELL", "XAUUSD", 3333.0, [3327.0, 3324.0], 3336.0),
+             
+            # Signal 19: NEW - Gold buy with range entry and only "open" TP (should be entry + 6)
+            ("Gold buy : 3397-3394\n\nSl 3391\nTp open",
+             "BUY", "XAUUSD", 3394.0, [3400.0], 3391.0),
         ]
         
         for i, (signal_text, expected_type, expected_symbol, expected_entry, expected_tps, expected_sl) in enumerate(signals, 1):
@@ -95,7 +103,7 @@ class TestSignalParser(unittest.TestCase):
                 self.assertEqual(result["take_profits"], expected_tps)
                 self.assertEqual(result["stop_loss"], expected_sl)
         
-        print("✅ All 17 user-provided signal formats passed!")
+        print("✅ All 19 user-provided signal formats passed!")
 
 
 if __name__ == '__main__':
