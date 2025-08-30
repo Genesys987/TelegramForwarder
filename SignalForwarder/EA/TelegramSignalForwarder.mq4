@@ -1064,9 +1064,10 @@ double GetPositionSize(Signal &signal)
   double lotStep = MarketInfo(symbol, MODE_LOTSTEP);
   double tickSize = MarketInfo(symbol, MODE_TICKSIZE);
   double tickValue = MarketInfo(symbol, MODE_TICKVALUE);
+  double currentPrice = signal.type == "BUY" ? MarketInfo(symbol, MODE_ASK) : MarketInfo(symbol, MODE_BID);
 
 // the value of our risk per lot, in the quote currency
-  double riskedTicks = MathAbs(signal.entry - signal.stopLoss) / tickSize;
+  double riskedTicks = MathAbs(currentPrice - signal.stopLoss) / tickSize;
   double riskValuePerLot = tickValue * riskedTicks;
 
 // Calculate maximum loss based on risk percentage (1%)
