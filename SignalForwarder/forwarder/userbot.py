@@ -24,36 +24,8 @@ try: from signal_parser import parse_signal
 except ImportError: logger.error("Hiba: signal_parser.py/parse_signal hiányzik."); exit()
 try: from queue_manager import add_signal_to_queue
 except ImportError: logger.error("Hiba: queue_manager.py/add_signal_to_queue hiányzik."); exit()
-try: from stoploss_update import process_stoploss_reply
+try: from stoploss_update import process_stoploss_reply, process_breakeven_signal, process_close_signal, process_close_and_breakeven_signal
 except ImportError: logger.error("Hiba: stoploss_update.py/process_stoploss_reply hiányzik."); exit()
-
-
-async def trigger_ea_processing():
-    """
-    Trigger EA to process immediately by writing a dummy signal file.
-    This forces the EA to run and process any pending SL updates.
-    """
-    try:
-        from config import MT4_SIGNAL_FILE_PATHS
-        dummy_content = "TRIGGER_EA_PROCESSING"
-        
-        for signal_path in MT4_SIGNAL_FILE_PATHS:
-            try:
-                # Ensure the directory exists
-                os.makedirs(os.path.dirname(signal_path), exist_ok=True)
-                
-                # Write dummy content to trigger EA
-                with open(signal_path, "w", encoding='utf-8') as f:
-                    f.write(dummy_content)
-                    f.flush()
-                    os.fsync(f.fileno())  # Force write to disk
-                    
-                logger.info(f"   🔄 EA trigger kiírva: {os.path.basename(signal_path)}")
-            except Exception as e:
-                logger.error(f"   ❌ Hiba EA trigger írásakor ({signal_path}): {e}")
-                
-    except Exception as e:
-        logger.error(f"   ❌ Váratlan hiba EA trigger során: {e}")
 
 
 # --- Perzisztens Group ID Számláló ---
@@ -199,22 +171,72 @@ async def run_userbot():
             reply_original_message = await message.get_reply_message()
             if reply_original_message:
                 original_message_text = reply_original_message.text
-                if re.search(r'(adjust|set|move)\s+(your\s+)?sl', message_text, re.IGNORECASE):
+                
+                # Check different patterns in order of specificity
+                if re.search(r'(move|adjust|set)\s+(my\s+)?sl\s+(to|at)\s+[\d.]+', message_text, re.IGNORECASE):
+                    # SL ADJUST pattern: "I'll move my SL to 3390.7"
                     logger.info(f"   SL állítás detektálva.")
                     # --- === GROUP_ID MEGSZERZÉSE === ---
                     retrieved_group_id = message_id_to_group_id.get(reply_to_msg_id)
                     # --- =========================== ---
                     if retrieved_group_id:
                         logger.info(f"   Talált GID: {retrieved_group_id}")
-                        command_written = process_stoploss_reply(message_text, original_message_text, retrieved_group_id)
+                        clean_channel = clean_channel_name(chat_title)
+                        command_written = process_stoploss_reply(message_text, original_message_text, retrieved_group_id, clean_channel)
                         if command_written: 
                           logger.info(f"   ✅ SL parancs kiírva.")
-                          # Trigger EA to process SL update immediately
-                          await trigger_ea_processing()
                           await forward_to_archive(message, chat_title, retrieved_group_id)
                         else: logger.error(f"   ❌ SL parancs hiba.")
                     else: logger.warning(f"   FIGYELEM: Nem található GID (ID: {reply_to_msg_id}). SL válasz nem feldolgozható!")
-                else: logger.info(f"   Nem SL állításnak tűnő válasz.")
+                
+                elif re.search(r'close.*(profit|half|all).*breakeven', message_text, re.IGNORECASE) or \
+                     re.search(r'close.*half.*hold', message_text, re.IGNORECASE) or \
+                     re.search(r'close.*entries.*breakeven', message_text, re.IGNORECASE) or \
+                     re.search(r'secure.*(entry|entries|first|profit)', message_text, re.IGNORECASE):
+                    # CLOSE HALF + BREAKEVEN pattern: "Let's CLOSE our profit now and set breakeven" or "Secure first entry"
+                    logger.info(f"   Close+Breakeven/Secure detektálva.")
+                    retrieved_group_id = message_id_to_group_id.get(reply_to_msg_id)
+                    if retrieved_group_id:
+                        logger.info(f"   Talált GID: {retrieved_group_id}")
+                        clean_channel = clean_channel_name(chat_title)
+                        command_written = process_close_and_breakeven_signal(retrieved_group_id, clean_channel)
+                        if command_written: 
+                          logger.info(f"   ✅ Close+Breakeven/Secure parancs kiírva.")
+                          await forward_to_archive(message, chat_title, retrieved_group_id)
+                        else: logger.error(f"   ❌ Close+Breakeven/Secure parancs hiba.")
+                    else: logger.warning(f"   FIGYELEM: Nem található GID (ID: {reply_to_msg_id}). Close+Breakeven/Secure válasz nem feldolgozható!")
+                
+                elif re.search(r'(breakeven|break\s*even|set\s+breakeven)', message_text, re.IGNORECASE):
+                    # BREAKEVEN only pattern
+                    logger.info(f"   Breakeven detektálva.")
+                    retrieved_group_id = message_id_to_group_id.get(reply_to_msg_id)
+                    if retrieved_group_id:
+                        logger.info(f"   Talált GID: {retrieved_group_id}")
+                        clean_channel = clean_channel_name(chat_title)
+                        command_written = process_breakeven_signal(retrieved_group_id, clean_channel)
+                        if command_written: 
+                          logger.info(f"   ✅ Breakeven parancs kiírva.")
+                          await forward_to_archive(message, chat_title, retrieved_group_id)
+                        else: logger.error(f"   ❌ Breakeven parancs hiba.")
+                    else: logger.warning(f"   FIGYELEM: Nem található GID (ID: {reply_to_msg_id}). Breakeven válasz nem feldolgozható!")
+                
+                elif re.search(r'(close|exit|entries\s+are\s+closed)', message_text, re.IGNORECASE):
+                    # CLOSE only pattern
+                    logger.info(f"   Close detektálva.")
+                    retrieved_group_id = message_id_to_group_id.get(reply_to_msg_id)
+                    if retrieved_group_id:
+                        logger.info(f"   Talált GID: {retrieved_group_id}")
+                        clean_channel = clean_channel_name(chat_title)
+                        command_written = process_close_signal(retrieved_group_id, clean_channel)
+                        if command_written: 
+                          logger.info(f"   ✅ Close parancs kiírva.")
+                          await forward_to_archive(message, chat_title, retrieved_group_id)
+                        else: logger.error(f"   ❌ Close parancs hiba.")
+                    else: logger.warning(f"   FIGYELEM: Nem található GID (ID: {reply_to_msg_id}). Close válasz nem feldolgozható!")
+                
+                else:
+                    logger.info(f"   Nem ismert trading instruction.")
+                    
             else: logger.error(f"   Hiba: Eredeti üzenet lekérése sikertelen (ID: {reply_to_msg_id}).")
             return
 

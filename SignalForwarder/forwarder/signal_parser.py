@@ -168,11 +168,10 @@ def parse_single_line_signal(text):
                         signal["signal_type"] = "SELL" if action == "SELLING" else "BUY"
                         raw_symbol = match.group(2).upper()
                         signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                        # Extract range from parentheses for later use if needed
+                        # Extract range from parentheses and use as entry price
                         range_text = match.group(3).strip()
-                        # Don't set entry here for NOW signals, but store the range info
+                        signal["entry"] = parse_entry_price(range_text, signal["signal_type"])
                         signal["_range_info"] = range_text
-                    # For NOW signals, don't set entry here - will be set to 0 later
                 elif 'FROM' in pattern:
                     # FROM format: SYMBOL BUY/SELL FROM price
                     raw_symbol = match.group(1).upper()
@@ -426,10 +425,10 @@ def parse_signal(text: str):
                 signal["signal_type"] = "SELL" if action == "SELLING" else "BUY"
                 raw_symbol = match_im_now.group(2).upper()
                 signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                # For NOW signals, entry will be set to 0 later
-                # But store the range info from parentheses for context
+                # Extract and parse the range from parentheses as entry price
                 range_text = match_im_now.group(3).strip()
-                signal["_range_info"] = range_text
+                signal["entry"] = parse_entry_price(range_text, signal["signal_type"])
+                signal["_range_info"] = range_text  # Keep for reference
                 continue
 
         # Entry Price parsing
@@ -560,8 +559,9 @@ def parse_signal(text: str):
         processed_tps = []
         for i, tp in enumerate(take_profits):
             if tp == 'open':
-                # Calculate "open" TP based on the previous TP (if exists)
+                # Calculate "open" TP based on the previous TP (if exists) or entry price
                 if i > 0 and isinstance(processed_tps[i-1], (int, float)):
+                    # Case 1: Previous TP exists - use prev_tp ± 4
                     prev_tp = processed_tps[i-1]
                     if signal.get("signal_type") == "BUY":
                         # For BUY: open TP should be higher (prev_tp + 4)
@@ -570,8 +570,18 @@ def parse_signal(text: str):
                         # For SELL: open TP should be lower (prev_tp - 4)
                         calculated_tp = prev_tp - 4
                     processed_tps.append(calculated_tp)
+                elif signal.get("entry") is not None and signal.get("entry") != 0:
+                    # Case 2: No previous TP but have entry - use entry ± 6
+                    entry_price = signal.get("entry")
+                    if signal.get("signal_type") == "BUY":
+                        # For BUY: open TP should be higher (entry + 6)
+                        calculated_tp = entry_price + 6
+                    else:
+                        # For SELL: open TP should be lower (entry - 6)
+                        calculated_tp = entry_price - 6
+                    processed_tps.append(calculated_tp)
                 else:
-                    print(f"Warning: Cannot calculate 'open' TP - no previous numeric TP found")
+                    print(f"Warning: Cannot calculate 'open' TP - no previous TP or entry found")
                     # Skip this TP
                     continue
             else:
@@ -588,8 +598,8 @@ def parse_signal(text: str):
             take_profits.sort(reverse=True)
         signal["take_profits"] = take_profits
 
-    # NEW: Simple check for immediate entry - set entry to 0 if NOW keyword found
-    if 'NOW' in text.upper():
+    # NEW: Simple check for immediate entry - set entry to 0 if NOW keyword found BUT no entry was set
+    if 'NOW' in text.upper() and signal.get("entry") is None:
         signal["entry"] = 0
 
     # Final Validation: Check if all essential parts were found
