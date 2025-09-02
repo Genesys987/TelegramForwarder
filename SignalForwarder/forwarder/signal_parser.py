@@ -127,7 +127,7 @@ def parse_single_line_signal(text):
             r'(BUY|SELL)\s+([\w\.\/\-]+)\s+NOW',                                # BUY GOLD NOW
             r'([\w\.\/\-]+)\s+NOW\s+(BUY|SELL)',                                # GOLD NOW SELL
             r'NOW\s+(BUY|SELL)\s+([\w\.\/\-]+)',                                # NOW BUY BTCUSD
-            r'I\'?M\s+(SELLING|BUYING)\s+([\w\.\/\-]+)\s+NOW\s*\(([\d\-\s@]+)\)', # I'M SELLING XAUUSD NOW (3337 - 3340)
+            r'I[\'\u2019]?M\s+(SELLING|BUYING)\s+([\w\.\/\-]+)\s+NOW\s*\(([\d\-\s@\.]+)\)', # I'M SELLING XAUUSD NOW (3337 - 3340)
             # Regular patterns (existing + new @ and - range formats)
             r'([\w\.\/\-]+)\s+(BUY|SELL)\s+FROM\s+([\d\/\.\-@]+)',              # GOLD SELL FROM 3313/3315.3
             r'([\w\.\/\-]+)\s+(BUY|SELL)\s+@([\d\-]+)',                         # Sell Gold @3339-3344
@@ -162,7 +162,7 @@ def parse_single_line_signal(text):
                         signal["signal_type"] = match.group(1).upper()
                         raw_symbol = match.group(2).upper()
                         signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                    elif pattern == r'I\'?M\s+(SELLING|BUYING)\s+([\w\.\/\-]+)\s+NOW\s*\(([\d\-\s@]+)\)':
+                    elif pattern == r'I[\'\u2019]?M\s+(SELLING|BUYING)\s+([\w\.\/\-]+)\s+NOW\s*\(([\d\-\s@\.]+)\)':
                         # I'M SELLING XAUUSD NOW (3337 - 3340)
                         action = match.group(1).upper()
                         signal["signal_type"] = "SELL" if action == "SELLING" else "BUY"
@@ -419,7 +419,7 @@ def parse_signal(text: str):
                 continue
             
             # Format 6: "I'M SELLING XAUUSD NOW (3337 - 3340)" - handle NOW with range in parentheses
-            match_im_now = re.match(r'^I\'?M\s+(SELLING|BUYING)\s+([\w\.\/\-]+)\s+NOW\s*\(([\d\-\s@]+)\)', line, re.IGNORECASE)
+            match_im_now = re.match(r'^I[\'\u2019]?M\s+(SELLING|BUYING)\s+([\w\.\/\-]+)\s+NOW\s*\(([\d\-\s@\.]+)\)', line, re.IGNORECASE)
             if match_im_now:
                 action = match_im_now.group(1).upper()
                 signal["signal_type"] = "SELL" if action == "SELLING" else "BUY"
