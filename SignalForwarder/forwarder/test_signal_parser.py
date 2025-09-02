@@ -4,13 +4,13 @@ Simple test suite for the signal parser - tests all 18 user-provided signal form
 """
 
 import unittest
-from signal_parser import parse_signal
+from .signal_parser import parse_signal
 
 
 class TestSignalParser(unittest.TestCase):
     
-    def test_all_19_user_signals(self):
-        """Test all 19 signal formats provided by the user"""
+    def test_all_20_user_signals(self):
+        """Test all 20 signal formats provided by the user"""
         
         signals = [
             # Signal 1: Standard BUY format
@@ -88,6 +88,10 @@ class TestSignalParser(unittest.TestCase):
             # Signal 19: NEW - Gold buy with range entry and only "open" TP (should be entry + 6)
             ("Gold buy : 3397-3394\n\nSl 3391\nTp open",
              "BUY", "XAUUSD", 3394.0, [3400.0], 3391.0),
+             
+            # Signal 20: NEW - Typographic apostrophe in I'M BUYING NOW format
+            ("I'M BUYING XAUUSD NOW (3473.5 - 3470.5)\n\n💰TP1: 3476.5\n💰TP2: 3479.5\n\n🛑 STOP LOSS: 3467.5",
+             "BUY", "XAUUSD", 3470.5, [3476.5, 3479.5], 3467.5),
         ]
         
         for i, (signal_text, expected_type, expected_symbol, expected_entry, expected_tps, expected_sl) in enumerate(signals, 1):
@@ -103,7 +107,7 @@ class TestSignalParser(unittest.TestCase):
                 self.assertEqual(result["take_profits"], expected_tps)
                 self.assertEqual(result["stop_loss"], expected_sl)
         
-        print("✅ All 19 user-provided signal formats passed!")
+        print("✅ All 20 user-provided signal formats passed!")
 
 
 if __name__ == '__main__':
