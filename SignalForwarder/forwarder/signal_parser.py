@@ -419,7 +419,7 @@ def parse_signal(text: str):
                 continue
             
             # Format 6: "I'M SELLING XAUUSD NOW (3337 - 3340)" - handle NOW with range in parentheses
-            match_im_now = re.match(r'^I[\'\u2019]?M\s+(SELLING|BUYING)\s+([\w\.\/\-]+)\s+NOW\s*\(([\d\-\s@\.]+)\)', line, re.IGNORECASE)
+            match_im_now = re.match(r'^I\'?M\s+(SELLING|BUYING)\s+([\w\.\/\-]+)\s+NOW\s*\(([\d\-\s@]+)\)', line, re.IGNORECASE)
             if match_im_now:
                 action = match_im_now.group(1).upper()
                 signal["signal_type"] = "SELL" if action == "SELLING" else "BUY"

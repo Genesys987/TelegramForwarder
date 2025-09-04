@@ -1014,7 +1014,13 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
     return;
   }
 
-  // Calculate how many to close vs breakeven
+  // NEW LOGIC: If only 1 order, do nothing - let it run
+  if(matchingCount == 1) {
+    PrintLog(eaName + ": ⚠️ Only 1 order found with GID=" + IntegerToString(signal.groupId) + " - letting it run (no action taken)");
+    return;
+  }
+
+  // Calculate how many to close vs breakeven (only for 2+ orders)
   // If odd number: close more than half (e.g., 3 orders: close 2, breakeven 1)
   // If even number: close exactly half (e.g., 4 orders: close 2, breakeven 2)
   int ordersToClose = (matchingCount + 1) / 2;  // This gives us ceil(count/2)
