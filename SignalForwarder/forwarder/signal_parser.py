@@ -419,7 +419,7 @@ def parse_signal(text: str):
                 continue
             
             # Format 6: "I'M SELLING XAUUSD NOW (3337 - 3340)" - handle NOW with range in parentheses
-            match_im_now = re.match(r'^I\'?M\s+(SELLING|BUYING)\s+([\w\.\/\-]+)\s+NOW\s*\(([\d\-\s@]+)\)', line, re.IGNORECASE)
+            match_im_now = re.match(r'^I[\'\u2019]?M\s+(SELLING|BUYING)\s+([\w\.\/\-]+)\s+NOW\s*\(([\d\-\s@\.]+)\)', line, re.IGNORECASE)
             if match_im_now:
                 action = match_im_now.group(1).upper()
                 signal["signal_type"] = "SELL" if action == "SELLING" else "BUY"
@@ -504,15 +504,17 @@ def parse_signal(text: str):
         if not tp_found:
             # Pattern for line containing only numbers separated by slashes OR single number
             # Prioritize lines with multiple values (likely TPs) over single values (could be entry)
-            slash_tp_pattern = r'^([\d\.]+(?:/[\d\.]+)+)$'  # Must have at least one slash (multiple values)
+            # Updated to handle spaces around slashes (e.g., "3590/ 3595" or "3590 / 3595")
+            slash_tp_pattern = r'^([\d\.]+(?:\s*/\s*[\d\.]+)+)$'  # Must have at least one slash (multiple values), spaces allowed
             slash_match = re.match(slash_tp_pattern, line.strip())
             if slash_match:
                 tp_values_text = slash_match.group(1)
-                tp_values = tp_values_text.split('/')
+                # Split by slash and strip whitespace from each value
+                tp_values = [val.strip() for val in tp_values_text.split('/') if val.strip()]
                 
                 for tp_val in tp_values:
                     try:
-                        tp_value = float(tp_val.strip())
+                        tp_value = float(tp_val)
                         if tp_value > 10:  # Filter out small numbers
                             take_profits.append(tp_value)
                             tp_found = True
