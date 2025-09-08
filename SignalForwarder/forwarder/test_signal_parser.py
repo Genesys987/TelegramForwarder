@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """
-Simple test suite for the signal parser - tests all 18 user-provided signal formats
+Simple test suite for the signal parser - tests all 22 user-provided signal formats
 """
 
 import unittest
-from .signal_parser import parse_signal
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from signal_parser import parse_signal
 
 
 class TestSignalParser(unittest.TestCase):
     
-    def test_all_20_user_signals(self):
-        """Test all 20 signal formats provided by the user"""
+    def test_all_22_user_signals(self):
+        """Test all 22 signal formats provided by the user"""
         
         signals = [
             # Signal 1: Standard BUY format
@@ -92,6 +95,14 @@ class TestSignalParser(unittest.TestCase):
             # Signal 20: NEW - Typographic apostrophe in I'M BUYING NOW format
             ("I'M BUYING XAUUSD NOW (3473.5 - 3470.5)\n\n💰TP1: 3476.5\n💰TP2: 3479.5\n\n🛑 STOP LOSS: 3467.5",
              "BUY", "XAUUSD", 3470.5, [3476.5, 3479.5], 3467.5),
+             
+            # Signal 21: NEW - Unicode apostrophe in I'M BUYING NOW format (user-provided example)
+            ("I'M BUYING XAUUSD NOW (3572.5 - 3569.5)\n\n💰TP1: 3575.5\n💰TP2: 3578.5\n\n🛑 STOP LOSS: 3566.5",
+             "BUY", "XAUUSD", 3569.5, [3575.5, 3578.5], 3566.5),
+             
+            # Signal 22: NEW - Space in slash-separated TPs (flexible spacing handling)
+            ("GOLD BUY 3578/3575\n\n3580/3582/3585/3587/3590/ 3595 \n\n\n            SL 3565",
+             "BUY", "XAUUSD", 3575.0, [3580.0, 3582.0, 3585.0, 3587.0, 3590.0, 3595.0], 3565.0),
         ]
         
         for i, (signal_text, expected_type, expected_symbol, expected_entry, expected_tps, expected_sl) in enumerate(signals, 1):
@@ -107,7 +118,7 @@ class TestSignalParser(unittest.TestCase):
                 self.assertEqual(result["take_profits"], expected_tps)
                 self.assertEqual(result["stop_loss"], expected_sl)
         
-        print("✅ All 20 user-provided signal formats passed!")
+        print("✅ All 22 user-provided signal formats passed!")
 
 
 if __name__ == '__main__':
