@@ -78,7 +78,7 @@ void    ProcessBreakevenSignal(Signal &signal);
 void    ProcessCloseSignal(Signal &signal);
 void    ProcessCloseHalfBreakevenSignal(Signal &signal);
 void    ProcessDynamicTrailingStop();
-double  CalculateNewSL(int tpHitLevel, Signal &signal);
+double  CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string channelName);
 bool    ParseOrderComment(string comment, int &groupId, string &channelName);
 
 // Utility functions
@@ -1293,10 +1293,20 @@ void ProcessDynamicTrailingStop()
   for(int o = 0; o < OrdersTotal(); o++) {
     if(!OrderSelect(o, SELECT_BY_POS, MODE_TRADES))
       continue;
-    Signal signal = GetSignalFromFile(OrderComment());
+      
+    // Parse order comment to get GID and channel name
+    int orderGid;
+    string orderChannelName;
+    if(!ParseOrderComment(OrderComment(), orderGid, orderChannelName)) {
+      if(debugMode)
+        PrintLog(eaName + ": Failed to parse order comment for ticket " + IntegerToString(OrderTicket()) + ": " + OrderComment());
+      continue;
+    }
+    
+    Signal signal = GetSignalFromFile(orderGid);
     if(!signal.isValid) {
-      if (signal.groupId != 0)
-        PrintLog(eaName + ": cannot find signal in file for GID " + IntegerToString(signal.groupId) + ", skipping TS update");
+      if(debugMode)
+        PrintLog(eaName + ": cannot find signal in file for GID " + IntegerToString(orderGid) + ", skipping TS update");
       continue;
     }
 
@@ -1317,7 +1327,7 @@ void ProcessDynamicTrailingStop()
     if(tpHitLevel <= 0)
       continue; // No TPs hit yet, skip TS for this order
     double currentSL = OrderStopLoss();
-    double newSL = CalculateNewSL(tpHitLevel, currentSL, signal);
+    double newSL = CalculateNewSL(tpHitLevel, currentSL, signal, orderChannelName);
     if(MathAbs(currentSL - newSL) > SL_MODIFY_THRESHOLD) {
       bool modified = OrderModify(OrderTicket(), OrderOpenPrice(), newSL,
                                   OrderTakeProfit(), 0, clrOrange);
@@ -1336,7 +1346,7 @@ void ProcessDynamicTrailingStop()
 //+------------------------------------------------------------------+
 //| CalculateNewSL: Calculate new SL based on TP hit level         |
 //+------------------------------------------------------------------+
-double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal)
+double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string channelName)
 {
   double newSL = currentStop;
   bool isBuy = (signal.type == "BUY");
@@ -1344,14 +1354,59 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal)
     return currentStop;
 
   int digits = MarketInfo(signal.symbol, MODE_DIGITS);
+  string symbolUpper = signal.symbol;
+  StringToUpper(symbolUpper);
+  
+  // Special rules for specific channel+symbol combinations
+  double dynamicStopLossMultiplier = stopLossMultiplier;
+  bool stopTrailingAfterTP2 = false;
+  
+  // FXPL + BTCUSD: always use 0.5 multiplier
+  if(channelName == "FXPL" && (StringFind(symbolUpper, "BTCUSD") >= 0 || StringFind(symbolUpper, "BTC") >= 0)) {
+    dynamicStopLossMultiplier = 0.5;
+    if(debugMode)
+      PrintLog(eaName + ": Using FXPL+BTCUSD rule: multiplier=0.5");
+  }
+  // THEA + XAUUSD: use 0.2 multiplier and stop trailing after TP2
+  else if(channelName == "THEA" && (StringFind(symbolUpper, "XAUUSD") >= 0 || StringFind(symbolUpper, "GOLD") >= 0)) {
+    dynamicStopLossMultiplier = 0.2;
+    stopTrailingAfterTP2 = true;
+    if(debugMode)
+      PrintLog(eaName + ": Using THEA+XAUUSD rule: multiplier=0.2, stop after TP2");
+  }
 
-  if(stopLossMultiplier < 0) {
+  // THEA special rule: if TP2+ hit and symbol is XAUUSD, move to breakeven and stop trailing
+  if(stopTrailingAfterTP2 && tpHitLevel >= 2) {
+    double breakevenSL = OrderOpenPrice();
+    double normalizedBreakeven = NormalizeDouble(breakevenSL, digits);
+    
+    // Only move to breakeven if it's more favorable than current SL
+    bool shouldMoveToBreakeven = false;
+    if(isBuy && normalizedBreakeven > currentStop) {
+      shouldMoveToBreakeven = true;
+    } else if(!isBuy && normalizedBreakeven < currentStop) {
+      shouldMoveToBreakeven = true;
+    }
+    
+    if(shouldMoveToBreakeven) {
+      if(debugMode)
+        PrintLog(eaName + ": THEA+XAUUSD TP2+ hit - moving to breakeven and stopping trailing: " + 
+                 DoubleToString(normalizedBreakeven, digits));
+      return normalizedBreakeven;
+    } else {
+      if(debugMode)
+        PrintLog(eaName + ": THEA+XAUUSD TP2+ hit - breakeven would be worse, keeping current SL");
+      return currentStop;
+    }
+  }
+
+  if(dynamicStopLossMultiplier < 0) {
     return NormalizeDouble(currentStop, digits); // No multiplier set, return original SL
   }
 
   if (tpHitLevel == 1) {
     // Use OrderOpenPrice and not signal.entry, because of slippage, actual open price might differ slightly
-    double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * stopLossMultiplier;
+    double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * dynamicStopLossMultiplier;
     newSL = isBuy ? OrderOpenPrice() - diff : OrderOpenPrice() + diff;
   } else {
     if (signal.tpCount < tpHitLevel) {
@@ -1383,7 +1438,9 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal)
   }
 
   if(debugMode)
-    PrintLog(eaName + ": SL calculation successful - Level:" + IntegerToString(tpHitLevel) +
+    PrintLog(eaName + ": SL calculation successful - Channel:" + channelName + 
+             " Symbol:" + symbolUpper + " Level:" + IntegerToString(tpHitLevel) +
+             " Multiplier:" + DoubleToString(dynamicStopLossMultiplier, 2) +
              " Original:" + DoubleToString(currentStop, digits) +
              " New:" + DoubleToString(newSL, digits) +
              " Direction:" + (isBuy ? "BUY" : "SELL"));
