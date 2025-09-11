@@ -1079,9 +1079,11 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
       if(OrderModify(OrderTicket(), breakeven, normalizedBreakeven, tp, 0, clrBlue)) {
         PrintLog(eaName + ": ✅ SL moved to breakeven for ticket " + IntegerToString(OrderTicket()) + " (half-breakeven)");
         breakevenCount++;
+        
       } else {
         int error = GetLastError();
-        PrintLog(eaName + ": ❌ Breakeven failed for ticket " + IntegerToString(OrderTicket()) + 
+        PrintLog(eaName + ": ❌ Breakeven failed for ticket " + IntegerToString(OrderTicket()) +
+                 " GID=" + IntegerToString(signal.groupId) +
                  " error=" + IntegerToString(error));
         
         // Error 130 = invalid stops (too close to market price)
@@ -1131,8 +1133,9 @@ bool ParseOrderComment(string comment, int &groupId, string &channelName)
 // 1234|ABCD|1.2550,1.2600 (GID|CHANNEL|TP1,TP2,...)
 
   string parts[];
-  if(StringSplit(comment, '|', parts) < 2) {
-    PrintLog(eaName + ": Invalid comment format, expected at least 2 parts but got " + IntegerToString(ArraySize(parts)));
+  int partCount = StringSplit(comment, '|', parts);
+  if(partCount < 2) {
+    PrintLog(eaName + ": Invalid comment format, expected at least 2 parts but got " + IntegerToString(partCount));
     return(false);
   }
 
