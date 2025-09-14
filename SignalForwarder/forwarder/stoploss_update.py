@@ -81,34 +81,6 @@ def _mark_signal_processed(group_id, channel_name, signal_type: SignalType):
     else:
         logger.error(f"Unknown signal type: {signal_type}")
 
-def clear_all_signal_tracking():
-    """Clear all signal tracking (useful for testing or manual reset)"""
-    for signal_type in _processed_signals:
-        _processed_signals[signal_type].clear()
-    logger.info("All signal tracking cleared")
-
-
-def clear_close_breakeven_tracking():
-    """Clear close+breakeven tracking (backward compatibility)"""
-    _processed_signals[SignalType.CLOSE_HALF_BREAKEVEN].clear()
-    logger.info("Close+Breakeven tracking cleared")
-
-
-def get_tracking_stats():
-    """Get current tracking statistics for monitoring"""
-    stats = {}
-    for signal_type, tracking_dict in _processed_signals.items():
-        stats[signal_type.value] = {
-            'count': len(tracking_dict),
-            'oldest': None,
-            'newest': None
-        }
-        if tracking_dict:
-            timestamps = list(tracking_dict.values())
-            stats[signal_type.value]['oldest'] = datetime.fromtimestamp(min(timestamps)).strftime('%Y-%m-%d %H:%M:%S')
-            stats[signal_type.value]['newest'] = datetime.fromtimestamp(max(timestamps)).strftime('%Y-%m-%d %H:%M:%S')
-    return stats
-
 # Helper function (copied from userbot refactoring)
 def extract_price_from_text(text):
     patterns = [
@@ -154,7 +126,7 @@ def _process_signal(signal_type: SignalType, group_id, channel_name="UNKN", modi
 
     return write_message_to_queue(signal_line)
 
-def process_stoploss_reply(reply_text, original_text, group_id, channel_name="UNKN"):
+def process_stoploss_reply(reply_text, group_id, channel_name="UNKN"):
     logger.info(f"SL Process: GID={group_id}, Channel={channel_name}, Reply='{reply_text}'")
     if not isinstance(group_id, int) or group_id <= 0:
         logger.error(f"Hiba SL Process: Érvénytelen group_id: {group_id}")

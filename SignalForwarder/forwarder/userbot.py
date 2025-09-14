@@ -8,25 +8,13 @@ import os
 from telethon.tl.types import PeerChannel
 from signal_parser import clean_channel_name
 import logging
+from signal_parser import parse_signal
+from queue_manager import add_signal_to_queue
+from stoploss_update import process_stoploss_reply, process_breakeven_signal, process_close_signal, process_close_and_breakeven_signal
+from config import (API_ID, API_HASH, INVITE_LINKS,
+           LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL)
+
 logger = logging.getLogger(__name__)
-
-# --- Configuration ---
-try:
-    # Csak azokat importáljuk, amiket KÖZVETLENÜL használunk itt
-    from config import (API_ID, API_HASH, INVITE_LINKS,
-                        LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL)
-except ImportError as e:
-    logger.error(f"Hiba: Hianyzó alap beállítások a config.py-ban: {e}")
-    exit()
-
-# --- Feldolgozó és segéd modulok importálása ---
-try: from signal_parser import parse_signal
-except ImportError: logger.error("Hiba: signal_parser.py/parse_signal hiányzik."); exit()
-try: from queue_manager import add_signal_to_queue
-except ImportError: logger.error("Hiba: queue_manager.py/add_signal_to_queue hiányzik."); exit()
-try: from stoploss_update import process_stoploss_reply, process_breakeven_signal, process_close_signal, process_close_and_breakeven_signal
-except ImportError: logger.error("Hiba: stoploss_update.py/process_stoploss_reply hiányzik."); exit()
-
 
 # --- Perzisztens Group ID Számláló ---
 current_group_id = 1000
@@ -182,7 +170,7 @@ async def run_userbot():
                     if retrieved_group_id:
                         logger.info(f"   Talált GID: {retrieved_group_id}")
                         clean_channel = clean_channel_name(chat_title)
-                        command_written = process_stoploss_reply(message_text, original_message_text, retrieved_group_id, clean_channel)
+                        command_written = process_stoploss_reply(message_text, retrieved_group_id, clean_channel)
                         if command_written: 
                           logger.info(f"   ✅ SL parancs kiírva.")
                           await forward_to_archive(message, chat_title, retrieved_group_id)
