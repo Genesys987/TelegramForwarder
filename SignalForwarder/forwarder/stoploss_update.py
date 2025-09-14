@@ -29,6 +29,8 @@ _processed_signals = {
     SignalType.CLOSE: OrderedDict()
 }
 
+trackable_signal_types = [SignalType.CLOSE, SignalType.BREAKEVEN, SignalType.CLOSE_HALF_BREAKEVEN]
+
 # Auto-cleanup settings
 TRACKING_CLEANUP_DAYS = 2  # Clean entries older than 2 days
 TRACKING_KEEP_RECENT = 3   # Always keep the most recent 3 entries per type
@@ -114,16 +116,6 @@ def get_tracking_stats():
             stats[signal_type.value]['newest'] = datetime.fromtimestamp(max(timestamps)).strftime('%Y-%m-%d %H:%M:%S')
     return stats
 
-# Backward compatibility functions (for existing tests)
-def _get_close_breakeven_key(group_id, channel_name):
-    return _get_signal_key(group_id, channel_name, SignalType.CLOSE_HALF_BREAKEVEN)
-
-def _is_close_breakeven_processed(group_id, channel_name):
-    return _is_signal_processed(group_id, channel_name, SignalType.CLOSE_HALF_BREAKEVEN)
-
-def _mark_close_breakeven_processed(group_id, channel_name):
-    _mark_signal_processed(group_id, channel_name, SignalType.CLOSE_HALF_BREAKEVEN)
-
 # Helper function (copied from userbot refactoring)
 def extract_price_from_text(text):
     patterns = [
@@ -153,23 +145,13 @@ def _process_signal(signal_type: SignalType, group_id, channel_name="UNKN", modi
         return None
 
     # Check if already processed (except for MODIFY)
-    if signal_type == SignalType.CLOSE and _is_signal_processed(group_id, channel_name, SignalType.CLOSE):
-        logger.warning(f"Close már feldolgozva GID={group_id}, Channel={channel_name} - kihagyás")
-        return None
-    if signal_type == SignalType.BREAKEVEN and _is_signal_processed(group_id, channel_name, SignalType.BREAKEVEN):
-        logger.warning(f"Breakeven már feldolgozva GID={group_id}, Channel={channel_name} - kihagyás")
-        return None
-    if signal_type == SignalType.CLOSE_HALF_BREAKEVEN and _is_signal_processed(group_id, channel_name, SignalType.CLOSE_HALF_BREAKEVEN):
-        logger.warning(f"Close+Breakeven már feldolgozva GID={group_id}, Channel={channel_name} - kihagyás")
-        return None
+    if signal_type in trackable_signal_types and _is_signal_processed(group_id, channel_name, signal_type):
+      logger.warning(f"{signal_type.value} már feldolgozva GID={group_id}, Channel={channel_name} - kihagyás")
+      return None
 
     # Mark as processed (except for MODIFY)
-    if signal_type == SignalType.CLOSE:
-        _mark_signal_processed(group_id, channel_name, SignalType.CLOSE)
-    elif signal_type == SignalType.BREAKEVEN:
-        _mark_signal_processed(group_id, channel_name, SignalType.BREAKEVEN)
-    elif signal_type == SignalType.CLOSE_HALF_BREAKEVEN:
-        _mark_signal_processed(group_id, channel_name, SignalType.CLOSE_HALF_BREAKEVEN)
+    if signal_type in trackable_signal_types:
+      _mark_signal_processed(group_id, channel_name, signal_type)
 
     timestamp = int(time.time())
     if signal_type == SignalType.MODIFY:
