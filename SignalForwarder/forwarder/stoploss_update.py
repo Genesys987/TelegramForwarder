@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 from collections import OrderedDict
 from enum import Enum
 
+from SignalForwarder.forwarder.queue_manager import write_message_to_queue
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -159,24 +161,7 @@ def _process_signal(signal_type: SignalType, group_id, channel_name="UNKN", modi
     else:
         signal_line = f"{timestamp}|{signal_type.value}|GID:{group_id}|{channel_name}"
 
-    try:
-        success = True
-        for signal_path in MT4_SIGNAL_FILE_PATHS:
-            try:
-                os.makedirs(os.path.dirname(signal_path), exist_ok=True)
-                with open(signal_path, "w", encoding='utf-8') as f:
-                    f.write(signal_line)
-                    f.flush()
-                    os.fsync(f.fileno())
-                logger.info(f"✅ {signal_type.value} signal kiírva ('{os.path.basename(signal_path)}'): {signal_line}")
-            except IOError as e:
-                logger.error(f"❌ Hiba {signal_type.value} signal írásakor ('{signal_path}'): {e}")
-                success = False
-        return signal_line if success else None
-    except Exception as e:
-        logger.error(f"❌ Váratlan Hiba {signal_type.value} signal írásakor: {e}")
-        traceback.print_exc()
-        return None
+    return write_message_to_queue(signal_line)
 
 def process_stoploss_reply(reply_text, original_text, group_id, channel_name="UNKN"):
     logger.info(f"SL Process: GID={group_id}, Channel={channel_name}, Reply='{reply_text}'")

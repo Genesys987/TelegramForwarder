@@ -28,7 +28,7 @@ def _write_signal_archive(message: str) -> None:
     except Exception as e:
         logger.error(f"❌ [QueueAdd] Hiba az archív fájl írásakor ({archive_path}): {e}")
 
-def write_queue(message: str) -> bool:
+def write_message_to_queue(message: str) -> bool:
     """
     Writes the given message to all MT4 queue files.
     Returns True if all writes succeed, False otherwise.
@@ -96,7 +96,7 @@ def add_signal_to_queue(signal_data: dict) -> bool:
         logger.info(f"🔄 [QueueAdd] Signal formázva csatorna névvel '{channel_name}' (eredeti: '{raw_channel_name}'): GID:{signal_data['group_id']}")
 
         # 5) I/O művelet: Hozzáfűzés az összes queue-fájlhoz
-        return write_queue(message)
+        return write_message_to_queue(message)
 
     except Exception as e:
         logger.error(f"❌ [QueueAdd] Végzetes hiba: {e}")
