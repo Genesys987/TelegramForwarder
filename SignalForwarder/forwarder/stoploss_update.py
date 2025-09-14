@@ -6,6 +6,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 from collections import OrderedDict
+from enum import Enum
 
 logger = logging.getLogger(__name__)
 
@@ -15,11 +16,17 @@ except ImportError:
     logger.error("Hiba: config.py/MT4_SIGNAL_FILE_PATHS hiányzik.")
     MT4_SIGNAL_FILE_PATHS = ["signals.txt"]
 
+class SignalType(Enum):
+    CLOSE = "CLOSE"
+    BREAKEVEN = "BREAKEVEN"
+    CLOSE_HALF_BREAKEVEN = "CLOSE_HALF_BREAKEVEN"
+    MODIFY = "MODIFY"
+
 # Global tracking with timestamps for automatic cleanup
 _processed_signals = {
-    'close_breakeven': OrderedDict(),  # key -> timestamp
-    'breakeven': OrderedDict(),
-    'close': OrderedDict()
+    SignalType.CLOSE_HALF_BREAKEVEN: OrderedDict(),  # key -> timestamp
+    SignalType.BREAKEVEN: OrderedDict(),
+    SignalType.CLOSE: OrderedDict()
 }
 
 # Auto-cleanup settings
@@ -60,29 +67,22 @@ def _cleanup_old_tracking():
             logger.info(f"Cleaned {len(old_keys)} old {signal_type} tracking entries (older than {TRACKING_CLEANUP_DAYS} days), kept {len(tracking_dict)} entries")
 
 def _get_signal_key(group_id, channel_name, signal_type):
-    """Generate a unique key for tracking signal operations"""
-    return f"{group_id}_{channel_name}_{signal_type}"
+    return f"{group_id}_{channel_name}_{signal_type.value}"
 
-def _is_signal_processed(group_id, channel_name, signal_type):
-    """Check if signal has already been processed"""
-    # Auto-cleanup before checking
+def _is_signal_processed(group_id, channel_name, signal_type: SignalType):
     _cleanup_old_tracking()
-    
     key = _get_signal_key(group_id, channel_name, signal_type)
     tracking_dict = _processed_signals.get(signal_type, {})
     return key in tracking_dict
 
-def _mark_signal_processed(group_id, channel_name, signal_type):
-    """Mark signal as processed with current timestamp"""
-    # Auto-cleanup before adding
+
+def _mark_signal_processed(group_id, channel_name, signal_type: SignalType):
     _cleanup_old_tracking()
-    
     key = _get_signal_key(group_id, channel_name, signal_type)
     timestamp = time.time()
-    
     if signal_type in _processed_signals:
         _processed_signals[signal_type][key] = timestamp
-        logger.info(f"{signal_type.upper()} marked as processed for GID={group_id}, Channel={channel_name}")
+        logger.info(f"{signal_type.value.upper()} marked as processed for GID={group_id}, Channel={channel_name}")
     else:
         logger.error(f"Unknown signal type: {signal_type}")
 
@@ -92,40 +92,37 @@ def clear_all_signal_tracking():
         _processed_signals[signal_type].clear()
     logger.info("All signal tracking cleared")
 
+
 def clear_close_breakeven_tracking():
     """Clear close+breakeven tracking (backward compatibility)"""
-    _processed_signals['close_breakeven'].clear()
+    _processed_signals[SignalType.CLOSE_HALF_BREAKEVEN].clear()
     logger.info("Close+Breakeven tracking cleared")
+
 
 def get_tracking_stats():
     """Get current tracking statistics for monitoring"""
     stats = {}
     for signal_type, tracking_dict in _processed_signals.items():
-        stats[signal_type] = {
+        stats[signal_type.value] = {
             'count': len(tracking_dict),
             'oldest': None,
             'newest': None
         }
-        
         if tracking_dict:
             timestamps = list(tracking_dict.values())
-            stats[signal_type]['oldest'] = datetime.fromtimestamp(min(timestamps)).strftime('%Y-%m-%d %H:%M:%S')
-            stats[signal_type]['newest'] = datetime.fromtimestamp(max(timestamps)).strftime('%Y-%m-%d %H:%M:%S')
-    
+            stats[signal_type.value]['oldest'] = datetime.fromtimestamp(min(timestamps)).strftime('%Y-%m-%d %H:%M:%S')
+            stats[signal_type.value]['newest'] = datetime.fromtimestamp(max(timestamps)).strftime('%Y-%m-%d %H:%M:%S')
     return stats
 
 # Backward compatibility functions (for existing tests)
 def _get_close_breakeven_key(group_id, channel_name):
-    """Generate a unique key for tracking close+breakeven operations"""
-    return _get_signal_key(group_id, channel_name, "close_breakeven")
+    return _get_signal_key(group_id, channel_name, SignalType.CLOSE_HALF_BREAKEVEN)
 
 def _is_close_breakeven_processed(group_id, channel_name):
-    """Check if close+breakeven has already been processed for this signal"""
-    return _is_signal_processed(group_id, channel_name, "close_breakeven")
+    return _is_signal_processed(group_id, channel_name, SignalType.CLOSE_HALF_BREAKEVEN)
 
 def _mark_close_breakeven_processed(group_id, channel_name):
-    """Mark close+breakeven as processed for this signal"""
-    _mark_signal_processed(group_id, channel_name, "close_breakeven")
+    _mark_signal_processed(group_id, channel_name, SignalType.CLOSE_HALF_BREAKEVEN)
 
 # Helper function (copied from userbot refactoring)
 def extract_price_from_text(text):
@@ -143,6 +140,62 @@ def extract_price_from_text(text):
     logger.debug(f"SL Extract: No price found in '{text}'")
     return None
 
+def _process_signal(signal_type: SignalType, group_id, channel_name="UNKN", modified_value=None):
+    """Internal unified signal processor for CLOSE, BREAKEVEN, CLOSE_HALF_BREAKEVEN, MODIFY"""
+    logger.info(f"Process: {signal_type.value} GID={group_id}, Channel={channel_name}")
+    if not isinstance(group_id, int) or group_id <= 0:
+        logger.error(f"Hiba {signal_type.value} Process: Érvénytelen group_id: {group_id}")
+        return None
+
+    # For MODIFY, extra_value is required
+    if signal_type == SignalType.MODIFY and not modified_value:
+        logger.error(f"Hiba {signal_type.value} Process: extra_value (new SL) is required.")
+        return None
+
+    # Check if already processed (except for MODIFY)
+    if signal_type == SignalType.CLOSE and _is_signal_processed(group_id, channel_name, SignalType.CLOSE):
+        logger.warning(f"Close már feldolgozva GID={group_id}, Channel={channel_name} - kihagyás")
+        return None
+    if signal_type == SignalType.BREAKEVEN and _is_signal_processed(group_id, channel_name, SignalType.BREAKEVEN):
+        logger.warning(f"Breakeven már feldolgozva GID={group_id}, Channel={channel_name} - kihagyás")
+        return None
+    if signal_type == SignalType.CLOSE_HALF_BREAKEVEN and _is_signal_processed(group_id, channel_name, SignalType.CLOSE_HALF_BREAKEVEN):
+        logger.warning(f"Close+Breakeven már feldolgozva GID={group_id}, Channel={channel_name} - kihagyás")
+        return None
+
+    # Mark as processed (except for MODIFY)
+    if signal_type == SignalType.CLOSE:
+        _mark_signal_processed(group_id, channel_name, SignalType.CLOSE)
+    elif signal_type == SignalType.BREAKEVEN:
+        _mark_signal_processed(group_id, channel_name, SignalType.BREAKEVEN)
+    elif signal_type == SignalType.CLOSE_HALF_BREAKEVEN:
+        _mark_signal_processed(group_id, channel_name, SignalType.CLOSE_HALF_BREAKEVEN)
+
+    timestamp = int(time.time())
+    if signal_type == SignalType.MODIFY:
+        signal_line = f"{timestamp}|{signal_type.value}|{modified_value}|GID:{group_id}|{channel_name}"
+    else:
+        signal_line = f"{timestamp}|{signal_type.value}|GID:{group_id}|{channel_name}"
+
+    try:
+        success = True
+        for signal_path in MT4_SIGNAL_FILE_PATHS:
+            try:
+                os.makedirs(os.path.dirname(signal_path), exist_ok=True)
+                with open(signal_path, "w", encoding='utf-8') as f:
+                    f.write(signal_line)
+                    f.flush()
+                    os.fsync(f.fileno())
+                logger.info(f"✅ {signal_type.value} signal kiírva ('{os.path.basename(signal_path)}'): {signal_line}")
+            except IOError as e:
+                logger.error(f"❌ Hiba {signal_type.value} signal írásakor ('{signal_path}'): {e}")
+                success = False
+        return signal_line if success else None
+    except Exception as e:
+        logger.error(f"❌ Váratlan Hiba {signal_type.value} signal írásakor: {e}")
+        traceback.print_exc()
+        return None
+
 def process_stoploss_reply(reply_text, original_text, group_id, channel_name="UNKN"):
     logger.info(f"SL Process: GID={group_id}, Channel={channel_name}, Reply='{reply_text}'")
     if not isinstance(group_id, int) or group_id <= 0:
@@ -155,175 +208,21 @@ def process_stoploss_reply(reply_text, original_text, group_id, channel_name="UN
         return None
 
     try:
-        # Basic validation
         new_sl_float = float(new_sl_value_str)
-        if new_sl_float <= 0: 
+        if new_sl_float <= 0:
             logger.warning(f"Warning SL Process: Extracted SL {new_sl_float} not positive.")
-        new_sl_value_formatted = new_sl_value_str # Use as extracted
+        new_sl_value_formatted = new_sl_value_str
     except ValueError:
-         logger.error(f"Hiba SL Process: Kinyert érték '{new_sl_value_str}' nem szám.")
-         return None
-
-    # Create new unified signal format: TIMESTAMP|MODIFY|NEW_SL|GID:xxxx|CHANNEL
-    timestamp = int(time.time())
-    signal_line = f"{timestamp}|MODIFY|{new_sl_value_formatted}|GID:{group_id}|{channel_name}"
-
-    try:
-        # Write to all signal files
-        success = True
-        for signal_path in MT4_SIGNAL_FILE_PATHS:
-            try:
-                # Ensure the directory exists
-                os.makedirs(os.path.dirname(signal_path), exist_ok=True)
-                
-                # Write with explicit flush to ensure immediate write
-                with open(signal_path, "w", encoding='utf-8') as f:
-                    f.write(signal_line)
-                    f.flush()
-                    os.fsync(f.fileno())  # Force write to disk
-                    
-                logger.info(f"✅ MODIFY signal kiírva ('{os.path.basename(signal_path)}'): {signal_line}")
-            except IOError as e:
-                logger.error(f"❌ Hiba MODIFY signal írásakor ('{signal_path}'): {e}")
-                success = False
-        
-        return signal_line if success else None
-    except Exception as e:
-        logger.error(f"❌ Váratlan Hiba MODIFY signal írásakor: {e}")
-        traceback.print_exc()
+        logger.error(f"Hiba SL Process: Kinyert érték '{new_sl_value_str}' nem szám.")
         return None
+
+    return _process_signal(SignalType.MODIFY, group_id, channel_name, modified_value=new_sl_value_formatted)
 
 def process_breakeven_signal(group_id, channel_name="UNKN"):
-    """Create a BREAKEVEN signal for MT4"""
-    logger.info(f"Breakeven Process: GID={group_id}, Channel={channel_name}")
-    
-    if not isinstance(group_id, int) or group_id <= 0:
-        logger.error(f"Hiba Breakeven Process: Érvénytelen group_id: {group_id}")
-        return None
-
-    # Check if breakeven has already been processed for this signal
-    if _is_signal_processed(group_id, channel_name, "breakeven"):
-        logger.warning(f"Breakeven már feldolgozva GID={group_id}, Channel={channel_name} - kihagyás")
-        return None
-
-    # Mark as processed first to prevent race conditions
-    _mark_signal_processed(group_id, channel_name, "breakeven")
-
-    # Create BREAKEVEN signal format: TIMESTAMP|BREAKEVEN|GID:xxxx|CHANNEL
-    timestamp = int(time.time())
-    signal_line = f"{timestamp}|BREAKEVEN|GID:{group_id}|{channel_name}"
-
-    try:
-        # Write to all signal files
-        success = True
-        for signal_path in MT4_SIGNAL_FILE_PATHS:
-            try:
-                # Ensure the directory exists
-                os.makedirs(os.path.dirname(signal_path), exist_ok=True)
-                
-                # Write with explicit flush to ensure immediate write
-                with open(signal_path, "w", encoding='utf-8') as f:
-                    f.write(signal_line)
-                    f.flush()
-                    os.fsync(f.fileno())  # Force write to disk
-                    
-                logger.info(f"✅ BREAKEVEN signal kiírva ('{os.path.basename(signal_path)}'): {signal_line}")
-            except IOError as e:
-                logger.error(f"❌ Hiba BREAKEVEN signal írásakor ('{signal_path}'): {e}")
-                success = False
-        
-        return signal_line if success else None
-    except Exception as e:
-        logger.error(f"❌ Váratlan Hiba BREAKEVEN signal írásakor: {e}")
-        traceback.print_exc()
-        return None
+    return _process_signal(SignalType.BREAKEVEN, group_id, channel_name)
 
 def process_close_signal(group_id, channel_name="UNKN"):
-    """Create a CLOSE signal for MT4"""
-    logger.info(f"Close Process: GID={group_id}, Channel={channel_name}")
-    
-    if not isinstance(group_id, int) or group_id <= 0:
-        logger.error(f"Hiba Close Process: Érvénytelen group_id: {group_id}")
-        return None
-
-    # Check if close has already been processed for this signal
-    if _is_signal_processed(group_id, channel_name, "close"):
-        logger.warning(f"Close már feldolgozva GID={group_id}, Channel={channel_name} - kihagyás")
-        return None
-
-    # Mark as processed first to prevent race conditions
-    _mark_signal_processed(group_id, channel_name, "close")
-
-    # Create CLOSE signal format: TIMESTAMP|CLOSE|GID:xxxx|CHANNEL
-    timestamp = int(time.time())
-    signal_line = f"{timestamp}|CLOSE|GID:{group_id}|{channel_name}"
-
-    try:
-        # Write to all signal files
-        success = True
-        for signal_path in MT4_SIGNAL_FILE_PATHS:
-            try:
-                # Ensure the directory exists
-                os.makedirs(os.path.dirname(signal_path), exist_ok=True)
-                
-                # Write with explicit flush to ensure immediate write
-                with open(signal_path, "w", encoding='utf-8') as f:
-                    f.write(signal_line)
-                    f.flush()
-                    os.fsync(f.fileno())  # Force write to disk
-                    
-                logger.info(f"✅ CLOSE signal kiírva ('{os.path.basename(signal_path)}'): {signal_line}")
-            except IOError as e:
-                logger.error(f"❌ Hiba CLOSE signal írásakor ('{signal_path}'): {e}")
-                success = False
-        
-        return signal_line if success else None
-    except Exception as e:
-        logger.error(f"❌ Váratlan Hiba CLOSE signal írásakor: {e}")
-        traceback.print_exc()
-        return None
+    return _process_signal(SignalType.CLOSE, group_id, channel_name)
 
 def process_close_and_breakeven_signal(group_id, channel_name="UNKN"):
-    """Create a CLOSE_HALF_BREAKEVEN signal for MT4 - close half orders, breakeven the rest"""
-    logger.info(f"Close+Breakeven Process: GID={group_id}, Channel={channel_name}")
-    
-    if not isinstance(group_id, int) or group_id <= 0:
-        logger.error(f"Hiba Close+Breakeven Process: Érvénytelen group_id: {group_id}")
-        return None
-
-    # Check if close+breakeven has already been processed for this signal
-    if _is_signal_processed(group_id, channel_name, "close_breakeven"):
-        logger.warning(f"Close+Breakeven már feldolgozva GID={group_id}, Channel={channel_name} - kihagyás")
-        return None
-
-    # Mark as processed first to prevent race conditions
-    _mark_signal_processed(group_id, channel_name, "close_breakeven")
-
-    # Create CLOSE_HALF_BREAKEVEN signal format: TIMESTAMP|CLOSE_HALF_BREAKEVEN|GID:xxxx|CHANNEL
-    timestamp = int(time.time())
-    signal_line = f"{timestamp}|CLOSE_HALF_BREAKEVEN|GID:{group_id}|{channel_name}"
-
-    try:
-        # Write to all signal files
-        success = True
-        for signal_path in MT4_SIGNAL_FILE_PATHS:
-            try:
-                # Ensure the directory exists
-                os.makedirs(os.path.dirname(signal_path), exist_ok=True)
-                
-                # Write with explicit flush to ensure immediate write
-                with open(signal_path, "w", encoding='utf-8') as f:
-                    f.write(signal_line)
-                    f.flush()
-                    os.fsync(f.fileno())  # Force write to disk
-                    
-                logger.info(f"✅ CLOSE_HALF_BREAKEVEN signal kiírva ('{os.path.basename(signal_path)}'): {signal_line}")
-            except IOError as e:
-                logger.error(f"❌ Hiba CLOSE_HALF_BREAKEVEN signal írásakor ('{signal_path}'): {e}")
-                success = False
-        
-        return signal_line if success else None
-    except Exception as e:
-        logger.error(f"❌ Váratlan Hiba CLOSE_HALF_BREAKEVEN signal írásakor: {e}")
-        traceback.print_exc()
-        return None
+    return _process_signal(SignalType.CLOSE_HALF_BREAKEVEN, group_id, channel_name)

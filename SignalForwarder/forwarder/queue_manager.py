@@ -16,7 +16,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-def write_signal_archive(message: str) -> None:
+def _write_signal_archive(message: str) -> None:
     """
     Writes the given message to the daily signals archive file.
     """
@@ -33,7 +33,7 @@ def write_queue(message: str) -> bool:
     Writes the given message to all MT4 queue files.
     Returns True if all writes succeed, False otherwise.
     """
-    write_signal_archive(message)  # Archive the signal
+    _write_signal_archive(message)  # Archive the signal
     for queue_path in MT4_QUEUE_FILE_PATHS:
         try:
             with open(queue_path, "a", encoding='utf-8') as f:
