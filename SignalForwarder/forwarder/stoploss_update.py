@@ -2,7 +2,6 @@
 import re
 import logging
 import time
-from datetime import datetime
 from collections import OrderedDict
 from enum import Enum
 from queue_manager import write_message_to_queue
@@ -97,7 +96,7 @@ def extract_price_from_text(text):
     logger.debug(f"SL Extract: No price found in '{text}'")
     return None
 
-def _process_signal(signal_type: SignalType, group_id, channel_name="UNKN", modified_value=None):
+def process_signal(signal_type: SignalType, group_id, channel_name="UNKN", modified_value=None):
     """Internal unified signal processor for CLOSE, BREAKEVEN, CLOSE_HALF_BREAKEVEN, MODIFY"""
     logger.info(f"Process: {signal_type.value} GID={group_id}, Channel={channel_name}")
     if not isinstance(group_id, int) or group_id <= 0:
@@ -146,13 +145,4 @@ def process_stoploss_reply(reply_text, group_id, channel_name="UNKN"):
         logger.error(f"Hiba SL Process: Kinyert érték '{new_sl_value_str}' nem szám.")
         return None
 
-    return _process_signal(SignalType.MODIFY, group_id, channel_name, modified_value=new_sl_value_formatted)
-
-def process_breakeven_signal(group_id, channel_name="UNKN"):
-    return _process_signal(SignalType.BREAKEVEN, group_id, channel_name)
-
-def process_close_signal(group_id, channel_name="UNKN"):
-    return _process_signal(SignalType.CLOSE, group_id, channel_name)
-
-def process_close_and_breakeven_signal(group_id, channel_name="UNKN"):
-    return _process_signal(SignalType.CLOSE_HALF_BREAKEVEN, group_id, channel_name)
+    return process_signal(SignalType.MODIFY, group_id, channel_name, modified_value=new_sl_value_formatted)
