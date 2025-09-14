@@ -1,22 +1,13 @@
 # --- stoploss_update.py (Updated for signals.txt integration) ---
 import re
-import os
-import traceback
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from collections import OrderedDict
 from enum import Enum
-
-from SignalForwarder.forwarder.queue_manager import write_message_to_queue
+from queue_manager import write_message_to_queue
 
 logger = logging.getLogger(__name__)
-
-try:
-    from config import MT4_SIGNAL_FILE_PATHS  # Use signals.txt instead of stoploss_update.txt
-except ImportError:
-    logger.error("Hiba: config.py/MT4_SIGNAL_FILE_PATHS hiányzik.")
-    MT4_SIGNAL_FILE_PATHS = ["signals.txt"]
 
 class SignalType(Enum):
     CLOSE = "CLOSE"

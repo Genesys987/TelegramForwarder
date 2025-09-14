@@ -10,7 +10,7 @@ Feladata:
 import os
 import traceback
 import logging
-from config import MT4_QUEUE_FILE_PATHS, MT4_SIGNAL_FILE_PATHS, getMT4DataFolderId
+from config import MT4_QUEUE_FILE_PATHS, MT4_SIGNAL_FILE_PATHS
 from signal_parser import clean_channel_name
 from datetime import datetime
 

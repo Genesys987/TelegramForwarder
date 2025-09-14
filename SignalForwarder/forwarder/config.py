@@ -62,14 +62,6 @@ for folder in mt4_data_folders:
     MT4_SIGNAL_FILE_PATHS.append(signal_path)
     print(f"MT4_SIGNAL_FILE_PATH: {signal_path}")
 
-# Stoploss update files (Python writes SL commands here for EA) - MUST be in MQL4/Files
-STOPLOSS_UPDATE_FILE_PATHS = []
-for folder in mt4_data_folders:
-    mql4_files_folder = os.path.join(folder, "MQL4", "Files")
-    stoploss_path = os.path.join(mql4_files_folder, "stoploss_update.txt")
-    STOPLOSS_UPDATE_FILE_PATHS.append(stoploss_path)
-    print(f"STOPLOSS_UPDATE_FILE_PATH: {stoploss_path}")
-
 # --- Files for Python Bot State ---
 # File to store the last used Group ID (Python internal state) - Can be anywhere
 LAST_GID_FILE = os.path.join(_basedir, "last_group_id.txt")
