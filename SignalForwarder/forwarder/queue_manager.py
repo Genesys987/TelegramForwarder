@@ -16,6 +16,34 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+def write_signal_archive(message: str) -> None:
+    """
+    Writes the given message to the daily signals archive file.
+    """
+    current_date = datetime.now().strftime("%Y%m%d")
+    archive_path = os.path.join(os.getcwd(), "logs", f"signals_archive_{current_date}.txt")
+    try:
+        with open(archive_path, "a", encoding='utf-8') as f:
+            f.write(message)
+    except Exception as e:
+        logger.error(f"❌ [QueueAdd] Hiba az archív fájl írásakor ({archive_path}): {e}")
+
+def write_queue(message: str) -> bool:
+    """
+    Writes the given message to all MT4 queue files.
+    Returns True if all writes succeed, False otherwise.
+    """
+    write_signal_archive(message)  # Archive the signal
+    for queue_path in MT4_QUEUE_FILE_PATHS:
+        try:
+            with open(queue_path, "a", encoding='utf-8') as f:
+                f.write(message)
+            logger.info(f"✅ [QueueAdd] Hozzáadva a queue fájlhoz ('{os.path.basename(queue_path)}'): {message.strip()}")
+        except Exception as e:
+            logger.error(f"❌ [QueueAdd] Hiba a queue fájl írásakor ({queue_path}): {e}")
+            return False
+    return True
+
 def add_signal_to_queue(signal_data: dict) -> bool:
     """
     Feladata, hogy a 'signal_data' dict tartalmából elkészítse azt a sort,
@@ -66,26 +94,9 @@ def add_signal_to_queue(signal_data: dict) -> bool:
                    f"GID:{signal_data['group_id']}|{channel_name}\n")
 
         logger.info(f"🔄 [QueueAdd] Signal formázva csatorna névvel '{channel_name}' (eredeti: '{raw_channel_name}'): GID:{signal_data['group_id']}")
-        
-        # Write to local signals archive file
-        current_date = datetime.now().strftime("%Y%m%d")
-        archive_path = os.path.join(os.getcwd(), "logs", f"signals_archive_{current_date}.txt")
-        try:
-            with open(archive_path, "a", encoding='utf-8') as f:
-                f.write(message)
-        except Exception as e:
-            logger.error(f"❌ [QueueAdd] Hiba az archív fájl írásakor ({archive_path}): {e}")
 
         # 5) I/O művelet: Hozzáfűzés az összes queue-fájlhoz
-        for queue_path in MT4_QUEUE_FILE_PATHS:
-            try:
-                with open(queue_path, "a", encoding='utf-8') as f:
-                    f.write(message)
-                logger.info(f"✅ [QueueAdd] Hozzáadva a queue fájlhoz ('{os.path.basename(queue_path)}'): {message.strip()}")
-            except Exception as e:
-                logger.error(f"❌ [QueueAdd] Hiba a queue fájl írásakor ({queue_path}): {e}")
-                return False
-        return True
+        return write_queue(message)
 
     except Exception as e:
         logger.error(f"❌ [QueueAdd] Végzetes hiba: {e}")
