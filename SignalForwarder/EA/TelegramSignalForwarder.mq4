@@ -4,7 +4,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.3.3"
+#property version "2.4.0"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -1316,11 +1316,9 @@ void ProcessDynamicTrailingStop()
     double tpLevels[10];
 
     int tpHitLevel = 0;
-    // check if the current M5 bar has touched the TP level
-    // it's possible that TP was a momentary spike
     for(int i = 0; i < signal.tpCount; i++) {
-      if((OrderType() == OP_BUY && iHigh(OrderSymbol(), PERIOD_M5, 0) >= signal.tpLevels[i]) ||
-          (OrderType() == OP_SELL && iLow(OrderSymbol(), PERIOD_M5, 0) <= signal.tpLevels[i])) {
+      if((OrderType() == OP_BUY && OrderClosePrice() >= signal.tpLevels[i]) ||
+          (OrderType() == OP_SELL && OrderClosePrice() <= signal.tpLevels[i])) {
         tpHitLevel = i + 1; // TP levels are 1-based
       }
     }
