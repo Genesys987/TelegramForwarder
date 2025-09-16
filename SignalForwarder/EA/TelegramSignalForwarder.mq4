@@ -25,6 +25,7 @@ extern double marginBufferPercentage             = 70.0;   // Amount of free mar
 
 static string gTempFile       = "processing.txt";     // Temp file to avoid re-read
 static string gSignalFile               = "signals.txt";       // Incoming signal file
+static int slippage = 20;  // maximum allowed slippage during order creation/modification
 
 int trailingScanPeriodSeconds = 3;
 
@@ -73,7 +74,6 @@ Signal ParseActionSignal(string &parts[], bool shouldValidateTimestamp);
 void    UpdateExistingOrdersSL(Signal &signal);
 void    SendOrders(Signal &signal);
 void    ProcessModifySlSignal(Signal &signal);
-void    ProcessBreakevenSignal(Signal &signal);
 void    ProcessCloseSignal(Signal &signal);
 void    ProcessCloseHalfBreakevenSignal(Signal &signal);
 void    ProcessDynamicTrailingStop();
@@ -167,21 +167,10 @@ void OnTimer()
     }
 
   } else if(signal.type == "MODIFY" || signal.type == "BREAKEVEN") {
-    // Process SL modification
-    if(debugMode)
-      PrintLog(eaName + ": Processing " + signal.type + " signal - GID=" + IntegerToString(signal.groupId) + " NewSL=" + DoubleToString(signal.stopLoss, 5));
     ProcessModifySlSignal(signal);
-
   } else if(signal.type == "CLOSE") {
-    // Process close all orders
-    if(debugMode)
-      PrintLog(eaName + ": Processing CLOSE signal - GID=" + IntegerToString(signal.groupId));
     ProcessCloseSignal(signal);
-
   } else if(signal.type == "CLOSE_HALF_BREAKEVEN") {
-    // Process close half + breakeven rest
-    if(debugMode)
-      PrintLog(eaName + ": Processing CLOSE_HALF_BREAKEVEN signal - GID=" + IntegerToString(signal.groupId));
     ProcessCloseHalfBreakevenSignal(signal);
   }
 
@@ -645,7 +634,6 @@ void SendOrders(Signal &signal)
            " Using SL=" + DoubleToString(rawSL, digits) +
            " TP Count=" + IntegerToString(signal.tpCount));
 
-  int slippage = 20;
   color cols[6] = { clrBlue, clrGreen, clrRed, clrYellow, clrMagenta, clrCyan };
   double lotSize = GetPositionSize(signal);
 
@@ -696,7 +684,7 @@ void ProcessModifySlSignal(Signal &signal)
     return;
   }
 
-  // if not modify, then breakeven
+// if not modify, then breakeven
   bool isModifySignal = signal.type == "MODIFY";
   string operation = isModifySignal ? "SL modification" : "SL breakeven";
   PrintLog(eaName + ": Processing " + operation + " - GID=" + IntegerToString(signal.groupId) +
@@ -740,7 +728,8 @@ void ProcessModifySlSignal(Signal &signal)
         PrintLog(eaName + ": ❌ " + operation + " failed for ticket " + IntegerToString(OrderTicket()) +
                  " GID=" + IntegerToString(signal.groupId) +
                  " error=" + IntegerToString(GetLastError()));
-         
+
+        int error = GetLastError();
         // Error 130 = invalid stops (too close to market price)
         // In this case for breakevens, close the order instead as signal provider likely sees reversal coming
         if(error == 130 && !isModifySignal) {
@@ -761,7 +750,7 @@ void ProcessModifySlSignal(Signal &signal)
             continue;
           }
 
-          if(OrderClose(ticket, lots, closePrice, 30, clrOrange)) {
+          if(OrderClose(ticket, lots, closePrice, slippage, clrOrange)) {
             PrintLog(eaName + ": ✅ Closed order ticket " + IntegerToString(ticket) + " (breakeven too close - error 130)");
             updatedCount++; // Count as processed
           } else {
@@ -833,7 +822,7 @@ void ProcessCloseSignal(Signal &signal)
       continue; // Skip pending orders for now
     }
 
-    if(OrderClose(ticket, lots, closePrice, 30, clrRed)) {
+    if(OrderClose(ticket, lots, closePrice, slippage, clrRed)) {
       PrintLog(eaName + ": ✅ Closed order ticket " + IntegerToString(ticket) +
                " GID=" + IntegerToString(signal.groupId) +
                " Symbol=" + symbol +
@@ -939,7 +928,7 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
       continue;
     }
 
-    if(OrderClose(ticket, lots, closePrice, 30, clrRed)) {
+    if(OrderClose(ticket, lots, closePrice, slippage, clrRed)) {
       PrintLog(eaName + ": ✅ Closed order ticket " + IntegerToString(ticket) + " (half-close)");
       closedCount++;
     } else {
@@ -992,7 +981,7 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
             continue;
           }
 
-          if(OrderClose(ticket, lots, closePrice, 30, clrOrange)) {
+          if(OrderClose(ticket, lots, closePrice, slippage, clrOrange)) {
             PrintLog(eaName + ": ✅ Closed order ticket " + IntegerToString(ticket) + " (breakeven too close - error 130)");
             closedCount++; // Count as closed instead of breakeven
           } else {
