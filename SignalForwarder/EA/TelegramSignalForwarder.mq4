@@ -68,9 +68,8 @@ string   storedTestSignal = "";
 void    PrintLog(string message);
 Signal ReadSignalFile();
 Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false);
-Signal ParseFullTradingSignal(string &parts[], bool shouldValidateTimestamp, string line);
+Signal ParseBuySellSignal(string &parts[], bool shouldValidateTimestamp);
 Signal ParseActionSignal(string &parts[], bool shouldValidateTimestamp);
-Signal ParseModifySignal(string &parts[], bool shouldValidateTimestamp);
 void    UpdateExistingOrdersSL(Signal &signal);
 void    SendOrders(Signal &signal);
 void    ProcessModifySignal(Signal &signal);
@@ -314,9 +313,10 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
     }
     
     // Parse full trading signal
-    return ParseFullTradingSignal(parts, shouldValidateTimestamp, line);
+    return ParseBuySellSignal(parts, shouldValidateTimestamp);
     
-  } else if(signal.type == "BREAKEVEN" || signal.type == "CLOSE") {
+  } else if(signal.type == "BREAKEVEN" || signal.type == "CLOSE"  || signal.type == "CLOSE_HALF_BREAKEVEN" ||
+  signal.type == "MODIFY") {
     // Action signal format: TIMESTAMP|TYPE|GID:xxx|CHANNEL
     if(partCount < 4) {
       PrintLog(eaName + ": Invalid " + signal.type + " signal format, expected 4 parts but got " + IntegerToString(partCount));
@@ -325,24 +325,7 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
     
     return ParseActionSignal(parts, shouldValidateTimestamp);
     
-  } else if(signal.type == "CLOSE_HALF_BREAKEVEN") {
-    // Close half + breakeven signal format: TIMESTAMP|TYPE|GID:xxx|CHANNEL
-    if(partCount < 4) {
-      PrintLog(eaName + ": Invalid CLOSE_HALF_BREAKEVEN signal format, expected 4 parts but got " + IntegerToString(partCount));
-      return signal;
-    }
-    
-    return ParseActionSignal(parts, shouldValidateTimestamp);
-    
-  } else if(signal.type == "MODIFY") {
-    // Modify signal format: TIMESTAMP|TYPE|NEW_SL|GID:xxx|CHANNEL
-    if(partCount < 5) {
-      PrintLog(eaName + ": Invalid MODIFY signal format, expected 5 parts but got " + IntegerToString(partCount));
-      return signal;
-    }
-    
-    return ParseModifySignal(parts, shouldValidateTimestamp);
-  }
+  } 
 
   return signal; // Should not reach here
 }
@@ -350,7 +333,7 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
 //+------------------------------------------------------------------+
 //| ParseFullTradingSignal: Parse BUY/SELL trading signals          |
 //+------------------------------------------------------------------+
-Signal ParseFullTradingSignal(string &parts[], bool shouldValidateTimestamp, string line)
+Signal ParseBuySellSignal(string &parts[], bool shouldValidateTimestamp)
 {
   Signal signal;
   
@@ -474,7 +457,7 @@ Signal ParseFullTradingSignal(string &parts[], bool shouldValidateTimestamp, str
 }
 
 //+------------------------------------------------------------------+
-//| ParseActionSignal: Parse BREAKEVEN/CLOSE action signals         |
+//| ParseModifySignal: Parse MODIFY/CLOSE etc. SL signals                      |
 //+------------------------------------------------------------------+
 Signal ParseActionSignal(string &parts[], bool shouldValidateTimestamp)
 {
@@ -485,53 +468,20 @@ Signal ParseActionSignal(string &parts[], bool shouldValidateTimestamp)
   signal.type = parts[1];
   StringToUpper(signal.type);
 
-// 2) Group ID
-  string gidPart = parts[2];
-  if(StringFind(gidPart, "GID:") != 0) {
-    PrintLog(eaName + ": Invalid group ID format '" + gidPart + "', skipping");
-    return signal;
+  bool isModifySignal = signal.type == "MODIFY";
+  int shift = isModifySignal ? 1 : 0;
+
+// 2) New SL value (for modify signals)
+  if (isModifySignal) {
+    if(!IsValidDouble(parts[2 + shift])) {
+      PrintLog(eaName + ": Invalid new SL value '" + parts[2] + "', skipping");
+      return signal;
+    }
+    signal.stopLoss = StrToDouble(parts[2]); // Will be normalized later when we know the symbol
   }
-
-  signal.groupId = (int)StrToInteger(StringSubstr(gidPart, 4));
-  if(signal.groupId <= 0) {
-    PrintLog(eaName + ": Invalid group ID '" + IntegerToString(signal.groupId) + "', skipping");
-    return signal;
-  }
-
-// 3) Channel Name
-  string rawChannelName = parts[3];
-  if(StringLen(rawChannelName) == 0)
-    rawChannelName = "UNKNOWN";
-  signal.channelName = CleanChannelName(rawChannelName);
-
-  if (shouldValidateTimestamp)
-    PrintLog(eaName + ": Parsed " + signal.type + " signal GID=" + IntegerToString(signal.groupId) + " from channel '" + signal.channelName + "'");
-
-  signal.isValid = true;
-  return signal;
-}
-
-//+------------------------------------------------------------------+
-//| ParseModifySignal: Parse MODIFY SL signals                      |
-//+------------------------------------------------------------------+
-Signal ParseModifySignal(string &parts[], bool shouldValidateTimestamp)
-{
-  Signal signal;
-  
-  // Set basic info
-  signal.timestamp = StrToInteger(parts[0]);
-  signal.type = parts[1];
-  StringToUpper(signal.type);
-
-// 2) New SL value
-  if(!IsValidDouble(parts[2])) {
-    PrintLog(eaName + ": Invalid new SL value '" + parts[2] + "', skipping");
-    return signal;
-  }
-  signal.stopLoss = StrToDouble(parts[2]); // Will be normalized later when we know the symbol
 
 // 3) Group ID
-  string gidPart = parts[3];
+  string gidPart = parts[3 + shift];
   if(StringFind(gidPart, "GID:") != 0) {
     PrintLog(eaName + ": Invalid group ID format '" + gidPart + "', skipping");
     return signal;
@@ -544,7 +494,7 @@ Signal ParseModifySignal(string &parts[], bool shouldValidateTimestamp)
   }
 
 // 4) Channel Name
-  string rawChannelName = parts[4];
+  string rawChannelName = parts[4 + shift];
   if(StringLen(rawChannelName) == 0)
     rawChannelName = "UNKNOWN";
   signal.channelName = CleanChannelName(rawChannelName);
