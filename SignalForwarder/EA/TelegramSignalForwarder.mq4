@@ -727,6 +727,7 @@ void ProcessModifySlSignal(Signal &signal)
 //+------------------------------------------------------------------+
 bool SetCurrentOrderStopLoss(Signal &signal)
 {
+// otherwise breakeven (when used via BREAKEVEN or CLOSE_HALF_BREAKEVEN)
   bool isModifySignal = signal.type == "MODIFY";
   string operation = isModifySignal ? "SL modification" : "SL breakeven";
   double newStopLoss = isModifySignal ? signal.stopLoss : OrderOpenPrice();
@@ -781,7 +782,7 @@ bool SetCurrentOrderStopLoss(Signal &signal)
           return false;
         }
       } else {
-         return false;
+        return false;
       }
     }
   } else {
@@ -951,57 +952,10 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
       continue;
     }
 
-    double currentSL = OrderStopLoss();
-    double breakeven = OrderOpenPrice();
-    int digits = MarketInfo(OrderSymbol(), MODE_DIGITS);
-    double normalizedBreakeven = NormalizeDouble(breakeven, digits);
-
-    if(MathAbs(currentSL - normalizedBreakeven) > SL_MODIFY_THRESHOLD) {
-      double tp = OrderTakeProfit();
-
-      if(OrderModify(OrderTicket(), breakeven, normalizedBreakeven, tp, 0, clrBlue)) {
-        PrintLog(eaName + ": ✅ SL moved to breakeven for ticket " + IntegerToString(OrderTicket()) + " (half-breakeven)");
-        breakevenCount++;
-
-      } else {
-        int error = GetLastError();
-        PrintLog(eaName + ": ❌ Breakeven failed for ticket " + IntegerToString(OrderTicket()) +
-                 " GID=" + IntegerToString(signal.groupId) +
-                 " error=" + IntegerToString(error));
-
-        // Error 130 = invalid stops (too close to market price)
-        // In this case, close the order instead as signal provider likely sees reversal coming
-        if(error == 130) {
-          PrintLog(eaName + ": Error 130 detected - breakeven too close to market price, closing order instead");
-
-          int ticket = OrderTicket();
-          double lots = OrderLots();
-          string symbol = OrderSymbol();
-          int orderType = OrderType();
-
-          RefreshRates();
-          double closePrice;
-          if(orderType == OP_BUY) {
-            closePrice = MarketInfo(symbol, MODE_BID);
-          } else if(orderType == OP_SELL) {
-            closePrice = MarketInfo(symbol, MODE_ASK);
-          } else {
-            continue;
-          }
-
-          if(OrderClose(ticket, lots, closePrice, slippage, clrOrange)) {
-            PrintLog(eaName + ": ✅ Closed order ticket " + IntegerToString(ticket) + " (breakeven too close - error 130)");
-            closedCount++; // Count as closed instead of breakeven
-          } else {
-            PrintLog(eaName + ": ❌ Failed to close order ticket " + IntegerToString(ticket) +
-                     " after breakeven error 130, error=" + IntegerToString(GetLastError()));
-          }
-        }
-      }
-    } else {
-      PrintLog(eaName + ": SL already at breakeven for ticket " + IntegerToString(OrderTicket()));
+    if (SetCurrentOrderStopLoss(signal)) {
       breakevenCount++;
     }
+
   }
 
   PrintLog(eaName + ": ✅ Close+Breakeven completed - Closed: " + IntegerToString(closedCount) +
