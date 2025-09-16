@@ -79,6 +79,8 @@ void    ProcessCloseHalfBreakevenSignal(Signal &signal);
 void    ProcessDynamicTrailingStop();
 double  CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string channelName);
 bool    ParseOrderComment(string comment, int &groupId, string &channelName);
+bool CloseCurrentOrder(Signal &signal);
+bool SetCurrentOrderStopLoss(Signal &signal);
 
 // Utility functions
 bool    IsSignalTooOld(long signalTimestampMs);
@@ -708,62 +710,8 @@ void ProcessModifySlSignal(Signal &signal)
       continue;
     }
 
-    // Update SL for matching order
-    double currentSL = OrderStopLoss();
-    int digits = MarketInfo(OrderSymbol(), MODE_DIGITS);
-    double breakeven = OrderOpenPrice();
-    double normalizedNewSL = NormalizeDouble(isModifySignal ? signal.stopLoss : breakeven, digits);
-
-    if(MathAbs(currentSL - normalizedNewSL) > SL_MODIFY_THRESHOLD) {
-      double op = OrderOpenPrice();
-      double tp = OrderTakeProfit();
-
-      if(OrderModify(OrderTicket(), op, normalizedNewSL, tp, 0, clrGold)) {
-        PrintLog(eaName + ": ✅ " + operation + " success for ticket " + IntegerToString(OrderTicket()) +
-                 " GID=" + IntegerToString(signal.groupId) +
-                 " from " + DoubleToString(currentSL, digits) +
-                 " to " + DoubleToString(normalizedNewSL, digits));
-        updatedCount++;
-      } else {
-        PrintLog(eaName + ": ❌ " + operation + " failed for ticket " + IntegerToString(OrderTicket()) +
-                 " GID=" + IntegerToString(signal.groupId) +
-                 " error=" + IntegerToString(GetLastError()));
-
-        int error = GetLastError();
-        // Error 130 = invalid stops (too close to market price)
-        // In this case for breakevens, close the order instead as signal provider likely sees reversal coming
-        if(error == 130 && !isModifySignal) {
-          PrintLog(eaName + ": Error 130 detected - breakeven too close to market price, closing order instead");
-
-          int ticket = OrderTicket();
-          double lots = OrderLots();
-          string symbol = OrderSymbol();
-          int orderType = OrderType();
-
-          RefreshRates();
-          double closePrice;
-          if(orderType == OP_BUY) {
-            closePrice = MarketInfo(symbol, MODE_BID);
-          } else if(orderType == OP_SELL) {
-            closePrice = MarketInfo(symbol, MODE_ASK);
-          } else {
-            continue;
-          }
-
-          if(OrderClose(ticket, lots, closePrice, slippage, clrOrange)) {
-            PrintLog(eaName + ": ✅ Closed order ticket " + IntegerToString(ticket) + " (breakeven too close - error 130)");
-            updatedCount++; // Count as processed
-          } else {
-            PrintLog(eaName + ": ❌ Failed to close order ticket " + IntegerToString(ticket) +
-                     " after breakeven error 130, error=" + IntegerToString(GetLastError()));
-          }
-        }
-
-      }
-    } else {
-      PrintLog(eaName + ": SL change too small for ticket " + IntegerToString(OrderTicket()) +
-               " - current=" + DoubleToString(currentSL, digits) +
-               " new=" + DoubleToString(normalizedNewSL, digits));
+    if(SetCurrentOrderStopLoss(signal)) {
+      updatedCount++;
     }
   }
 
@@ -771,6 +719,76 @@ void ProcessModifySlSignal(Signal &signal)
     PrintLog(eaName + ": ⚠️ No orders found with GID=" + IntegerToString(signal.groupId) + " for " + operation);
   } else {
     PrintLog(eaName + ": ✅ " + operation + " for " + IntegerToString(updatedCount) + " orders with GID=" + IntegerToString(signal.groupId));
+  }
+}
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool SetCurrentOrderStopLoss(Signal &signal)
+{
+  bool isModifySignal = signal.type == "MODIFY";
+  string operation = isModifySignal ? "SL modification" : "SL breakeven";
+  double newStopLoss = isModifySignal ? signal.stopLoss : OrderOpenPrice();
+// Update SL for matching order
+  double currentSL = OrderStopLoss();
+  int digits = MarketInfo(OrderSymbol(), MODE_DIGITS);
+  double breakeven = OrderOpenPrice();
+  double normalizedNewSL = NormalizeDouble(newStopLoss, digits);
+
+  if(MathAbs(currentSL - normalizedNewSL) > SL_MODIFY_THRESHOLD) {
+    double op = OrderOpenPrice();
+    double tp = OrderTakeProfit();
+
+    if(OrderModify(OrderTicket(), op, normalizedNewSL, tp, 0, clrGold)) {
+      PrintLog(eaName + ": ✅ " + operation + " success for ticket " + IntegerToString(OrderTicket()) +
+               " GID=" + IntegerToString(signal.groupId) +
+               " from " + DoubleToString(currentSL, digits) +
+               " to " + DoubleToString(normalizedNewSL, digits));
+      return true;
+    } else {
+      PrintLog(eaName + ": ❌ " + operation + " failed for ticket " + IntegerToString(OrderTicket()) +
+               " GID=" + IntegerToString(signal.groupId) +
+               " error=" + IntegerToString(GetLastError()));
+
+      int error = GetLastError();
+      // Error 130 = invalid stops (too close to market price)
+      // In this case for breakevens, close the order instead as signal provider likely sees reversal coming
+      if(error == 130 && !isModifySignal) {
+        PrintLog(eaName + ": Error 130 detected - breakeven too close to market price, closing order instead");
+
+        int ticket = OrderTicket();
+        double lots = OrderLots();
+        string symbol = OrderSymbol();
+        int orderType = OrderType();
+
+        RefreshRates();
+        double closePrice;
+        if(orderType == OP_BUY) {
+          closePrice = MarketInfo(symbol, MODE_BID);
+        } else if(orderType == OP_SELL) {
+          closePrice = MarketInfo(symbol, MODE_ASK);
+        } else {
+          return false;
+        }
+
+        if(OrderClose(ticket, lots, closePrice, slippage, clrOrange)) {
+          PrintLog(eaName + ": ✅ Closed order ticket " + IntegerToString(ticket) + " (breakeven too close - error 130)");
+          return true;
+        } else {
+          PrintLog(eaName + ": ❌ Failed to close order ticket " + IntegerToString(ticket) +
+                   " after breakeven error 130, error=" + IntegerToString(GetLastError()));
+          return false;
+        }
+      } else {
+         return false;
+      }
+    }
+  } else {
+    PrintLog(eaName + ": SL change too small for ticket " + IntegerToString(OrderTicket()) +
+             " - current=" + DoubleToString(currentSL, digits) +
+             " new=" + DoubleToString(normalizedNewSL, digits));
+    return false;
   }
 }
 
@@ -806,32 +824,8 @@ void ProcessCloseSignal(Signal &signal)
       continue;
     }
 
-    // Close the order
-    int ticket = OrderTicket();
-    double lots = OrderLots();
-    string symbol = OrderSymbol();
-    int orderType = OrderType();
-
-    RefreshRates();
-    double closePrice;
-    if(orderType == OP_BUY) {
-      closePrice = MarketInfo(symbol, MODE_BID);
-    } else if(orderType == OP_SELL) {
-      closePrice = MarketInfo(symbol, MODE_ASK);
-    } else {
-      continue; // Skip pending orders for now
-    }
-
-    if(OrderClose(ticket, lots, closePrice, slippage, clrRed)) {
-      PrintLog(eaName + ": ✅ Closed order ticket " + IntegerToString(ticket) +
-               " GID=" + IntegerToString(signal.groupId) +
-               " Symbol=" + symbol +
-               " Lots=" + DoubleToString(lots, 2));
+    if (CloseCurrentOrder(signal)) {
       closedCount++;
-    } else {
-      PrintLog(eaName + ": ❌ Failed to close order ticket " + IntegerToString(ticket) +
-               " GID=" + IntegerToString(signal.groupId) +
-               " error=" + IntegerToString(GetLastError()));
     }
   }
 
@@ -839,6 +833,41 @@ void ProcessCloseSignal(Signal &signal)
     PrintLog(eaName + ": ⚠️ No orders found with GID=" + IntegerToString(signal.groupId) + " to close");
   } else {
     PrintLog(eaName + ": ✅ Closed " + IntegerToString(closedCount) + " orders with GID=" + IntegerToString(signal.groupId));
+  }
+}
+
+//+------------------------------------------------------------------+
+//| CloseCurrentOrder: Closes the currently selected order          |
+//+------------------------------------------------------------------+
+bool CloseCurrentOrder(Signal &signal)
+{
+// Close the order
+  int ticket = OrderTicket();
+  double lots = OrderLots();
+  string symbol = OrderSymbol();
+  int orderType = OrderType();
+
+  RefreshRates();
+  double closePrice;
+  if(orderType == OP_BUY) {
+    closePrice = MarketInfo(symbol, MODE_BID);
+  } else if(orderType == OP_SELL) {
+    closePrice = MarketInfo(symbol, MODE_ASK);
+  } else {
+    return false; // Skip pending orders for now
+  }
+
+  if(OrderClose(ticket, lots, closePrice, slippage, clrRed)) {
+    PrintLog(eaName + ": ✅ Closed order ticket " + IntegerToString(ticket) +
+             " GID=" + IntegerToString(signal.groupId) +
+             " Symbol=" + symbol +
+             " Lots=" + DoubleToString(lots, 2));
+    return true;
+  } else {
+    PrintLog(eaName + ": ❌ Failed to close order ticket " + IntegerToString(ticket) +
+             " GID=" + IntegerToString(signal.groupId) +
+             " error=" + IntegerToString(GetLastError()));
+    return false;
   }
 }
 
@@ -913,28 +942,7 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
       continue;
     }
 
-    int ticket = OrderTicket();
-    double lots = OrderLots();
-    string symbol = OrderSymbol();
-    int orderType = OrderType();
-
-    RefreshRates();
-    double closePrice;
-    if(orderType == OP_BUY) {
-      closePrice = MarketInfo(symbol, MODE_BID);
-    } else if(orderType == OP_SELL) {
-      closePrice = MarketInfo(symbol, MODE_ASK);
-    } else {
-      continue;
-    }
-
-    if(OrderClose(ticket, lots, closePrice, slippage, clrRed)) {
-      PrintLog(eaName + ": ✅ Closed order ticket " + IntegerToString(ticket) + " (half-close)");
-      closedCount++;
-    } else {
-      PrintLog(eaName + ": ❌ Failed to close order ticket " + IntegerToString(ticket) +
-               " error=" + IntegerToString(GetLastError()));
-    }
+    CloseCurrentOrder(signal);
   }
 
 // Move remaining orders to breakeven
