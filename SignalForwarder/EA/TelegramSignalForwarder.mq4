@@ -4,7 +4,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.4.0"
+#property version "2.4.1"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -277,8 +277,8 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
       PrintLog(eaName + ": Signal too old, skipping. Timestamp=" + IntegerToString(signalTimestamp));
     } else {
       storedTestSignal = line;
-      return signal;
     }
+    return signal;
   }
 
 // 1) Signal type
