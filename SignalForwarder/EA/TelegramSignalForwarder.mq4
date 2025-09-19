@@ -943,7 +943,9 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
       continue;
     }
 
-    CloseCurrentOrder(signal);
+    if (CloseCurrentOrder(signal)) {
+      closedCount++;
+    }
   }
 
 // Move remaining orders to breakeven
