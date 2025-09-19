@@ -1,10 +1,9 @@
 //+------------------------------------------------------------------+
 //|                                     TelegramSignalForwarder.mq4  |
-//|                Clean, Modular & Readable Code Refactoring       |
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.4.1"
+#property version "2.4.2"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -458,15 +457,16 @@ Signal ParseActionSignal(string &parts[], bool shouldValidateTimestamp)
 
 // 2) New SL value (for modify signals)
   if (isModifySignal) {
-    if(!IsValidDouble(parts[2 + shift])) {
-      PrintLog(eaName + ": Invalid new SL value '" + parts[2] + "', skipping");
+    string slPart = parts[2];
+    if(!IsValidDouble(slPart)) {
+      PrintLog(eaName + ": Invalid new SL value '" + slPart + "', skipping");
       return signal;
     }
-    signal.stopLoss = StrToDouble(parts[2]); // Will be normalized later when we know the symbol
+    signal.stopLoss = StrToDouble(slPart); // Will be normalized later when we know the symbol
   }
 
 // 3) Group ID
-  string gidPart = parts[3 + shift];
+  string gidPart = parts[2 + shift];
   if(StringFind(gidPart, "GID:") != 0) {
     PrintLog(eaName + ": Invalid group ID format '" + gidPart + "', skipping");
     return signal;
@@ -479,7 +479,7 @@ Signal ParseActionSignal(string &parts[], bool shouldValidateTimestamp)
   }
 
 // 4) Channel Name
-  string rawChannelName = parts[4 + shift];
+  string rawChannelName = parts[3 + shift];
   if(StringLen(rawChannelName) == 0)
     rawChannelName = "UNKNOWN";
   signal.channelName = CleanChannelName(rawChannelName);
@@ -1018,12 +1018,14 @@ bool IsSignalTooOld(long signalTimestamp)
     return(true);
   }
 
-  if(debugMode)
+  bool isTooOld = ageMinutes > signalMaxAgeMinutes;
+
+  if(debugMode || isTooOld)
     PrintLog(eaName + ": Signal age check - UTC now: " + TimeToString(utcTime) +
              ", Signal time: " + TimeToString(signalTime) +
              ", Age: " + IntegerToString(ageMinutes) + " minutes");
 
-  return(ageMinutes > signalMaxAgeMinutes);
+  return isTooOld;
 }
 
 //+------------------------------------------------------------------+
@@ -1044,21 +1046,21 @@ bool FileExists(string filename)
 //+------------------------------------------------------------------+
 bool IsValidDouble(string s)
 {
-  int len = StringLen(s);
+   int len = StringLen(s);
   if(len == 0)
-    return(false);
-  bool dotFound = false;
-  int start = (StringGetCharacter(s, 0) == '+' || StringGetCharacter(s, 0) == '-') ? 1 : 0;
-  for(int i = start; i < len; i++) {
-    int c = StringGetCharacter(s, i);
-    if(c == '.') {
-      if(dotFound)
-        return(false);
-      dotFound = true;
-    } else if(c < '0' || c > '9')
       return(false);
-  }
-  return(true);
+   bool dotFound = false;
+   int start = (StringGetCharacter(s, 0) == '+' || StringGetCharacter(s, 0) == '-') ? 1 : 0;
+   for(int i = start; i < len; i++) {
+      int c = StringGetCharacter(s, i);
+      if(c == '.') {
+      if(dotFound)
+            return(false);
+         dotFound = true;
+    } else if(c < '0' || c > '9')
+         return(false);
+      }
+   return(true);
 }
 
 //+------------------------------------------------------------------+

@@ -119,9 +119,9 @@ def process_signal(signal_type: SignalType, group_id, channel_name="UNKN", modif
 
     timestamp = int(time.time())
     if signal_type == SignalType.MODIFY:
-        signal_line = f"{timestamp}|{signal_type.value}|{modified_value}|GID:{group_id}|{channel_name}"
+        signal_line = f"{timestamp}|{signal_type.value}|{modified_value}|GID:{group_id}|{channel_name}\n"
     else:
-        signal_line = f"{timestamp}|{signal_type.value}|GID:{group_id}|{channel_name}"
+        signal_line = f"{timestamp}|{signal_type.value}|GID:{group_id}|{channel_name}\n"
 
     return write_message_to_queue(signal_line)
 

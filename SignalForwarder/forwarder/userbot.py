@@ -183,7 +183,7 @@ async def run_userbot():
                 if signal_type:
                     logger.info(f"Processing trading instruction: {signal_type}")
                     if retrieved_group_id:
-                        is_success = false
+                        is_success = False
                         if signal_type == SignalType.MODIFY:
                             is_success = process_stoploss_reply(message_text, retrieved_group_id, clean_channel)
                         else:
