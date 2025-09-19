@@ -1,32 +1,18 @@
-import asyncio
 import re
 import json # GID map perzisztenciához
 from datetime import datetime, timezone
 from telethon import TelegramClient, events
 import traceback
 import os
-from telethon.tl.types import PeerChannel
 from signal_parser import clean_channel_name
 import logging
+from signal_parser import parse_signal
+from queue_manager import add_signal_to_queue
+from stoploss_update import process_stoploss_reply, SignalType, process_signal
+from config import (API_ID, API_HASH, INVITE_LINKS,
+           LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL)
+
 logger = logging.getLogger(__name__)
-
-# --- Configuration ---
-try:
-    # Csak azokat importáljuk, amiket KÖZVETLENÜL használunk itt
-    from config import (API_ID, API_HASH, INVITE_LINKS,
-                        LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL)
-except ImportError as e:
-    logger.error(f"Hiba: Hianyzó alap beállítások a config.py-ban: {e}")
-    exit()
-
-# --- Feldolgozó és segéd modulok importálása ---
-try: from signal_parser import parse_signal
-except ImportError: logger.error("Hiba: signal_parser.py/parse_signal hiányzik."); exit()
-try: from queue_manager import add_signal_to_queue
-except ImportError: logger.error("Hiba: queue_manager.py/add_signal_to_queue hiányzik."); exit()
-try: from stoploss_update import process_stoploss_reply, process_breakeven_signal, process_close_signal, process_close_and_breakeven_signal
-except ImportError: logger.error("Hiba: stoploss_update.py/process_stoploss_reply hiányzik."); exit()
-
 
 # --- Perzisztens Group ID Számláló ---
 current_group_id = 1000
@@ -172,70 +158,44 @@ async def run_userbot():
             if reply_original_message:
                 original_message_text = reply_original_message.text
                 
-                # Check different patterns in order of specificity
+                # Extract common variables for reply commands
+                retrieved_group_id = message_id_to_group_id.get(reply_to_msg_id)
+                clean_channel = clean_channel_name(chat_title)
+
+                # --- Unified trading instruction pattern matching ---
+                signal_type = None
+                # MODIFY (SL adjust)
                 if re.search(r'(move|adjust|set)\s+(my\s+)?sl\s+(to|at)\s+[\d.]+', message_text, re.IGNORECASE):
-                    # SL ADJUST pattern: "I'll move my SL to 3390.7"
-                    logger.info(f"   SL állítás detektálva.")
-                    # --- === GROUP_ID MEGSZERZÉSE === ---
-                    retrieved_group_id = message_id_to_group_id.get(reply_to_msg_id)
-                    # --- =========================== ---
-                    if retrieved_group_id:
-                        logger.info(f"   Talált GID: {retrieved_group_id}")
-                        clean_channel = clean_channel_name(chat_title)
-                        command_written = process_stoploss_reply(message_text, original_message_text, retrieved_group_id, clean_channel)
-                        if command_written: 
-                          logger.info(f"   ✅ SL parancs kiírva.")
-                          await forward_to_archive(message, chat_title, retrieved_group_id)
-                        else: logger.error(f"   ❌ SL parancs hiba.")
-                    else: logger.warning(f"   FIGYELEM: Nem található GID (ID: {reply_to_msg_id}). SL válasz nem feldolgozható!")
-                
+                    signal_type = SignalType.MODIFY
+                # CLOSE_HALF_BREAKEVEN
                 elif re.search(r'close.*(profit|half|all).*breakeven', message_text, re.IGNORECASE) or \
                      re.search(r'close.*half.*hold', message_text, re.IGNORECASE) or \
                      re.search(r'close.*entries.*breakeven', message_text, re.IGNORECASE) or \
                      re.search(r'secure.*(entry|entries|first|profit)', message_text, re.IGNORECASE):
-                    # CLOSE HALF + BREAKEVEN pattern: "Let's CLOSE our profit now and set breakeven" or "Secure first entry"
-                    logger.info(f"   Close+Breakeven/Secure detektálva.")
-                    retrieved_group_id = message_id_to_group_id.get(reply_to_msg_id)
-                    if retrieved_group_id:
-                        logger.info(f"   Talált GID: {retrieved_group_id}")
-                        clean_channel = clean_channel_name(chat_title)
-                        command_written = process_close_and_breakeven_signal(retrieved_group_id, clean_channel)
-                        if command_written: 
-                          logger.info(f"   ✅ Close+Breakeven/Secure parancs kiírva.")
-                          await forward_to_archive(message, chat_title, retrieved_group_id)
-                        else: logger.error(f"   ❌ Close+Breakeven/Secure parancs hiba.")
-                    else: logger.warning(f"   FIGYELEM: Nem található GID (ID: {reply_to_msg_id}). Close+Breakeven/Secure válasz nem feldolgozható!")
-                
+                    signal_type = SignalType.CLOSE_HALF_BREAKEVEN
+                # BREAKEVEN
                 elif re.search(r'(breakeven|break\s*even|set\s+breakeven)', message_text, re.IGNORECASE):
-                    # BREAKEVEN only pattern
-                    logger.info(f"   Breakeven detektálva.")
-                    retrieved_group_id = message_id_to_group_id.get(reply_to_msg_id)
-                    if retrieved_group_id:
-                        logger.info(f"   Talált GID: {retrieved_group_id}")
-                        clean_channel = clean_channel_name(chat_title)
-                        command_written = process_breakeven_signal(retrieved_group_id, clean_channel)
-                        if command_written: 
-                          logger.info(f"   ✅ Breakeven parancs kiírva.")
-                          await forward_to_archive(message, chat_title, retrieved_group_id)
-                        else: logger.error(f"   ❌ Breakeven parancs hiba.")
-                    else: logger.warning(f"   FIGYELEM: Nem található GID (ID: {reply_to_msg_id}). Breakeven válasz nem feldolgozható!")
-                
+                    signal_type = SignalType.BREAKEVEN
+                # CLOSE
                 elif re.search(r'(close|exit|entries\s+are\s+closed)', message_text, re.IGNORECASE):
-                    # CLOSE only pattern
-                    logger.info(f"   Close detektálva.")
-                    retrieved_group_id = message_id_to_group_id.get(reply_to_msg_id)
-                    if retrieved_group_id:
-                        logger.info(f"   Talált GID: {retrieved_group_id}")
-                        clean_channel = clean_channel_name(chat_title)
-                        command_written = process_close_signal(retrieved_group_id, clean_channel)
-                        if command_written: 
-                          logger.info(f"   ✅ Close parancs kiírva.")
-                          await forward_to_archive(message, chat_title, retrieved_group_id)
-                        else: logger.error(f"   ❌ Close parancs hiba.")
-                    else: logger.warning(f"   FIGYELEM: Nem található GID (ID: {reply_to_msg_id}). Close válasz nem feldolgozható!")
+                    signal_type = SignalType.CLOSE
                 
+                if signal_type:
+                    logger.info(f"Processing trading instruction: {signal_type}")
+                    if retrieved_group_id:
+                        is_success = False
+                        if signal_type == SignalType.MODIFY:
+                            is_success = process_stoploss_reply(message_text, retrieved_group_id, clean_channel)
+                        else:
+                            is_success = process_signal(signal_type, retrieved_group_id, clean_channel)
+                        if is_success:
+                            await forward_to_archive(message, chat_title, retrieved_group_id)
+                        else:
+                            logger.error(f"❌ Parancs hiba: {signal_type}")
+                    else:
+                        logger.warning(f"Nincs GID találat (ID: {reply_to_msg_id}). A kereskedési utasítás nem lett feldolgozva!")
                 else:
-                    logger.info(f"   Nem ismert trading instruction.")
+                    logger.info(f"Ismeretlen kereskedési utasítás.")
                     
             else: logger.error(f"   Hiba: Eredeti üzenet lekérése sikertelen (ID: {reply_to_msg_id}).")
             return
