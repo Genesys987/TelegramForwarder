@@ -748,39 +748,16 @@ bool SetCurrentOrderStopLoss(Signal &signal)
                " to " + DoubleToString(normalizedNewSL, digits));
       return true;
     } else {
+      int error = GetLastError();
       PrintLog(eaName + ": ❌ " + operation + " failed for ticket " + IntegerToString(OrderTicket()) +
                " GID=" + IntegerToString(signal.groupId) +
-               " error=" + IntegerToString(GetLastError()));
+               " error=" + IntegerToString(error));
 
-      int error = GetLastError();
       // Error 130 = invalid stops (too close to market price)
       // In this case for breakevens, close the order instead as signal provider likely sees reversal coming
       if(error == 130 && !isModifySignal) {
         PrintLog(eaName + ": Error 130 detected - breakeven too close to market price, closing order instead");
-
-        int ticket = OrderTicket();
-        double lots = OrderLots();
-        string symbol = OrderSymbol();
-        int orderType = OrderType();
-
-        RefreshRates();
-        double closePrice;
-        if(orderType == OP_BUY) {
-          closePrice = MarketInfo(symbol, MODE_BID);
-        } else if(orderType == OP_SELL) {
-          closePrice = MarketInfo(symbol, MODE_ASK);
-        } else {
-          return false;
-        }
-
-        if(OrderClose(ticket, lots, closePrice, slippage, clrOrange)) {
-          PrintLog(eaName + ": ✅ Closed order ticket " + IntegerToString(ticket) + " (breakeven too close - error 130)");
-          return true;
-        } else {
-          PrintLog(eaName + ": ❌ Failed to close order ticket " + IntegerToString(ticket) +
-                   " after breakeven error 130, error=" + IntegerToString(GetLastError()));
-          return false;
-        }
+        return CloseCurrentOrder(signal);
       } else {
         return false;
       }
