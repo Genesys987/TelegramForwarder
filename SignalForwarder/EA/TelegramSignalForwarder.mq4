@@ -694,7 +694,8 @@ void ProcessModifySlSignal(Signal &signal)
 
   int updatedCount = 0;
   int total = OrdersTotal();
-  for(int i=0; i<total; i++) {
+// Close orders in reverse order to avoid index issues
+  for(int i=total-1; i>=0; i--) {
     if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
       continue;
     }
@@ -866,7 +867,8 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
   int matchingCount = 0;
   int total = OrdersTotal();
 
-  for(int i=0; i<total; i++) {
+// Close orders in reverse order to avoid index issues
+  for(int i=total-1; i>=0; i--) {
     if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
       continue;
     }
@@ -1025,21 +1027,21 @@ bool FileExists(string filename)
 //+------------------------------------------------------------------+
 bool IsValidDouble(string s)
 {
-   int len = StringLen(s);
+  int len = StringLen(s);
   if(len == 0)
-      return(false);
-   bool dotFound = false;
-   int start = (StringGetCharacter(s, 0) == '+' || StringGetCharacter(s, 0) == '-') ? 1 : 0;
-   for(int i = start; i < len; i++) {
-      int c = StringGetCharacter(s, i);
-      if(c == '.') {
+    return(false);
+  bool dotFound = false;
+  int start = (StringGetCharacter(s, 0) == '+' || StringGetCharacter(s, 0) == '-') ? 1 : 0;
+  for(int i = start; i < len; i++) {
+    int c = StringGetCharacter(s, i);
+    if(c == '.') {
       if(dotFound)
-            return(false);
-         dotFound = true;
+        return(false);
+      dotFound = true;
     } else if(c < '0' || c > '9')
-         return(false);
-      }
-   return(true);
+      return(false);
+  }
+  return(true);
 }
 
 //+------------------------------------------------------------------+
