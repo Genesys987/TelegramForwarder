@@ -504,9 +504,8 @@ void UpdateExistingOrdersSL(Signal &signal)
   string symbol = signal.symbol;
   StringToUpper(symbol);
   if(StringFind(symbol, "XAUUSD") >= 0 || StringFind(symbol, "GOLD") >= 0) {
-    if(debugMode)
-      PrintLog(eaName + ": Skipping UpdateExistingOrdersSL for Gold symbol: " + symbol +
-               " - avoiding interference with independent trades");
+    PrintLog(eaName + ": Skipping UpdateExistingOrdersSL for Gold symbol: " + symbol +
+             " - avoiding interference with independent trades");
     return;
   }
 
@@ -514,8 +513,7 @@ void UpdateExistingOrdersSL(Signal &signal)
 
   for(int i=0; i<OrdersTotal(); i++) {
     if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
-      if(debugMode)
-        PrintLog(eaName + ": Failed to select order at index " + IntegerToString(i) + " - error=" + IntegerToString(GetLastError()));
+      PrintLog(eaName + ": Failed to select order at index " + IntegerToString(i) + " - error=" + IntegerToString(GetLastError()));
       continue;
     }
     if(OrderSymbol() != symbol || OrderType() != targetOrderType) {
@@ -527,9 +525,8 @@ void UpdateExistingOrdersSL(Signal &signal)
     // Parse the order's comment to get channel information
     int orderGid;
     string orderChannelName;
-    if(!ParseOrderComment(OrderComment(), orderGid, orderChannelName)) {
-      if(debugMode)
-        PrintLog(eaName + ": Failed to parse order comment for ticket " + IntegerToString(OrderTicket()) + ": " + OrderComment());
+    if(!ParseOrderComment(OrderComment(), orderGid /* unused */, orderChannelName)) {
+      PrintLog(eaName + ": Failed to parse order comment for ticket " + IntegerToString(OrderTicket()) + ": " + OrderComment());
       continue;
     }
 
@@ -554,12 +551,13 @@ void UpdateExistingOrdersSL(Signal &signal)
         PrintLog(eaName + ": SL update failed ticket=" + IntegerToString(OrderTicket()) +
                  " err=" + IntegerToString(GetLastError()));
     } else {
-      if(debugMode)
-        PrintLog(eaName + ": SL change too small for ticket " + IntegerToString(OrderTicket()) +
-                 " - current=" + DoubleToString(currSL, MarketInfo(symbol, MODE_DIGITS)) +
-                 " new=" + DoubleToString(signal.stopLoss, MarketInfo(symbol, MODE_DIGITS)));
+      PrintLog(eaName + ": SL change too small for ticket " + IntegerToString(OrderTicket()) +
+               " - current=" + DoubleToString(currSL, MarketInfo(symbol, MODE_DIGITS)) +
+               " new=" + DoubleToString(signal.stopLoss, MarketInfo(symbol, MODE_DIGITS)));
     }
   }
+
+  PrintLog(eaName + ": Completed SL update for existing orders from channel '" + signal.channelName + "'");
 }
 
 //+------------------------------------------------------------------+
