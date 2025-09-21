@@ -48,54 +48,88 @@ def add_signal_to_queue(signal_data: dict) -> bool:
     """
     Feladata, hogy a 'signal_data' dict tartalmából elkészítse azt a sort,
     amit a queue-fájlba (MT4_QUEUE_FILE_PATH) fűz hozzá.
-    A paraméterekből létrehoz egy 'message' stringet:
-      "{timestamp_utc}|{signal_type}|{symbol}|{entry}|{tp1,tp2,tp3}|{stop_loss}|GID:{group_id}|{channel_name}"
+    
+    Támogatott signal típusok:
+    - BUY/SELL: "{timestamp_utc}|{signal_type}|{symbol}|{entry}|{tp1,tp2,tp3}|{stop_loss}|GID:{group_id}|{channel_name}"
+    - MODIFY_SL: "{timestamp_utc}|MODIFY|{new_sl}|GID:{group_id}|{channel_name}"
+    - MODIFY_TP: "{timestamp_utc}|MODIFY_TP{level}|{new_tp}|GID:{group_id}|{channel_name}"
 
-    Kötelező kulcsok a 'signal_data'-ban:
-      - timestamp_utc: int (UTC timestamp in milliseconds)
-      - signal_type: str (BUY/SELL)
-      - symbol: str pl. "XAUUSD"
-      - entry: float
-      - take_profits: list (>=3 elem), pl. [3219,3217,3215]
-      - stop_loss: float
-      - group_id: int  (Python generálja)
-      - channel_name: str (tisztított csatorna név)
+    Kötelező kulcsok BUY/SELL signalokhoz:
+      - timestamp_utc, signal_type, symbol, entry, take_profits, stop_loss, group_id, channel_name
+
+    Kötelező kulcsok MODIFY signalokhoz:
+      - timestamp_utc, signal_type, group_id, channel_name
+      - new_sl (MODIFY_SL esetén) vagy new_tp + tp_level (MODIFY_TP esetén)
 
     Visszatér:
       True, ha sikeres
       False, ha hiba történt vagy hiányos adatok
     """
     try:
-        # 1) Alap ellenőrzés
-        required_keys = ["timestamp_utc", "signal_type", "symbol", "entry", "take_profits",
-                         "stop_loss", "group_id", "channel_name"]
-        if not all(key in signal_data for key in required_keys):
-            logger.error(f"❌ [QueueAdd] Hiányzó kulcsok. Van: {list(signal_data.keys())}, Kellene: {required_keys}")
+        # 1) Common validation for all signal types
+        common_keys = ["timestamp_utc", "signal_type", "group_id", "channel_name"]
+        if not all(key in signal_data for key in common_keys):
+            logger.error(f"❌ [QueueAdd] Hiányzó alapvető kulcsok. Van: {list(signal_data.keys())}, Kellene: {common_keys}")
             return False
 
-        # 2) TPs ellenőrzés - support any number of TPs (minimum 1)
-        tps = signal_data["take_profits"]
-        if not isinstance(tps, list) or len(tps) < 1:
-            logger.error(f"❌ [QueueAdd] Érvénytelen take_profits: {tps}")
-            return False
-
-        # 3) Timestamp ellenőrzés
+        # 2) Timestamp ellenőrzés
         timestamp = signal_data["timestamp_utc"]
         if not isinstance(timestamp, int) or timestamp <= 0:
             logger.error(f"❌ [QueueAdd] Érvénytelen timestamp: {timestamp}")
             return False
 
-        # 4) Sor összerakása timestamp-pel kezdve (prefix nélkül)
-        tp_str = ",".join(str(tp) for tp in tps)
+        signal_type = signal_data["signal_type"].upper()
         raw_channel_name = signal_data.get("channel_name", "UNKNOWN")
         channel_name = clean_channel_name(raw_channel_name)  # Clean to 4-letter format
-        message = (f"{timestamp}|{signal_data['signal_type']}|{signal_data['symbol']}|{signal_data['entry']}|"
-                   f"{tp_str}|{signal_data['stop_loss']}|"
-                   f"GID:{signal_data['group_id']}|{channel_name}\n")
+        
+        # 3) Signal type specific processing
+        if signal_type in ["BUY", "SELL"]:
+            # Traditional trading signal
+            trading_keys = ["symbol", "entry", "take_profits", "stop_loss"]
+            if not all(key in signal_data for key in trading_keys):
+                logger.error(f"❌ [QueueAdd] Hiányzó trading signal kulcsok. Van: {list(signal_data.keys())}, Kellene: {trading_keys}")
+                return False
 
-        logger.info(f"🔄 [QueueAdd] Signal formázva csatorna névvel '{channel_name}' (eredeti: '{raw_channel_name}'): GID:{signal_data['group_id']}")
+            # TPs ellenőrzés - support any number of TPs (minimum 1)
+            tps = signal_data["take_profits"]
+            if not isinstance(tps, list) or len(tps) < 1:
+                logger.error(f"❌ [QueueAdd] Érvénytelen take_profits: {tps}")
+                return False
 
-        # 5) I/O művelet: Hozzáfűzés az összes queue-fájlhoz
+            # Standard trading signal format
+            tp_str = ",".join(str(tp) for tp in tps)
+            message = (f"{timestamp}|{signal_type}|{signal_data['symbol']}|{signal_data['entry']}|"
+                       f"{tp_str}|{signal_data['stop_loss']}|"
+                       f"GID:{signal_data['group_id']}|{channel_name}\n")
+
+        elif signal_type == "MODIFY_SL":
+            # SL modification signal
+            if "new_sl" not in signal_data:
+                logger.error(f"❌ [QueueAdd] Hiányzó new_sl kulcs MODIFY_SL signalhoz")
+                return False
+            
+            # MODIFY signal format: timestamp|MODIFY|new_sl|GID:xxx|channel
+            message = (f"{timestamp}|MODIFY|{signal_data['new_sl']}|"
+                       f"GID:{signal_data['group_id']}|{channel_name}\n")
+
+        elif signal_type.startswith("MODIFY_TP"):
+            # TP modification signal  
+            if "new_tp" not in signal_data or "tp_level" not in signal_data:
+                logger.error(f"❌ [QueueAdd] Hiányzó new_tp vagy tp_level kulcs MODIFY_TP signalhoz")
+                return False
+            
+            # For now, we'll use the MODIFY format for TP changes too
+            # The EA can be enhanced later to handle TP modifications specifically
+            message = (f"{timestamp}|MODIFY_TP{signal_data['tp_level']}|{signal_data['new_tp']}|"
+                       f"GID:{signal_data['group_id']}|{channel_name}\n")
+
+        else:
+            logger.error(f"❌ [QueueAdd] Ismeretlen signal típus: {signal_type}")
+            return False
+
+        logger.info(f"🔄 [QueueAdd] {signal_type} signal formázva csatorna névvel '{channel_name}' (eredeti: '{raw_channel_name}'): GID:{signal_data['group_id']}")
+
+        # 4) I/O művelet: Hozzáfűzás az összes queue-fájlhoz
         return write_message_to_queue(message)
 
     except Exception as e:

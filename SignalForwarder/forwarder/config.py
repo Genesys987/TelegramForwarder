@@ -22,6 +22,17 @@ ARCHIVE_CHANNEL = config.get("ARCHIVE_CHANNEL", None)
 NON_REPLY_SL_CHANNEL = config.get("NON_REPLY_SL_CHANNEL", "FXTM")
 
 # ----------------------
+# Dummy Signal Settings
+# ----------------------
+# Enable/disable dummy signal functionality for "ready" messages
+DUMMY_SIGNAL_ENABLED = config.get("DUMMY_SIGNAL_ENABLED", "true").lower() == "true"
+
+# Average TP and SL differences for dummy signals (calculated from FXTM historical data)
+DUMMY_SIGNAL_TP1_DIFF = float(config.get("DUMMY_SIGNAL_TP1_DIFF", "4.67"))
+DUMMY_SIGNAL_TP2_DIFF = float(config.get("DUMMY_SIGNAL_TP2_DIFF", "7.94"))
+DUMMY_SIGNAL_SL_DIFF = float(config.get("DUMMY_SIGNAL_SL_DIFF", "4.79"))
+
+# ----------------------
 # MT4 File Paths
 # IMPORTANT: Verify these paths are correct for YOUR MT4 installation!
 # Use raw strings (r"...") or double backslashes (\\) for Windows paths.

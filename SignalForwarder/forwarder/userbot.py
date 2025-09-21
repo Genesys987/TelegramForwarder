@@ -9,9 +9,10 @@ import logging
 from signal_parser import parse_signal
 from queue_manager import add_signal_to_queue
 from stoploss_update import process_stoploss_reply, SignalType, process_signal, process_stoploss_non_reply
-from signal_parser import parse_natural_language_sl_modification
+from signal_parser import parse_natural_language_sl_modification, is_ready_message, create_dummy_signal, create_modify_signal_from_real_signal
 from config import (API_ID, API_HASH, INVITE_LINKS,
-           LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL, NON_REPLY_SL_CHANNEL)
+           LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL, NON_REPLY_SL_CHANNEL, DUMMY_SIGNAL_ENABLED)
+from fxtm_tracker import fxtm_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,61 @@ client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 
 # --- Fő Feldolgozó Függvények ---
 
+async def process_ready_message(message_text: str, message_id: int, message_date, channel_name: str = None):
+    """
+    Process a "ready" message and create a dummy signal.
+    """
+    logger.info(f"   Ready üzenet feldolgozása (ID: {message_id}) csatornából: {channel_name or 'UNKNOWN'}...")
+    
+    # Check if dummy signals are enabled
+    if not DUMMY_SIGNAL_ENABLED:
+        logger.info("   Dummy signal funkció kikapcsolva, ready üzenet kihagyva")
+        return None
+    
+    # Parse ready message to get signal type
+    is_ready, signal_type = is_ready_message(message_text)
+    if not is_ready:
+        logger.warning(f"   Ready message parse sikertelen: {message_text}")
+        return None
+    
+    logger.info(f"   Ready üzenet típusa: {signal_type}")
+    
+    # Generate new group ID for dummy signal
+    group_id = get_next_group_id()
+    logger.info(f"   Dummy signal GroupID: {group_id}")
+    
+    # Create dummy signal
+    dummy_signal = create_dummy_signal(signal_type, group_id, channel_name or "FXTM")
+    
+    # Extract UTC timestamp
+    if message_date:
+        if message_date.tzinfo is None:
+            message_date = message_date.replace(tzinfo=timezone.utc)
+        else:
+            message_date = message_date.astimezone(timezone.utc)
+        
+        timestamp = int(message_date.timestamp())
+        dummy_signal["timestamp_utc"] = timestamp
+        logger.info(f"   Timestamp hozzáadva: {timestamp} ({message_date.isoformat()})")
+    else:
+        logger.warning(f"   Figyelmeztetés: Nincs üzenet dátum, jelenlegi időt használjuk")
+        timestamp = int(datetime.now(timezone.utc).timestamp())
+        dummy_signal["timestamp_utc"] = timestamp
+    
+    # Track the dummy signal for future real signal processing
+    clean_channel = clean_channel_name(channel_name or "FXTM")
+    fxtm_tracker.add_dummy_signal(clean_channel, group_id)
+    
+    # Add signal to queue
+    if add_signal_to_queue(dummy_signal):
+        logger.info(f"   Dummy signal queue-hoz adva (GID {group_id}) - {signal_type}")
+        add_gid_mapping(message_id, group_id)
+        return group_id
+    else:
+        logger.error(f"   Hiba: Dummy signal queue-hoz adása sikertelen (GID {group_id})")
+        fxtm_tracker.remove_dummy_signal(clean_channel)  # Clean up tracking
+        return None
+
 async def process_new_standard_signal(message_text: str, message_id: int, message_date, channel_name: str = None):
     logger.info(f"   Standard szignál feldolgozása (ID: {message_id}) csatornából: {channel_name or 'UNKNOWN'}...")
     signal_data = parse_signal(message_text)
@@ -91,6 +147,29 @@ async def process_new_standard_signal(message_text: str, message_id: int, messag
         timestamp = int(datetime.now(timezone.utc).timestamp())
         signal_data["timestamp_utc"] = timestamp
 
+    # Check if this is an FXTM channel and if we have a pending dummy signal
+    clean_channel = clean_channel_name(channel_name or "UNKNOWN")
+    if DUMMY_SIGNAL_ENABLED and clean_channel.upper() == "FXTM" and fxtm_tracker.has_dummy_signal(clean_channel):
+        # This is a real FXTM signal following a dummy signal - convert to MODIFY
+        dummy_gid = fxtm_tracker.get_dummy_gid(clean_channel)
+        logger.info(f"   FXTM real signal észlelve dummy signal után (Dummy GID: {dummy_gid})")
+        
+        # Create modify signal to update the dummy signal with real TP/SL values
+        modify_signal = create_modify_signal_from_real_signal(signal_data, dummy_gid)
+        
+        # Remove the dummy tracking since it's now being replaced
+        fxtm_tracker.remove_dummy_signal(clean_channel)
+        
+        # Add the modify signal to queue
+        if add_signal_to_queue(modify_signal):
+            logger.info(f"   FXTM MODIFY signal queue-hoz adva (Target GID: {dummy_gid})")
+            add_gid_mapping(message_id, dummy_gid)  # Map message to dummy GID
+            return dummy_gid
+        else:
+            logger.error(f"   Hiba: FXTM MODIFY signal queue-hoz adása sikertelen")
+            return None
+    
+    # Standard signal processing (not FXTM or no dummy pending)
     group_id = get_next_group_id() # Generáljuk az ÚJ GID-t
     signal_data["group_id"] = group_id # Hozzáadjuk a dict-hez
     logger.info(f"   Új GroupID: {group_id}")
@@ -203,7 +282,20 @@ async def run_userbot():
 
         # === Standard szignál feldolgozás ===
         else:
-            # Check for non-reply SL modification messages first
+            # Check for ready message first (if dummy signals enabled)
+            if DUMMY_SIGNAL_ENABLED:
+                is_ready, signal_type = is_ready_message(message_text)
+                if is_ready:
+                    logger.info(f"Ready üzenet észlelve: {signal_type} típus")
+                    try:
+                        result = await process_ready_message(message_text, message_id, message.date, chat_title)
+                        if result:
+                            await forward_to_archive(message, chat_title, result)
+                    except Exception as e:
+                        logger.error(f"Ready message processing error: {e}")
+                    return  # Don't process as standard signal
+            
+            # Check for non-reply SL modification messages
             sl_modification = parse_natural_language_sl_modification(message_text)
             if sl_modification:
                 logger.info(f"Non-reply SL modification észlelve: {sl_modification}")
@@ -221,7 +313,7 @@ async def run_userbot():
                     traceback.print_exc()
                 return  # Don't process as standard signal
             
-            # Process as standard trading signal if not SL modification
+            # Process as standard trading signal if not ready or SL modification
             try:
                 group_id = await process_new_standard_signal(message_text, message_id, message.date, chat_title)
                 if group_id is not None: await forward_to_archive(message, chat_title, group_id)

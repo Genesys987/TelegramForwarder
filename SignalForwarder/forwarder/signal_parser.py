@@ -847,6 +847,125 @@ def parse_signal(text: str):
         print(f"Debug: Signal parsing incomplete. Missing or invalid parts: {missing}. Original text: {text[:100]}...")
         return None
 
+def is_ready_message(text: str) -> tuple[bool, str]:
+    """
+    Check if the message is a "ready" trading message that should trigger a dummy signal.
+    
+    Returns:
+        tuple: (is_ready_message, signal_type) where signal_type is "BUY" or "SELL"
+    """
+    if not text or not text.strip():
+        return False, ""
+    
+    # Convert to uppercase for pattern matching
+    upper_text = text.upper().strip()
+    
+    # Define patterns that indicate ready BUY signals
+    buy_patterns = [
+        r'\bI\'?M\s+BUYING\s+NOW\b',
+        r'\bREADY\s+BUY\b',
+        r'\bMID\s+RISK\s+LET\'?S\s+SCALPING\s+BUY\s+GOLD\s+SLOWLY\b',
+        r'\bHIGH\s+RISK\s+LET\'?S\s+SCALPING\s+BUY\s+GOLD\s+SLOWLY\b',
+        r'\bANOTHER\s+GOLD\s+BUY\s+READY\b',
+    ]
+    
+    # Define patterns that indicate ready SELL signals  
+    sell_patterns = [
+        r'\bI\'?M\s+SELLING\s+NOW\b',
+        r'\bREADY\s+SELL\b',
+        r'\bLET\'?S\s+SCALPING\s+SELL\s+GOLD\s+SLOWLY\s+MID\s+RISK\b',
+        r'\bDOUBLE\s+SELL\s+READY\b',
+        r'\bGOLD\s+SELL\s+READY\b',
+    ]
+    
+    # Check for BUY patterns
+    for pattern in buy_patterns:
+        if re.search(pattern, upper_text):
+            return True, "BUY"
+    
+    # Check for SELL patterns
+    for pattern in sell_patterns:
+        if re.search(pattern, upper_text):
+            return True, "SELL"
+    
+    return False, ""
+
+def create_dummy_signal(signal_type: str, group_id: int, channel_name: str = "FXTM") -> dict:
+    """
+    Create a dummy trading signal with average TP/SL values.
+    
+    Args:
+        signal_type: "BUY" or "SELL"
+        group_id: Group ID for the signal
+        channel_name: Channel name (defaults to "FXTM")
+        
+    Returns:
+        dict: Signal data compatible with add_signal_to_queue
+    """
+    try:
+        from config import DUMMY_SIGNAL_TP1_DIFF, DUMMY_SIGNAL_TP2_DIFF, DUMMY_SIGNAL_SL_DIFF
+    except ImportError:
+        # Fallback values if config import fails
+        DUMMY_SIGNAL_TP1_DIFF = 4.67
+        DUMMY_SIGNAL_TP2_DIFF = 7.94  
+        DUMMY_SIGNAL_SL_DIFF = 4.79
+    
+    # Use current market price as entry (approximate XAUUSD price)
+    # TODO: In production, this should get current market price from broker/API
+    entry_price = 3650.0  # Default approximate gold price
+    
+    if signal_type.upper() == "BUY":
+        # For BUY: TP above entry, SL below entry
+        tp1 = entry_price + DUMMY_SIGNAL_TP1_DIFF
+        tp2 = entry_price + DUMMY_SIGNAL_TP2_DIFF  
+        sl = entry_price - DUMMY_SIGNAL_SL_DIFF
+    else:  # SELL
+        # For SELL: TP below entry, SL above entry
+        tp1 = entry_price - DUMMY_SIGNAL_TP1_DIFF
+        tp2 = entry_price - DUMMY_SIGNAL_TP2_DIFF
+        sl = entry_price + DUMMY_SIGNAL_SL_DIFF
+    
+    signal_data = {
+        "timestamp_utc": int(time.time()),
+        "signal_type": signal_type.upper(),
+        "symbol": "XAUUSD",
+        "entry": entry_price,
+        "take_profits": [tp1, tp2],
+        "stop_loss": sl,
+        "group_id": group_id,
+        "channel_name": clean_channel_name(channel_name)
+    }
+    
+    return signal_data
+
+def create_modify_signal_from_real_signal(real_signal_data: dict, dummy_gid: int) -> dict:
+    """
+    Create a MODIFY signal from a real FXTM signal to update the dummy signal's TP/SL values.
+    
+    For now, we create just one SL modification signal. 
+    In the future, this could be enhanced to send multiple TP modifications.
+    
+    Args:
+        real_signal_data: The parsed real signal data  
+        dummy_gid: The group ID of the dummy signal to modify
+        
+    Returns:
+        dict: MODIFY signal data for queue_manager
+    """
+    # Create SL modification signal to update the dummy signal
+    modify_signal = {
+        "timestamp_utc": int(time.time()),
+        "signal_type": "MODIFY_SL", 
+        "new_sl": real_signal_data["stop_loss"],
+        "group_id": dummy_gid,
+        "channel_name": real_signal_data.get("channel_name", "FXTM")
+    }
+    
+    # TODO: Future enhancement - could also create TP modification signals
+    # For now, the EA will use the original dummy TPs and only update SL
+    
+    return modify_signal
+
 def format_mt4_comment(group_id: int, channel_name: str, stop_loss: float, digits: int = 5) -> str:
     """
     Format MT4 comment string within 31 character limit.
