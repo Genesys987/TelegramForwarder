@@ -165,7 +165,7 @@ async def run_userbot():
                 # --- Unified trading instruction pattern matching ---
                 signal_type = None
                 # MODIFY (SL adjust)
-                if re.search(r'(move|adjust|set)\s+(my\s+)?sl\s+(to|at)\s+[\d.]+', message_text, re.IGNORECASE):
+                if re.search(r'(change|move|adjust|set).*(sl|stoploss|stop loss)', message_text, re.IGNORECASE):
                     signal_type = SignalType.MODIFY
                 # CLOSE_HALF_BREAKEVEN
                 elif re.search(r'close.*(profit|half|all).*breakeven', message_text, re.IGNORECASE) or \

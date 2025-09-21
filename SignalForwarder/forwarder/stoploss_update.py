@@ -82,17 +82,13 @@ def _mark_signal_processed(group_id, channel_name, signal_type: SignalType):
 
 # Helper function (copied from userbot refactoring)
 def extract_price_from_text(text):
-    patterns = [
-        r"(?:SL|Stop\s*loss|Adjust)\s*(?:on\s+\w+)?\s*(?:to|at|is|here)?\s*:?\s*([\d]+\.?[\d]*)",
-        r"([\d]+\.?[\d]*)"
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match and match.group(1):
-            price_str = match.group(1)
-            if re.fullmatch(r"[\d]+\.?[\d]*", price_str) and "." != price_str:
-                logger.debug(f"SL Extract: Price '{price_str}' from '{text}'")
-                return price_str
+    pattern = r"(\d+\.?\d*)"
+    match = re.search(pattern, text, re.IGNORECASE)
+    if match and match.group(1):
+      price_str = match.group(1)
+      if re.fullmatch(r"[\d]+\.?[\d]*", price_str) and "." != price_str:
+        logger.debug(f"SL Extract: Price '{price_str}' from '{text}'")
+        return price_str
     logger.debug(f"SL Extract: No price found in '{text}'")
     return None
 
