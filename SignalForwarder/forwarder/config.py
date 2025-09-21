@@ -18,6 +18,9 @@ assert API_HASH is not None, "TELEGRAM_API_HASH is not set in .env file"
 
 ARCHIVE_CHANNEL = config.get("ARCHIVE_CHANNEL", None)
 
+# Non-reply SL modification channel (for testing purposes)
+NON_REPLY_SL_CHANNEL = config.get("NON_REPLY_SL_CHANNEL", "FXTM")
+
 # ----------------------
 # MT4 File Paths
 # IMPORTANT: Verify these paths are correct for YOUR MT4 installation!

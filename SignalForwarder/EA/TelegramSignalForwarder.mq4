@@ -707,7 +707,19 @@ void ProcessModifySlSignal(Signal &signal)
       continue;
     }
 
-    if(orderGid != signal.groupId || orderChannel != signal.channelName) {
+    // For MODIFY signals, match by GID primarily, with optional channel verification
+    if(orderGid != signal.groupId) {
+      continue;
+    }
+    
+    // Optional channel verification - only warn if mismatch for MODIFY signals
+    if(signal.type == "MODIFY" && orderChannel != signal.channelName) {
+      if(debugMode) {
+        PrintLog(eaName + ": Channel mismatch for GID=" + IntegerToString(signal.groupId) + 
+                 " Expected: '" + signal.channelName + "' Found: '" + orderChannel + "' - proceeding anyway");
+      }
+    } else if(signal.type != "MODIFY" && orderChannel != signal.channelName) {
+      // For non-MODIFY signals, strict channel matching
       continue;
     }
 

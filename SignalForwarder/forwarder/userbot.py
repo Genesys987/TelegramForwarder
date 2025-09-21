@@ -8,9 +8,10 @@ from signal_parser import clean_channel_name
 import logging
 from signal_parser import parse_signal
 from queue_manager import add_signal_to_queue
-from stoploss_update import process_stoploss_reply, SignalType, process_signal
+from stoploss_update import process_stoploss_reply, SignalType, process_signal, process_stoploss_non_reply
+from signal_parser import parse_natural_language_sl_modification
 from config import (API_ID, API_HASH, INVITE_LINKS,
-           LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL)
+           LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL, NON_REPLY_SL_CHANNEL)
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +203,25 @@ async def run_userbot():
 
         # === Standard szignál feldolgozás ===
         else:
+            # Check for non-reply SL modification messages first
+            sl_modification = parse_natural_language_sl_modification(message_text)
+            if sl_modification:
+                logger.info(f"Non-reply SL modification észlelve: {sl_modification}")
+                try:
+                    # Non-reply SL modification konfigurálható csatornán (teszteléshez)
+                    # Konfigurációból vesszük a csatorna nevet (alapértelmezett: FXTM)
+                    channel_name = NON_REPLY_SL_CHANNEL
+                    success = process_stoploss_non_reply(message_text, channel_name)
+                    if success:
+                        logger.info(f"Non-reply SL modification sikeresen feldolgozva {channel_name} csatornából")
+                    else:
+                        logger.warning(f"Non-reply SL modification feldolgozása sikertelen {channel_name} csatornából")
+                except Exception as e:
+                    logger.error(f"Hiba non-reply SL modification feldolgozásakor: {e}")
+                    traceback.print_exc()
+                return  # Don't process as standard signal
+            
+            # Process as standard trading signal if not SL modification
             try:
                 group_id = await process_new_standard_signal(message_text, message_id, message.date, chat_title)
                 if group_id is not None: await forward_to_archive(message, chat_title, group_id)

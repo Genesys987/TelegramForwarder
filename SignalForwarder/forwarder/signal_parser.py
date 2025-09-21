@@ -5,6 +5,219 @@ symbol_mappings = {
     'GOLD': 'XAUUSD'
 }
 
+import re
+import time
+from typing import Dict, Optional
+
+def parse_natural_language_sl_modification(text: str) -> Optional[float]:
+    """
+    Parse natural language SL modification messages to extract the new SL value.
+    
+    Examples:
+    - "I'll move my SL to 3649 temporarily traders"
+    - "Adjust your SL here a bit to 3659.8 to give it space"
+    - "move my sl to 1234"
+    - "set the stoploss at 5678"
+    - "Let's move our stoploss to 1234"
+    - "Change the SL temporarily to 5678"
+    
+    Args:
+        text: The natural language message
+        
+    Returns:
+        The extracted SL value as float, or None if no valid SL found
+    """
+    if not text or not text.strip():
+        return None
+    
+    # Convert to uppercase for pattern matching
+    upper_text = text.upper()
+    
+    # Define specific patterns for exact SL modification phrases only
+    # These are the ONLY patterns that should trigger non-reply SL modification
+    patterns = [
+        r'I\'LL\s+MOVE\s+MY\s+SL\s+TO\s+([\d\.]+)(?:\s+TEMPORARILY)?(?:\s+TRADERS)?',  # "I'll move my SL to 3649 temporarily traders"
+        r'ADJUST\s+YOUR\s+SL\s+HERE\s+A\s+BIT\s+TO\s+([\d\.]+)(?:\s+TO\s+GIVE\s+IT\s+SPACE)?',  # "Adjust your SL here a bit to 3659.8 to give it space"
+        r'MOVE\s+MY\s+SL\s+TO\s+([\d\.]+)',  # "move my sl to 1234"
+        r'SET\s+THE\s+STOPLOSS\s+AT\s+([\d\.]+)',  # "set the stoploss at 5678"
+        r'LET\'S\s+MOVE\s+OUR\s+STOPLOSS\s+TO\s+([\d\.]+)',  # "Let's move our stoploss to 1234"
+        r'CHANGE\s+THE\s+SL\s+TEMPORARILY\s+TO\s+([\d\.]+)',  # "Change the SL temporarily to 5678"
+        r'ADJUST\s+YOUR\s+SL\s+ON\s+\w+\s+TO\s+([\d\.]+)',  # "Adjust your SL on BTCUSD to 115100"
+        r'ADJUSTING\s+SL\s+TO\s+([\d\.]+)',  # "Adjusting SL to 3330.5"
+        r'I\s+WILL\s+ADJUST\s+SL\s+TO\s+([\d\.]+)(?:\s+TO\s+AVOID\s+GETTING\s+WICKED\s+OUT)?',  # "I will adjust SL to 3323 to avoid getting wicked out"
+        r'I\'M\s+MOVING\s+SL\s+TO\s+([\d\.]+)',  # "I'm moving sl to 3340"
+        r'ADJUST\s+SL\s+JUST\s+INCASE\s+\+?\d+\s+PIPS\s+TO\s+([\d\.]+)',  # "Adjust SL just incase +10 pips to 3350"
+        r'IL\s+MOVE\s+MY\s+SL\s+TO\s+([\d\.]+)(?:\s+TEMPORARILY)?(?:\s+TRADERS)?',  # "Il move my SL to 3654 temporarily traders" (typo in I'll)
+        r'I\'LL\s+MOVE\s+MY\s+SL\s+TO\s+([\d\.]+)(?:\s+TEMPORARILY)?(?:\s+FOR\s+THIS\s+HIGH\s+RISK\s+TRADE\s+NOW)?',  # "I'll move my SL to 3639 temporarily for this high risk trade now"
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, upper_text)
+        if match:
+            try:
+                sl_value = float(match.group(1))
+                if sl_value > 0:  # Basic validation
+                    return sl_value
+            except (ValueError, IndexError):
+                continue
+    
+    # Fallback: Look for any sequence like "to XXXX" where XXXX is a number
+    fallback_match = re.search(r'\bTO\s+([\d\.]+)', upper_text)
+    if fallback_match:
+        try:
+            sl_value = float(fallback_match.group(1))
+            if sl_value > 0:
+                return sl_value
+        except (ValueError, IndexError):
+            pass
+    
+    return None
+
+def create_sl_modification_signal(group_id: int, channel_name: str, new_sl: float) -> str:
+    """
+    Create a MODIFY signal string for SL modification.
+    
+    Format: TIMESTAMP|MODIFY|NEW_SL|GID:xxx|CHANNEL_NAME
+    
+    Args:
+        group_id: The group ID of orders to modify
+        channel_name: The channel name
+        new_sl: The new stop loss value
+        
+    Returns:
+        Formatted signal string ready for signals.txt
+    """
+    import time
+    
+    timestamp = int(time.time())
+    clean_channel = clean_channel_name(channel_name)
+    
+    signal_parts = [
+        str(timestamp),
+        "MODIFY",
+        f"{new_sl:.5f}".rstrip('0').rstrip('.'),
+        f"GID:{group_id}",
+        clean_channel
+    ]
+    
+    signal_string = "|".join(signal_parts)
+    print(f"Debug: Created SL modification signal: {signal_string}")
+    
+    return signal_string
+
+def process_natural_language_sl_modification(message_text: str, reply_to_group_id: int, channel_name: str) -> Optional[str]:
+    """
+    Process a natural language SL modification message and create a signal.
+    
+    This function extracts the SL value from natural language and creates a MODIFY signal
+    that can be written to signals.txt for the EA to process.
+    
+    Args:
+        message_text: The natural language message (e.g., "Adjust your SL to 3659.8")
+        reply_to_group_id: The group ID extracted from the replied-to message
+        channel_name: The channel name where the message came from
+        
+    Returns:
+        The formatted signal string ready for signals.txt, or None if parsing fails
+    """
+    # Extract SL value from natural language
+    new_sl = parse_natural_language_sl_modification(message_text)
+    if new_sl is None:
+        print(f"Debug: Could not extract SL value from message: {message_text}")
+        return None
+    
+    # Validate inputs
+    if reply_to_group_id <= 0:
+        print(f"Debug: Invalid group ID: {reply_to_group_id}")
+        return None
+    
+    if not channel_name or not channel_name.strip():
+        print("Debug: Empty channel name provided")
+        return None
+    
+    # Create the signal
+    signal_string = create_sl_modification_signal(reply_to_group_id, channel_name, new_sl)
+    
+    print(f"Debug: Successfully processed natural language SL modification:")
+    print(f"       Message: {message_text}")
+    print(f"       Extracted SL: {new_sl}")
+    print(f"       Group ID: {reply_to_group_id}")
+    print(f"       Channel: {channel_name}")
+    print(f"       Signal: {signal_string}")
+    
+    return signal_string
+
+def write_signal_to_file(signal_string: str, signals_file_path: str = "signals.txt") -> bool:
+    """
+    Write a signal string to the signals.txt file for the EA to process.
+    
+    Args:
+        signal_string: The formatted signal string
+        signals_file_path: Path to the signals.txt file
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        with open(signals_file_path, 'w', encoding='utf-8') as f:
+            f.write(signal_string + '\n')
+        print(f"Debug: Successfully wrote signal to {signals_file_path}")
+        return True
+    except Exception as e:
+        print(f"Error: Failed to write signal to {signals_file_path}: {e}")
+        return False
+
+# Example usage and integration function
+def handle_telegram_sl_modification_reply(message_text: str, replied_message_info: Dict, channel_name: str) -> bool:
+    """
+    Complete workflow function to handle a Telegram message that modifies SL.
+    
+    This function should be called when detecting a natural language SL modification
+    message that replies to a trading signal.
+    
+    Args:
+        message_text: The natural language message (e.g., "Adjust your SL to 3659.8")
+        replied_message_info: Dictionary containing info about the replied-to message
+                             Should have 'group_id' key with the GID from original signal
+        channel_name: The channel name where the message came from
+        
+    Returns:
+        True if the SL modification was processed successfully, False otherwise
+    
+    Example usage:
+        # When receiving a Telegram message like "Adjust your SL to 3659.8"
+        # that replies to a previous trading signal with GID 12345
+        
+        replied_info = {'group_id': 12345}  # Extract from original message
+        success = handle_telegram_sl_modification_reply(
+            message_text="Adjust your SL here a bit to 3659.8 to give it space",
+            replied_message_info=replied_info,
+            channel_name="FXPL_Channel"
+        )
+    """
+    
+    # Extract group ID from replied message
+    group_id = replied_message_info.get('group_id')
+    if not group_id or group_id <= 0:
+        print(f"Error: Invalid or missing group_id in replied message info: {replied_message_info}")
+        return False
+    
+    # Process the natural language message
+    signal_string = process_natural_language_sl_modification(message_text, group_id, channel_name)
+    if not signal_string:
+        print("Error: Failed to process natural language SL modification")
+        return False
+    
+    # Write to signals.txt for EA to process
+    success = write_signal_to_file(signal_string)
+    if success:
+        print(f"✅ Successfully processed SL modification:")
+        print(f"   Original message: {message_text}")
+        print(f"   Group ID: {group_id}")
+        print(f"   Generated signal: {signal_string}")
+    
+    return success
+
 def clean_channel_name(channel_name: str) -> str:
     """
     Clean channel name by keeping letters only
