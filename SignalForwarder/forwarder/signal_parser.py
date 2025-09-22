@@ -1,9 +1,60 @@
 import re
+from typing import Optional
 
 # Dictionary of common symbol mappings
 symbol_mappings = {
     'GOLD': 'XAUUSD'
 }
+
+def parse_natural_language_sl_modification(text: str) -> Optional[float]:
+    """
+    Parse natural language SL modification messages to extract the new stop loss value.
+    
+    Supports 13 specific patterns:
+    - "I'll move my SL to 3649"
+    - "Adjust your SL here a bit to 3659.8"
+    - "Adjusting SL to 3330.5"
+    - "I will adjust SL to 3323 to avoid getting wicked out"
+    - "Adjust your SL on BTCUSD to 115100"
+    - etc.
+    
+    Args:
+        text: The message text to parse
+        
+    Returns:
+        The new SL value as float, or None if no SL modification is detected
+    """
+    if not text or not isinstance(text, str):
+        return None
+    
+    # 13 specific regex patterns for SL modification detection
+    sl_modification_patterns = [
+        r"I['\u2019]?ll\s+move\s+(?:my\s+)?SL\s+to\s+([\d.]+)",                           # "I'll move my SL to 3649"
+        r"Adjust\s+(?:your\s+)?SL\s+here\s+a\s+bit\s+to\s+([\d.]+)",                    # "Adjust your SL here a bit to 3659.8"
+        r"Adjusting\s+SL\s+to\s+([\d.]+)",                                               # "Adjusting SL to 3330.5"  
+        r"I\s+will\s+adjust\s+SL\s+to\s+([\d.]+)\s+to\s+avoid\s+getting\s+wicked\s+out", # "I will adjust SL to 3323 to avoid getting wicked out"
+        r"Adjust\s+(?:your\s+)?SL\s+on\s+\w+\s+to\s+([\d.]+)",                          # "Adjust your SL on BTCUSD to 115100"
+        r"Move\s+(?:your\s+)?SL\s+to\s+([\d.]+)",                                       # "Move your SL to 3650"
+        r"Set\s+(?:your\s+)?SL\s+(?:at\s+|to\s+)([\d.]+)",                             # "Set your SL to 3645" or "Set your SL at 3645"
+        r"Change\s+SL\s+to\s+([\d.]+)",                                                 # "Change SL to 3640"
+        r"Update\s+(?:your\s+)?SL\s+to\s+([\d.]+)",                                     # "Update your SL to 3655"
+        r"SL\s+(?:should\s+be\s+)?(?:moved\s+to\s+|adjusted\s+to\s+|set\s+to\s+)([\d.]+)", # "SL should be moved to 3648"
+        r"(?:New\s+)?SL\s+(?:level\s+)?(?:is\s+|at\s+|to\s+)([\d.]+)",                  # "New SL level is 3642"
+        r"I['\u2019]?m\s+(?:moving|adjusting)\s+(?:my\s+)?SL\s+to\s+([\d.]+)",           # "I'm moving my SL to 3651"
+        r"Let['\u2019]?s\s+(?:move|adjust|set)\s+SL\s+to\s+([\d.]+)"                    # "Let's move SL to 3647"
+    ]
+    
+    for pattern in sl_modification_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            try:
+                sl_value = float(match.group(1))
+                if sl_value > 0:  # Basic validation
+                    return sl_value
+            except (ValueError, IndexError):
+                continue
+    
+    return None
 
 def clean_channel_name(channel_name: str) -> str:
     """

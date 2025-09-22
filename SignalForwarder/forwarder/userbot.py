@@ -4,13 +4,13 @@ from datetime import datetime, timezone
 from telethon import TelegramClient, events
 import traceback
 import os
-from signal_parser import clean_channel_name
+from signal_parser import clean_channel_name, parse_natural_language_sl_modification
 import logging
 from signal_parser import parse_signal
 from queue_manager import add_signal_to_queue
-from stoploss_update import process_stoploss_reply, SignalType, process_signal
+from stoploss_update import process_stoploss_reply, SignalType, process_signal, process_stoploss_non_reply
 from config import (API_ID, API_HASH, INVITE_LINKS,
-           LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL)
+           LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL, NON_REPLY_SL_CHANNEL)
 
 logger = logging.getLogger(__name__)
 
@@ -200,8 +200,28 @@ async def run_userbot():
             else: logger.error(f"   Hiba: Eredeti üzenet lekérése sikertelen (ID: {reply_to_msg_id}).")
             return
 
-        # === Standard szignál feldolgozás ===
+        # === Non-reply SL modification check ===
         else:
+            # Check for non-reply SL modification messages
+            sl_modification = parse_natural_language_sl_modification(message_text)
+            if sl_modification:
+                logger.info(f"Non-reply SL modification észlelve: {sl_modification}")
+                try:
+                    # Non-reply SL modification konfigurálható csatornán (teszteléshez)
+                    # Konfigurációból vesszük a csatorna nevet (alapértelmezett: FXTM)
+                    channel_name = NON_REPLY_SL_CHANNEL
+                    success = process_stoploss_non_reply(message_text, channel_name)
+                    if success:
+                        logger.info(f"Non-reply SL modification sikeresen feldolgozva {channel_name} csatornából")
+                        await forward_to_archive(message, chat_title, None)  # Forward to archive without group_id
+                    else:
+                        logger.warning(f"Non-reply SL modification feldolgozása sikertelen {channel_name} csatornából")
+                except Exception as e:
+                    logger.error(f"Hiba non-reply SL modification feldolgozásakor: {e}")
+                    traceback.print_exc()
+                return  # Don't process as standard signal
+            
+            # === Standard szignál feldolgozás ===
             try:
                 group_id = await process_new_standard_signal(message_text, message_id, message.date, chat_title)
                 if group_id is not None: await forward_to_archive(message, chat_title, group_id)
@@ -217,7 +237,11 @@ async def forward_to_archive(message, channel_name, group_id):
     """
     if ARCHIVE_CHANNEL:
         try:
-            cleaned_channel = f"#{clean_channel_name(channel_name)} - {group_id}"
+            if group_id is not None:
+                cleaned_channel = f"#{clean_channel_name(channel_name)} - {group_id}"
+            else:
+                # For non-reply SL modifications, don't include group_id
+                cleaned_channel = f"#{clean_channel_name(channel_name)} - SL_MOD"
             message_text = f"{cleaned_channel}\n\n{message.text}"
             await client.send_message(ARCHIVE_CHANNEL, message_text)
             logger.info(f"📤 Üzenet továbbítva az archív csatornára: {ARCHIVE_CHANNEL}")
