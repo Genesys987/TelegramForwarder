@@ -1,9 +1,33 @@
 import re
+import os
+from dotenv import dotenv_values
 
 # Dictionary of common symbol mappings
 symbol_mappings = {
     'GOLD': 'XAUUSD'
 }
+
+# Load warmup signal settings from .env
+config = dotenv_values(".env")
+WARMUP_SIGNAL_ENABLED = config.get("WARMUP_SIGNAL_ENABLED", "false").lower() == "true"
+WARMUP_SIGNAL_TP1_DIFF = float(config.get("WARMUP_SIGNAL_TP1_DIFF", "4.83"))
+WARMUP_SIGNAL_TP2_DIFF = float(config.get("WARMUP_SIGNAL_TP2_DIFF", "8.48"))
+WARMUP_SIGNAL_SL_DIFF = float(config.get("WARMUP_SIGNAL_SL_DIFF", "4.83"))
+WARMUP_SIGNAL_CHANNEL = config.get("WARMUP_SIGNAL_CHANNEL", "FXTM")
+
+# Ready message patterns for warmup signals
+READY_MESSAGE_PATTERNS = [
+    r"I'?m\s+buying\s+now",
+    r"I'?m\s+selling\s+now", 
+    r"Let'?s\s+scalping\s+sell\s+gold\s+slowly\s+mid\s+risk",
+    r"ready\s+sell",
+    r"Mid\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly",
+    r"Ready\s+Buy",
+    r"Double\s+sell\s+ready", 
+    r"HIGH\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly",
+    r"GOLD\s+SELL\s+READY",
+    r"ANOTHER\s+GOLD\s+BUY\s+READY"
+]
 
 def clean_channel_name(channel_name: str) -> str:
     """
@@ -674,3 +698,98 @@ def format_mt4_comment(group_id: int, channel_name: str, stop_loss: float, digit
         comment = comment[:31]
     
     return comment
+
+def is_ready_message(text: str):
+    """
+    Check if the message matches any ready message pattern for warmup signals.
+    
+    Args:
+        text: Message text to check
+        
+    Returns:
+        tuple: (is_ready: bool, signal_type: str or None, current_price: float or None)
+    """
+    if not WARMUP_SIGNAL_ENABLED:
+        return False, None, None
+        
+    text_lower = text.lower()
+    
+    # Determine signal type from ready message patterns
+    signal_type = None
+    
+    # BUY patterns - exact matching for ready messages
+    buy_patterns = [
+        r"^I'?m\s+buying\s+now[\.\!]*$",
+        r"^ready\s+buy[\s\w]*[\.\!]*$",
+        r"^Mid\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly[\.\!]*$", 
+        r"^HIGH\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly[\.\!]*$",
+        r"^ANOTHER\s+GOLD\s+BUY\s+READY[\.\!]*$"
+    ]
+    
+    # SELL patterns - exact matching for ready messages  
+    sell_patterns = [
+        r"^I'?m\s+selling\s+now[\.\!]*$",
+        r"^Let'?s\s+scalping\s+sell\s+gold\s+slowly\s+mid\s+risk[\.\!]*$",
+        r"^ready\s+sell[\s\w]*[\.\!]*$",
+        r"^Double\s+sell\s+ready[\.\!]*$",
+        r"^GOLD\s+SELL\s+READY[\.\!]*$"
+    ]
+    
+    for pattern in buy_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            signal_type = "BUY"
+            break
+            
+    if not signal_type:
+        for pattern in sell_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                signal_type = "SELL"
+                break
+    
+    if signal_type:
+        # No price extraction needed - warmup signals use instant execution
+        return True, signal_type, None
+        
+    return False, None, None
+
+def generate_warmup_signal(signal_type: str, current_market_price: float):
+    """
+    Generate a warmup signal with average TP/SL differences.
+    
+    Args:
+        signal_type: "BUY" or "SELL"
+        current_market_price: Current market price from EA (required)
+        
+    Returns:
+        dict: Generated warmup signal data or None if price not available
+    """
+    if not WARMUP_SIGNAL_ENABLED:
+        return None
+        
+    if not current_market_price:
+        return None  # Cannot generate without real market price
+        
+    entry_price = current_market_price
+    
+    # Calculate TP and SL levels based on signal type and average differences
+    if signal_type == "BUY":
+        tp1 = entry_price + WARMUP_SIGNAL_TP1_DIFF
+        tp2 = entry_price + WARMUP_SIGNAL_TP2_DIFF  
+        sl = entry_price - WARMUP_SIGNAL_SL_DIFF
+    else:  # SELL
+        tp1 = entry_price - WARMUP_SIGNAL_TP1_DIFF
+        tp2 = entry_price - WARMUP_SIGNAL_TP2_DIFF
+        sl = entry_price + WARMUP_SIGNAL_SL_DIFF
+    
+    # Generate signal data structure
+    signal_data = {
+        "signal_type": signal_type,
+        "symbol": "XAUUSD",  # Default to XAUUSD for GOLD signals
+        "entry": 0,  # Immediate entry like NOW signals
+        "take_profits": [tp1, tp2],
+        "stop_loss": sl,
+        "channel_name": WARMUP_SIGNAL_CHANNEL,  # Use configured channel name
+        "is_warmup": True  # Flag to identify warmup signals
+    }
+    
+    return signal_data

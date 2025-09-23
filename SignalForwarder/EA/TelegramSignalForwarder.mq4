@@ -24,6 +24,8 @@ extern double marginBufferPercentage             = 70.0;   // Amount of free mar
 
 static string gTempFile       = "processing.txt";     // Temp file to avoid re-read
 static string gSignalFile               = "signals.txt";       // Incoming signal file
+static string gPriceRequestFile = "price_request.txt";         // Python -> EA price request file
+static string gPriceResponseFile = "price_response.txt";       // EA -> Python price response file
 static int slippage = 20;  // maximum allowed slippage during order creation/modification
 
 int trailingScanPeriodSeconds = 3;
@@ -66,6 +68,7 @@ string   storedTestSignal = "";
 //|--- Function Prototypes                                          |
 //+------------------------------------------------------------------+
 void    PrintLog(string message);
+void    ProcessPriceRequest();
 Signal ReadSignalFile();
 Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false);
 Signal ParseBuySellSignal(string &parts[], bool shouldValidateTimestamp);
@@ -124,6 +127,9 @@ void OnTimer()
   if (!IsTradeAllowed() || !IsConnected() || IsStopped()) {
     return;
   }
+// Process any pending price requests first
+  ProcessPriceRequest();
+  
 // Process dynamic trailing stop for existing positions
   ProcessDynamicTrailingStop();
 
@@ -453,39 +459,93 @@ Signal ParseActionSignal(string &parts[], bool shouldValidateTimestamp)
   StringToUpper(signal.type);
 
   bool isModifySignal = signal.type == "MODIFY";
-  int shift = isModifySignal ? 1 : 0;
-
-// 2) New SL value (for modify signals)
+  
   if (isModifySignal) {
-    string slPart = parts[2];
-    if(!IsValidDouble(slPart)) {
-      PrintLog(eaName + ": Invalid new SL value '" + slPart + "', skipping");
+    // Check if this is the new 7-part MODIFY format or old 5-part format
+    int partCount = ArraySize(parts);
+    
+    if (partCount >= 7) {
+      // New format: TIMESTAMP|MODIFY|SYMBOL|ENTRY|TP1,TP2|SL|GID:xxx|CHANNEL
+      signal.symbol = parts[2] + symbolPostfix;
+      signal.entry = StrToDouble(parts[3]);
+      
+      // Parse TP levels
+      string tpsArr[];
+      signal.tpCount = StringSplit(parts[4], ',', tpsArr);
+      ArrayResize(signal.tpLevels, signal.tpCount);
+      for(int i=0; i<signal.tpCount; i++) {
+        signal.tpLevels[i] = NormalizeDouble(StrToDouble(tpsArr[i]), MarketInfo(signal.symbol, MODE_DIGITS));
+      }
+      
+      // Parse SL
+      signal.stopLoss = StrToDouble(parts[5]);
+      
+      // Parse GID
+      string gidPart = parts[6];
+      if(StringFind(gidPart, "GID:") == 0) {
+        signal.groupId = (int)StrToInteger(StringSubstr(gidPart, 4));
+      }
+      
+      // Parse channel name
+      signal.channelName = CleanChannelName(parts[7]);
+      
+      if (shouldValidateTimestamp)
+        PrintLog(eaName + ": Parsed new format MODIFY signal GID=" + IntegerToString(signal.groupId) + 
+                 " Symbol=" + signal.symbol + 
+                 " NewSL=" + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) + 
+                 " TPCount=" + IntegerToString(signal.tpCount) + 
+                 " from channel '" + signal.channelName + "'");
+      
+    } else if (partCount >= 5) {
+      // Old format: TIMESTAMP|MODIFY|NEW_SL|GID:xxx|CHANNEL
+      string slPart = parts[2];
+      if(!IsValidDouble(slPart)) {
+        PrintLog(eaName + ": Invalid new SL value '" + slPart + "', skipping");
+        return signal;
+      }
+      signal.stopLoss = StrToDouble(slPart);
+      
+      // Parse GID
+      string gidPart = parts[3];
+      if(StringFind(gidPart, "GID:") == 0) {
+        signal.groupId = (int)StrToInteger(StringSubstr(gidPart, 4));
+      }
+      
+      // Parse channel name
+      signal.channelName = CleanChannelName(parts[4]);
+      
+      if (shouldValidateTimestamp)
+        PrintLog(eaName + ": Parsed old format MODIFY signal GID=" + IntegerToString(signal.groupId) + 
+                 " NewSL=" + DoubleToString(signal.stopLoss, 5) + 
+                 " from channel '" + signal.channelName + "'");
+    } else {
+      PrintLog(eaName + ": Invalid MODIFY signal format, expected at least 5 parts but got " + IntegerToString(partCount));
       return signal;
     }
-    signal.stopLoss = StrToDouble(slPart); // Will be normalized later when we know the symbol
+    
+  } else {
+    // BREAKEVEN/CLOSE signals - use original logic
+    int shift = 0;
+    
+    // Group ID
+    string gidPart = parts[2 + shift];
+    if(StringFind(gidPart, "GID:") != 0) {
+      PrintLog(eaName + ": Invalid group ID format '" + gidPart + "', skipping");
+      return signal;
+    }
+
+    signal.groupId = (int)StrToInteger(StringSubstr(gidPart, 4));
+    if(signal.groupId <= 0) {
+      PrintLog(eaName + ": Invalid group ID '" + IntegerToString(signal.groupId) + "', skipping");
+      return signal;
+    }
+
+    // Channel Name
+    string rawChannelName = parts[3 + shift];
+    if(StringLen(rawChannelName) == 0)
+      rawChannelName = "UNKNOWN";
+    signal.channelName = CleanChannelName(rawChannelName);
   }
-
-// 3) Group ID
-  string gidPart = parts[2 + shift];
-  if(StringFind(gidPart, "GID:") != 0) {
-    PrintLog(eaName + ": Invalid group ID format '" + gidPart + "', skipping");
-    return signal;
-  }
-
-  signal.groupId = (int)StrToInteger(StringSubstr(gidPart, 4));
-  if(signal.groupId <= 0) {
-    PrintLog(eaName + ": Invalid group ID '" + IntegerToString(signal.groupId) + "', skipping");
-    return signal;
-  }
-
-// 4) Channel Name
-  string rawChannelName = parts[3 + shift];
-  if(StringLen(rawChannelName) == 0)
-    rawChannelName = "UNKNOWN";
-  signal.channelName = CleanChannelName(rawChannelName);
-
-  if (shouldValidateTimestamp)
-    PrintLog(eaName + ": Parsed MODIFY signal GID=" + IntegerToString(signal.groupId) + " NewSL=" + DoubleToString(signal.stopLoss, 5) + " from channel '" + signal.channelName + "'");
 
   signal.isValid = true;
   return signal;
@@ -726,25 +786,52 @@ void ProcessModifySlSignal(Signal &signal)
 //+------------------------------------------------------------------+
 bool SetCurrentOrderStopLoss(Signal &signal)
 {
-// otherwise breakeven (when used via BREAKEVEN or CLOSE_HALF_BREAKEVEN)
   bool isModifySignal = signal.type == "MODIFY";
   string operation = isModifySignal ? "SL modification" : "SL breakeven";
   double newStopLoss = isModifySignal ? signal.stopLoss : OrderOpenPrice();
-// Update SL for matching order
+  
   double currentSL = OrderStopLoss();
+  double currentTP = OrderTakeProfit();
   int digits = MarketInfo(OrderSymbol(), MODE_DIGITS);
-  double breakeven = OrderOpenPrice();
   double normalizedNewSL = NormalizeDouble(newStopLoss, digits);
+  
+  // For new format MODIFY with TP levels, also update TP if provided
+  bool shouldUpdateTp = false;
+  double newTp = currentTP; // Keep current TP by default
+  
+  if (isModifySignal && signal.tpCount > 0) {
+    // Extract TP level from order comment (format: GID|CHANNEL|TP_LEVEL)
+    string commentParts[];
+    int commentPartCount = StringSplit(OrderComment(), '|', commentParts);
+    if (commentPartCount >= 3) {
+      int orderTpLevel = StrToInteger(commentParts[2]);
+      if (orderTpLevel > 0 && orderTpLevel <= signal.tpCount) {
+        newTp = signal.tpLevels[orderTpLevel - 1]; // Array is 0-based, TP levels are 1-based
+        newTp = NormalizeDouble(newTp, digits);
+        shouldUpdateTp = true;
+      }
+    }
+  }
 
-  if(MathAbs(currentSL - normalizedNewSL) > SL_MODIFY_THRESHOLD) {
+  bool slChanged = MathAbs(currentSL - normalizedNewSL) > SL_MODIFY_THRESHOLD;
+  bool tpChanged = shouldUpdateTp && MathAbs(currentTP - newTp) > SL_MODIFY_THRESHOLD;
+
+  if (slChanged || tpChanged) {
     double op = OrderOpenPrice();
-    double tp = OrderTakeProfit();
 
-    if(OrderModify(OrderTicket(), op, normalizedNewSL, tp, 0, clrGold)) {
-      PrintLog(eaName + ": ✅ " + operation + " success for ticket " + IntegerToString(OrderTicket()) +
-               " GID=" + IntegerToString(signal.groupId) +
-               " from " + DoubleToString(currentSL, digits) +
-               " to " + DoubleToString(normalizedNewSL, digits));
+    if (OrderModify(OrderTicket(), op, normalizedNewSL, newTp, 0, clrGold)) {
+      string logMsg = "✅ " + operation + " success for ticket " + IntegerToString(OrderTicket()) +
+                      " GID=" + IntegerToString(signal.groupId);
+      
+      if (slChanged) {
+        logMsg += " SL: " + DoubleToString(currentSL, digits) + " -> " + DoubleToString(normalizedNewSL, digits);
+      }
+      
+      if (tpChanged) {
+        logMsg += " TP: " + DoubleToString(currentTP, digits) + " -> " + DoubleToString(newTp, digits);
+      }
+      
+      PrintLog(eaName + ": " + logMsg);
       return true;
     } else {
       int error = GetLastError();
@@ -752,19 +839,17 @@ bool SetCurrentOrderStopLoss(Signal &signal)
                " GID=" + IntegerToString(signal.groupId) +
                " error=" + IntegerToString(error));
 
-      // Error 130 = invalid stops (too close to market price)
-      // In this case for breakevens, close the order instead as signal provider likely sees reversal coming
-      if(error == 130 && !isModifySignal) {
-        PrintLog(eaName + ": Error 130 detected - breakeven too close to market price, closing order instead");
+      if (error == 130 && !isModifySignal) {
+        PrintLog(eaName + ": Error 130 detected - breakeven too close, closing order instead");
         return CloseCurrentOrder(signal);
       } else {
         return false;
       }
     }
   } else {
-    PrintLog(eaName + ": SL change too small for ticket " + IntegerToString(OrderTicket()) +
-             " - current=" + DoubleToString(currentSL, digits) +
-             " new=" + DoubleToString(normalizedNewSL, digits));
+    PrintLog(eaName + ": No significant changes for ticket " + IntegerToString(OrderTicket()) +
+             " - SL=" + DoubleToString(normalizedNewSL, digits) +
+             " TP=" + DoubleToString(newTp, digits));
     return false;
   }
 }
@@ -1431,5 +1516,85 @@ double GetPositionSize(Signal &signal)
            " TPCount=" + IntegerToString(signal.tpCount));
 
   return positionSize;
+}
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| ProcessPriceRequest: Handle price requests from Python          |
+//+------------------------------------------------------------------+
+void ProcessPriceRequest()
+{
+  // Check if price request file exists
+  if (!FileExists(gPriceRequestFile)) {
+    return;
+  }
+
+  // Read the price request
+  int handle = FileOpen(gPriceRequestFile, FILE_READ|FILE_SHARE_READ|FILE_TXT|FILE_ANSI);
+  if (handle == INVALID_HANDLE) {
+    if (debugMode)
+      PrintLog(eaName + ": Failed to open price request file");
+    return;
+  }
+
+  string requestLine = FileReadString(handle);
+  FileClose(handle);
+  
+  // Delete the request file after reading
+  FileDelete(gPriceRequestFile);
+
+  if (StringLen(requestLine) == 0) {
+    if (debugMode)
+      PrintLog(eaName + ": Empty price request file");
+    return;
+  }
+
+  // Parse request: GET_PRICE|SYMBOL
+  string parts[];
+  int partCount = StringSplit(requestLine, '|', parts);
+  
+  if (partCount < 2) {
+    PrintLog(eaName + ": Invalid price request format: " + requestLine);
+    return;
+  }
+
+  string command = parts[0];
+  string requestedSymbol = parts[1];
+
+  if (command != "GET_PRICE") {
+    PrintLog(eaName + ": Unknown price request command: " + command);
+    return;
+  }
+
+  // Add symbol postfix if configured
+  string fullSymbol = requestedSymbol + symbolPostfix;
+  
+  // Check if symbol exists
+  if (MarketInfo(fullSymbol, MODE_TIME) == 0) {
+    PrintLog(eaName + ": Invalid symbol in price request: " + fullSymbol);
+    return;
+  }
+
+  // Get current market price (use Bid for general reference)
+  RefreshRates();
+  double currentPrice = MarketInfo(fullSymbol, MODE_BID);
+  int digits = MarketInfo(fullSymbol, MODE_DIGITS);
+  
+  // Format response: PRICE|SYMBOL|PRICE
+  string response = "PRICE|" + requestedSymbol + "|" + DoubleToString(currentPrice, digits);
+  
+  // Write response to price response file
+  int responseHandle = FileOpen(gPriceResponseFile, FILE_WRITE|FILE_TXT|FILE_ANSI);
+  if (responseHandle == INVALID_HANDLE) {
+    PrintLog(eaName + ": Failed to create price response file");
+    return;
+  }
+
+  FileWrite(responseHandle, response);
+  FileFlush(responseHandle);
+  FileClose(responseHandle);
+
+  if (debugMode)
+    PrintLog(eaName + ": Price request processed: " + requestLine + " -> " + response);
 }
 //+------------------------------------------------------------------+

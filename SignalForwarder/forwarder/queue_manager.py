@@ -53,10 +53,10 @@ def add_signal_to_queue(signal_data: dict) -> bool:
 
     Kötelező kulcsok a 'signal_data'-ban:
       - timestamp_utc: int (UTC timestamp in milliseconds)
-      - signal_type: str (BUY/SELL)
+      - signal_type: str (BUY/SELL/MODIFY)
       - symbol: str pl. "XAUUSD"
-      - entry: float
-      - take_profits: list (>=3 elem), pl. [3219,3217,3215]
+      - entry: float (0 for MODIFY signals)
+      - take_profits: list (>=1 elem), pl. [3219,3217,3215]
       - stop_loss: float
       - group_id: int  (Python generálja)
       - channel_name: str (tisztított csatorna név)
@@ -66,9 +66,17 @@ def add_signal_to_queue(signal_data: dict) -> bool:
       False, ha hiba történt vagy hiányos adatok
     """
     try:
-        # 1) Alap ellenőrzés
-        required_keys = ["timestamp_utc", "signal_type", "symbol", "entry", "take_profits",
-                         "stop_loss", "group_id", "channel_name"]
+        # 1) Alap ellenőrzés - MODIFY signaloknál entry nem kötelező
+        if signal_data.get("signal_type") == "MODIFY":
+            required_keys = ["timestamp_utc", "signal_type", "symbol", "take_profits",
+                             "stop_loss", "group_id", "channel_name"]
+            # Set entry to 0 for MODIFY signals if not present
+            if "entry" not in signal_data:
+                signal_data["entry"] = 0
+        else:
+            required_keys = ["timestamp_utc", "signal_type", "symbol", "entry", "take_profits",
+                             "stop_loss", "group_id", "channel_name"]
+        
         if not all(key in signal_data for key in required_keys):
             logger.error(f"❌ [QueueAdd] Hiányzó kulcsok. Van: {list(signal_data.keys())}, Kellene: {required_keys}")
             return False

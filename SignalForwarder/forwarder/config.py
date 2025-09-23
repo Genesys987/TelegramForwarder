@@ -68,3 +68,12 @@ LAST_GID_FILE = os.path.join(_basedir, "last_group_id.txt")
 
 # File to store Message ID <-> Group ID mapping (Python internal state) - Can be anywhere
 MESSAGE_GID_MAP_FILE = os.path.join(_basedir, "message_gid_map.json")
+
+# ----------------------
+# Warmup Signal Settings
+# ----------------------
+WARMUP_SIGNAL_ENABLED = config.get("WARMUP_SIGNAL_ENABLED", "false").lower() == "true"
+WARMUP_SIGNAL_TP1_DIFF = float(config.get("WARMUP_SIGNAL_TP1_DIFF", "4.83"))
+WARMUP_SIGNAL_TP2_DIFF = float(config.get("WARMUP_SIGNAL_TP2_DIFF", "8.48"))
+WARMUP_SIGNAL_SL_DIFF = float(config.get("WARMUP_SIGNAL_SL_DIFF", "6"))
+WARMUP_SIGNAL_CHANNEL = config.get("WARMUP_SIGNAL_CHANNEL", "FXTM")
