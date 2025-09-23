@@ -68,3 +68,10 @@ LAST_GID_FILE = os.path.join(_basedir, "last_group_id.txt")
 
 # File to store Message ID <-> Group ID mapping (Python internal state) - Can be anywhere
 MESSAGE_GID_MAP_FILE = os.path.join(_basedir, "message_gid_map.json")
+
+# ----------------------
+# Non-Reply SL Modification Settings
+# ----------------------
+# Channel name for non-reply SL modifications (configurable for testing)
+# Default: "FXTM" for production, can be set to "LocalDemo" for testing
+NON_REPLY_SL_CHANNEL_ID = config.get("NON_REPLY_SL_CHANNEL_ID", "FXTM")

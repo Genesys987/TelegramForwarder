@@ -2,9 +2,12 @@
 import re
 import logging
 import time
+import os
 from collections import OrderedDict
 from enum import Enum
+from typing import Optional
 from queue_manager import write_message_to_queue
+from signal_parser import clean_channel_name
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +130,13 @@ def process_stoploss_reply(reply_text, group_id, channel_name="UNKN"):
         logger.error(f"Hiba SL Process: Érvénytelen group_id: {group_id}")
         return None
 
+    new_sl_value_formatted = get_formatted_sl_value(reply_text)
+    if not new_sl_value_formatted:
+        return None
+
+    return process_signal(SignalType.MODIFY, group_id, channel_name, modified_value=new_sl_value_formatted)
+
+def get_formatted_sl_value(reply_text: str) -> Optional[str]:
     new_sl_value_str = extract_price_from_text(reply_text)
     if not new_sl_value_str:
         logger.error(f"Hiba SL Process: Új SL kinyerése sikertelen: '{reply_text}'")
@@ -136,9 +146,113 @@ def process_stoploss_reply(reply_text, group_id, channel_name="UNKN"):
         new_sl_float = float(new_sl_value_str)
         if new_sl_float <= 0:
             logger.warning(f"Warning SL Process: Extracted SL {new_sl_float} not positive.")
-        new_sl_value_formatted = new_sl_value_str
+        return new_sl_value_str
     except ValueError:
         logger.error(f"Hiba SL Process: Kinyert érték '{new_sl_value_str}' nem szám.")
         return None
 
-    return process_signal(SignalType.MODIFY, group_id, channel_name, modified_value=new_sl_value_formatted)
+def find_latest_group_id_for_channel(channel_name: str) -> Optional[int]:
+    """
+    Find the most recent group ID for a specific channel by searching archive files.
+    
+    Args:
+        channel_name: The cleaned channel name (4 characters)
+        
+    Returns:
+        The latest group_id for the channel, or None if not found
+    """
+    try:
+        import glob
+        
+        latest_group_id = None
+        latest_timestamp = 0
+        
+        # Search through archive files (processed signals)
+        logger.debug(f"Searching archive files for channel {channel_name}")
+        logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
+        if os.path.exists(logs_dir):
+            # Get all archive files, sorted by date (newest first)
+            archive_pattern = os.path.join(logs_dir, 'signals_archive_*.txt')
+            archive_files = sorted(glob.glob(archive_pattern), reverse=True)
+            
+            for archive_file in archive_files:
+                try:
+                    with open(archive_file, "r", encoding='utf-8') as f:
+                        lines = f.readlines()
+                    
+                    # Process lines in reverse order to find the most recent entry
+                    for line in reversed(lines):
+                        line = line.strip()
+                        if not line:
+                            continue
+                        
+                        # Parse signal line format: timestamp|signal_type|symbol|entry|tps|sl|GID:xxxx|channel_name
+                        parts = line.split('|')
+                        if len(parts) >= 8:
+                            try:
+                                timestamp = int(parts[0])
+                                line_channel = parts[-1].strip()  # Last part is channel name
+                                gid_part = parts[-2].strip()      # Second to last is GID:xxxx
+                                
+                                # Extract GID from "GID:xxxx" format
+                                if gid_part.startswith("GID:"):
+                                    group_id = int(gid_part[4:])
+                                    
+                                    # Check if this is for our target channel and is more recent
+                                    if line_channel == channel_name and timestamp > latest_timestamp:
+                                        latest_timestamp = timestamp
+                                        latest_group_id = group_id
+                                        logger.debug(f"Found in archive {archive_file}: GID={group_id}, timestamp={timestamp}")
+                                
+                            except (ValueError, IndexError):
+                                continue
+                                
+                except Exception as e:
+                    logger.warning(f"Error reading archive file {archive_file}: {e}")
+                    continue
+        
+        if latest_group_id:
+            logger.info(f"Found latest GID {latest_group_id} for channel {channel_name} (timestamp: {latest_timestamp})")
+        else:
+            logger.warning(f"No signals found for channel {channel_name} in archive files")
+            
+        return latest_group_id
+        
+    except Exception as e:
+        logger.error(f"Error finding latest group_id for channel {channel_name}: {e}")
+        return None
+
+def process_stoploss_non_reply(message_text: str, channel_name: str) -> bool | None:
+    """
+    Process SL modification from non-reply messages using natural language parsing.
+    
+    Args:
+        message_text: The message text containing SL modification
+        channel_name: The target channel name (will be cleaned to 4 chars)
+        
+    Returns:
+        True if SL modification was successfully processed, False otherwise
+    """
+    logger.info(f"Non-reply SL processing for channel: {channel_name}")
+    
+    try:
+        # Clean the channel name to 4-character format
+        clean_channel = clean_channel_name(channel_name)
+        
+        # Find the latest group ID for this channel
+        group_id = find_latest_group_id_for_channel(clean_channel)
+        if group_id is None:
+            logger.warning(f"No recent signals found for channel {clean_channel}, cannot modify SL")
+            return False
+
+        new_formatted_sl_value = get_formatted_sl_value(message_text)
+        if not new_formatted_sl_value:
+            return False
+        
+        # Process the SL modification
+        logger.info(f"Processing non-reply SL modification: GID={group_id}, Channel={clean_channel}, New SL={new_formatted_sl_value}")
+        return process_signal(SignalType.MODIFY, group_id, clean_channel, modified_value=new_formatted_sl_value)
+
+    except Exception as e:
+        logger.error(f"Error in non-reply SL processing: {e}")
+        return False
