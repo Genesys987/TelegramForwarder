@@ -4,13 +4,12 @@ from datetime import datetime, timezone
 from telethon import TelegramClient, events
 import traceback
 import os
-from signal_parser import clean_channel_name, parse_natural_language_sl_modification
 import logging
-from signal_parser import parse_signal
+from signal_parser import clean_channel_name, parse_signal
 from queue_manager import add_signal_to_queue
 from stoploss_update import process_stoploss_reply, SignalType, process_signal, process_stoploss_non_reply
 from config import (API_ID, API_HASH, INVITE_LINKS,
-           LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL, NON_REPLY_SL_CHANNEL)
+           LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL, NON_REPLY_SL_CHANNEL_ID)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +57,8 @@ SESSION_NAME = "userbot_session"
 client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 
 # --- Fő Feldolgozó Függvények ---
+sl_clause="(sl|stoploss|stop loss)"
+stoploss_regexp=fr"{sl_clause}?.*(level|change|move|moving|adjust|set|update).*{sl_clause}"
 
 async def process_new_standard_signal(message_text: str, message_id: int, message_date, channel_name: str = None):
     logger.info(f"   Standard szignál feldolgozása (ID: {message_id}) csatornából: {channel_name or 'UNKNOWN'}...")
@@ -165,7 +166,7 @@ async def run_userbot():
                 # --- Unified trading instruction pattern matching ---
                 signal_type = None
                 # MODIFY (SL adjust)
-                if re.search(r'(change|move|adjust|set).*(sl|stoploss|stop loss)', message_text, re.IGNORECASE):
+                if re.search(stoploss_regexp, message_text, re.IGNORECASE):
                     signal_type = SignalType.MODIFY
                 # CLOSE_HALF_BREAKEVEN
                 elif re.search(r'close.*(profit|half|all).*breakeven', message_text, re.IGNORECASE) or \
@@ -203,13 +204,12 @@ async def run_userbot():
         # === Non-reply SL modification check ===
         else:
             # Check for non-reply SL modification messages
-            sl_modification = parse_natural_language_sl_modification(message_text)
-            if sl_modification:
-                logger.info(f"Non-reply SL modification észlelve: {sl_modification}")
+            if re.search(stoploss_regexp, message_text, re.IGNORECASE):
+                logger.info(f"Non-reply SL modification észlelve: {message_text}")
                 try:
                     # Non-reply SL modification konfigurálható csatornán (teszteléshez)
                     # Konfigurációból vesszük a csatorna nevet (alapértelmezett: FXTM)
-                    channel_name = NON_REPLY_SL_CHANNEL
+                    channel_name = NON_REPLY_SL_CHANNEL_ID
                     success = process_stoploss_non_reply(message_text, channel_name)
                     if success:
                         logger.info(f"Non-reply SL modification sikeresen feldolgozva {channel_name} csatornából")

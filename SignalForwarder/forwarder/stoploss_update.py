@@ -7,7 +7,7 @@ from collections import OrderedDict
 from enum import Enum
 from typing import Optional
 from queue_manager import write_message_to_queue
-from signal_parser import parse_natural_language_sl_modification
+from signal_parser import clean_channel_name
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +130,13 @@ def process_stoploss_reply(reply_text, group_id, channel_name="UNKN"):
         logger.error(f"Hiba SL Process: Érvénytelen group_id: {group_id}")
         return None
 
+    new_sl_value_formatted = get_formatted_sl_value(reply_text)
+    if not new_sl_value_formatted:
+        return None
+
+    return process_signal(SignalType.MODIFY, group_id, channel_name, modified_value=new_sl_value_formatted)
+
+def get_formatted_sl_value(reply_text: str) -> Optional[str]:
     new_sl_value_str = extract_price_from_text(reply_text)
     if not new_sl_value_str:
         logger.error(f"Hiba SL Process: Új SL kinyerése sikertelen: '{reply_text}'")
@@ -139,12 +146,10 @@ def process_stoploss_reply(reply_text, group_id, channel_name="UNKN"):
         new_sl_float = float(new_sl_value_str)
         if new_sl_float <= 0:
             logger.warning(f"Warning SL Process: Extracted SL {new_sl_float} not positive.")
-        new_sl_value_formatted = new_sl_value_str
+        return new_sl_value_str
     except ValueError:
         logger.error(f"Hiba SL Process: Kinyert érték '{new_sl_value_str}' nem szám.")
         return None
-
-    return process_signal(SignalType.MODIFY, group_id, channel_name, modified_value=new_sl_value_formatted)
 
 def find_latest_group_id_for_channel(channel_name: str) -> Optional[int]:
     """
@@ -217,7 +222,7 @@ def find_latest_group_id_for_channel(channel_name: str) -> Optional[int]:
         logger.error(f"Error finding latest group_id for channel {channel_name}: {e}")
         return None
 
-def process_stoploss_non_reply(message_text: str, channel_name: str) -> bool:
+def process_stoploss_non_reply(message_text: str, channel_name: str) -> bool | None:
     """
     Process SL modification from non-reply messages using natural language parsing.
     
@@ -231,14 +236,7 @@ def process_stoploss_non_reply(message_text: str, channel_name: str) -> bool:
     logger.info(f"Non-reply SL processing for channel: {channel_name}")
     
     try:
-        # Parse the new SL value from natural language
-        new_sl_value = parse_natural_language_sl_modification(message_text)
-        if new_sl_value is None:
-            logger.warning(f"Could not extract SL value from message: {message_text}")
-            return False
-        
         # Clean the channel name to 4-character format
-        from signal_parser import clean_channel_name
         clean_channel = clean_channel_name(channel_name)
         
         # Find the latest group ID for this channel
@@ -246,11 +244,15 @@ def process_stoploss_non_reply(message_text: str, channel_name: str) -> bool:
         if group_id is None:
             logger.warning(f"No recent signals found for channel {clean_channel}, cannot modify SL")
             return False
+
+        new_formatted_sl_value = get_formatted_sl_value(message_text)
+        if not new_formatted_sl_value:
+            return False
         
         # Process the SL modification
-        logger.info(f"Processing non-reply SL modification: GID={group_id}, Channel={clean_channel}, New SL={new_sl_value}")
-        return process_signal(SignalType.MODIFY, group_id, clean_channel, modified_value=str(new_sl_value))
-        
+        logger.info(f"Processing non-reply SL modification: GID={group_id}, Channel={clean_channel}, New SL={new_formatted_sl_value}")
+        return process_signal(SignalType.MODIFY, group_id, clean_channel, modified_value=new_formatted_sl_value)
+
     except Exception as e:
         logger.error(f"Error in non-reply SL processing: {e}")
         return False
