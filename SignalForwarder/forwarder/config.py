@@ -77,3 +77,10 @@ WARMUP_SIGNAL_TP1_DIFF = float(config.get("WARMUP_SIGNAL_TP1_DIFF", "4.83"))
 WARMUP_SIGNAL_TP2_DIFF = float(config.get("WARMUP_SIGNAL_TP2_DIFF", "8.48"))
 WARMUP_SIGNAL_SL_DIFF = float(config.get("WARMUP_SIGNAL_SL_DIFF", "6"))
 WARMUP_SIGNAL_CHANNEL = config.get("WARMUP_SIGNAL_CHANNEL", "FXTM")
+
+# ----------------------
+# Non-Reply SL Modification Settings
+# ----------------------
+# Channel name for non-reply SL modifications (configurable for testing)
+# Default: "FXTM" for production, can be set to "LocalDemo" for testing
+NON_REPLY_SL_CHANNEL_ID = config.get("NON_REPLY_SL_CHANNEL_ID", "FXTM")
