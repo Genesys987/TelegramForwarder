@@ -510,15 +510,29 @@ void UpdateExistingOrdersSL(Signal &signal)
   }
 
   int targetOrderType = (signal.type == "BUY") ? OP_BUY : OP_SELL;
+  int totalOrders = OrdersTotal();
+  int checkedOrders = 0;
+  int matchingOrders = 0;
 
-  for(int i=0; i<OrdersTotal(); i++) {
+  PrintLog(eaName + ": UpdateExistingOrdersSL START - Looking for Symbol=" + symbol + 
+           " Type=" + IntegerToString(targetOrderType) + 
+           " Channel=" + signal.channelName + 
+           " NewSL=" + DoubleToString(signal.stopLoss, MarketInfo(symbol, MODE_DIGITS)) +
+           " TotalOrders=" + IntegerToString(totalOrders));
+
+  for(int i=0; i<totalOrders; i++) {
     if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
       PrintLog(eaName + ": Failed to select order at index " + IntegerToString(i) + " - error=" + IntegerToString(GetLastError()));
       continue;
     }
+    
+    checkedOrders++;
+    PrintLog(eaName + ": Order[" + IntegerToString(i) + "] = Ticket:" + IntegerToString(OrderTicket()) + 
+             " Symbol:" + OrderSymbol() + " Type:" + IntegerToString(OrderType()) + 
+             " Comment:" + OrderComment());
+    
     if(OrderSymbol() != symbol || OrderType() != targetOrderType) {
-      if(debugMode)
-        PrintLog(eaName + ": Ignoring order at index " + IntegerToString(i) + " - symbol/type mismatch");
+      PrintLog(eaName + ": Order[" + IntegerToString(i) + "] SKIP - symbol/type mismatch (Expected: " + symbol + "/" + IntegerToString(targetOrderType) + ")");
       continue;
     }
 
@@ -526,20 +540,31 @@ void UpdateExistingOrdersSL(Signal &signal)
     int orderGid;
     string orderChannelName;
     if(!ParseOrderComment(OrderComment(), orderGid /* unused */, orderChannelName)) {
-      PrintLog(eaName + ": Failed to parse order comment for ticket " + IntegerToString(OrderTicket()) + ": " + OrderComment());
+      PrintLog(eaName + ": Order[" + IntegerToString(i) + "] SKIP - failed to parse comment: " + OrderComment());
       continue;
     }
+
+    PrintLog(eaName + ": Order[" + IntegerToString(i) + "] Parsed - GID=" + IntegerToString(orderGid) + 
+             " Channel='" + orderChannelName + "' vs Signal Channel='" + signal.channelName + "'");
 
     // Only update SL if the order is from the same channel
     if(orderChannelName != signal.channelName) {
-      if(debugMode)
-        PrintLog(eaName + ": Ignoring order ticket " + IntegerToString(OrderTicket()) +
-                 " - different channel (order='" + orderChannelName + "', signal='" + signal.channelName + "')");
+      PrintLog(eaName + ": Order[" + IntegerToString(i) + "] SKIP - different channel (order='" + orderChannelName + "', signal='" + signal.channelName + "')");
       continue;
     }
 
+    matchingOrders++;
+    PrintLog(eaName + ": Order[" + IntegerToString(i) + "] MATCH - proceeding with SL update");
+
     double currSL = OrderStopLoss();
-    if(MathAbs(currSL - signal.stopLoss) > SL_MODIFY_THRESHOLD) {
+    double slDiff = MathAbs(currSL - signal.stopLoss);
+    
+    PrintLog(eaName + ": Order[" + IntegerToString(i) + "] SL Check - CurrentSL=" + DoubleToString(currSL, MarketInfo(symbol, MODE_DIGITS)) + 
+             " NewSL=" + DoubleToString(signal.stopLoss, MarketInfo(symbol, MODE_DIGITS)) + 
+             " Diff=" + DoubleToString(slDiff, 8) + 
+             " Threshold=" + DoubleToString(SL_MODIFY_THRESHOLD, 8));
+    
+    if(slDiff > SL_MODIFY_THRESHOLD) {
       double openP = OrderOpenPrice();
       double tp    = OrderTakeProfit();
       bool ok = OrderModify(OrderTicket(), openP, signal.stopLoss, tp, 0, clrBlue);
@@ -553,11 +578,15 @@ void UpdateExistingOrdersSL(Signal &signal)
     } else {
       PrintLog(eaName + ": SL change too small for ticket " + IntegerToString(OrderTicket()) +
                " - current=" + DoubleToString(currSL, MarketInfo(symbol, MODE_DIGITS)) +
-               " new=" + DoubleToString(signal.stopLoss, MarketInfo(symbol, MODE_DIGITS)));
+               " new=" + DoubleToString(signal.stopLoss, MarketInfo(symbol, MODE_DIGITS)) +
+               " diff=" + DoubleToString(slDiff, 8));
     }
   }
 
-  PrintLog(eaName + ": Completed SL update for existing orders from channel '" + signal.channelName + "'");
+  PrintLog(eaName + ": Completed SL update for existing orders from channel '" + signal.channelName + 
+           "' - Total orders: " + IntegerToString(totalOrders) + 
+           ", Checked: " + IntegerToString(checkedOrders) + 
+           ", Matching: " + IntegerToString(matchingOrders));
 }
 
 //+------------------------------------------------------------------+
