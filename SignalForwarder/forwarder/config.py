@@ -70,6 +70,12 @@ LAST_GID_FILE = os.path.join(_basedir, "last_group_id.txt")
 MESSAGE_GID_MAP_FILE = os.path.join(_basedir, "message_gid_map.json")
 
 # ----------------------
+# Warmup Signal Settings
+# ----------------------
+WARMUP_SIGNAL_ENABLED = config.get("WARMUP_SIGNAL_ENABLED", "false").lower() == "true"
+WARMUP_SIGNAL_CHANNEL = config.get("WARMUP_SIGNAL_CHANNEL", "FXTM")
+
+# ----------------------
 # Non-Reply SL Modification Settings
 # ----------------------
 # Channel name for non-reply SL modifications (configurable for testing)
