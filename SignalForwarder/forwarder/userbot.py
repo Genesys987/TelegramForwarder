@@ -35,86 +35,7 @@ def save_last_gid(): # Mentés növelés után
 def get_next_group_id(): # Következő GID lekérése és mentése
     global current_group_id; current_group_id += 1; save_last_gid(); return current_group_id
 
-async def get_current_market_price(symbol: str = "XAUUSD", timeout: int = 5) -> float:
-    """
-    Request current market price from EA.
-    Sends GET_PRICE request and waits for response.
-    """
-    try:
-        # Send price request to EA via price_request.txt
-        request_message = f"GET_PRICE|{symbol}"
-        
-        for signal_path in MT4_SIGNAL_FILE_PATHS:
-            # Use price_request.txt in the same directory as signals.txt
-            price_request_path = os.path.join(os.path.dirname(signal_path), "price_request.txt")
-            
-            # Check if price request file already exists (EA might be busy)
-            if os.path.exists(price_request_path):
-                continue  # EA is processing another request, try next path
-            
-            # Try to create the request file
-            try:
-                with open(price_request_path, "w", encoding='utf-8') as f:
-                    f.write(request_message)
-                logger.info(f"   GET_PRICE kérés küldve az EA-nak: {symbol}")
-                break
-            except Exception as e:
-                logger.error(f"   Hiba GET_PRICE kérés küldésekor: {e}")
-                continue
-        else:
-            logger.warning("   Minden EA foglalt - EA futása szükséges a price request-ekhez")
-            return None
-        
-        # Wait for response file (price_response.txt)
-        response_file = os.path.join(os.path.dirname(signal_path), "price_response.txt")
-        
-        for _ in range(timeout * 10):  # Check every 100ms
-            if os.path.exists(response_file):
-                try:
-                    with open(response_file, "r", encoding='utf-8') as f:
-                        response = f.read().strip()
-                    
-                    # Delete response file
-                    os.remove(response_file)
-                    
-                    # Parse response: "PRICE|XAUUSD|3746.50"
-                    parts = response.split("|")
-                    if len(parts) == 3 and parts[0] == "PRICE" and parts[1] == symbol:
-                        price = float(parts[2])
-                        logger.info(f"   Market price kapva EA-tól: {symbol} = {price}")
-                        
-                        # Clean up request file after successful response
-                        try:
-                            if os.path.exists(price_request_path):
-                                os.remove(price_request_path)
-                        except Exception:
-                            pass  # Ignore cleanup errors
-                        
-                        return price
-                    else:
-                        logger.error(f"   Hibás price response formátum: {response}")
-                        return None
-                        
-                except Exception as e:
-                    logger.error(f"   Hiba price response olvasásakor: {e}")
-                    return None
-            
-            await asyncio.sleep(0.1)  # Wait 100ms
-        
-        # Cleanup request file on timeout 
-        try:
-            if os.path.exists(price_request_path):
-                os.remove(price_request_path)
-                logger.warning(f"   Price request fájl törölve timeout miatt")
-        except Exception:
-            pass  # Ignore cleanup errors
-            
-        logger.warning(f"   Timeout: Nem érkezett price response {timeout}s alatt")
-        return None
-        
-    except Exception as e:
-        logger.error(f"   Hiba get_current_market_price-ban: {e}")
-        return None
+
 
 # --- Perzisztens Message ID <-> GID Összerendelés ---
 message_id_to_group_id = {}
@@ -189,7 +110,7 @@ async def process_new_standard_signal(message_text: str, message_id: int, messag
     if add_signal_to_queue(signal_data): logger.info(f"   Jelzés queue-hoz adva (GID {group_id})."); return group_id
     else: logger.error(f"   Hiba: Jelzés queue-hoz adása sikertelen (GID {group_id})."); return None
 
-async def process_warmup_signal(message_text: str, message_id: int, message_date, channel_name: str = None, market_price: float = None):
+async def process_warmup_signal(message_text: str, message_id: int, message_date, channel_name: str = None):
     """Process ready messages and generate warmup signals."""
     logger.info(f"   Warmup szignál feldolgozása (ID: {message_id}) csatornából: {channel_name or 'UNKNOWN'}...")
     
@@ -197,12 +118,10 @@ async def process_warmup_signal(message_text: str, message_id: int, message_date
     if not is_ready:
         return None
         
-    logger.info(f"   Ready üzenet felismerve: {signal_type} (instant execution)")
-    if market_price:
-        logger.info(f"   Market price használva: {market_price}")
+    logger.info(f"   Ready üzenet felismerve: {signal_type} (EA számítja ki TP/SL értékeket)")
     
     # Generate warmup signal
-    signal_data = generate_warmup_signal(signal_type, market_price)
+    signal_data = generate_warmup_signal(signal_type)
     if not signal_data:
         logger.error("   Warmup signal generálás sikertelen")
         return None
@@ -394,14 +313,10 @@ async def run_userbot():
                 if WARMUP_SIGNAL_ENABLED:
                     is_ready, signal_type, _ = is_ready_message(message_text)
                     if is_ready:
-                        # Get current market price from EA (EA must be running!)
-                        market_price = await get_current_market_price("XAUUSD")
-                        if market_price:
-                            group_id = await process_warmup_signal(message_text, message_id, message.date, chat_title, market_price)
-                            if group_id is not None:
-                                await forward_to_archive(message, chat_title, group_id)
-                        else:
-                            logger.error("   EA nem fut vagy nem elérhető - warmup signal kihagyva (EA futása szükséges!)")
+                        # Process warmup signal (EA will calculate TP/SL from zeros)
+                        group_id = await process_warmup_signal(message_text, message_id, message.date, chat_title)
+                        if group_id is not None:
+                            await forward_to_archive(message, chat_title, group_id)
                         return  # Don't process as standard signal
                 
                 # Try to parse as standard signal

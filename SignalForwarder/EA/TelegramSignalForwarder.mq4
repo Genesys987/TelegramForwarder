@@ -24,8 +24,7 @@ extern double marginBufferPercentage             = 70.0;   // Amount of free mar
 
 static string gTempFile       = "processing.txt";     // Temp file to avoid re-read
 static string gSignalFile               = "signals.txt";       // Incoming signal file
-static string gPriceRequestFile = "price_request.txt";         // Python -> EA price request file
-static string gPriceResponseFile = "price_response.txt";       // EA -> Python price response file
+
 static int slippage = 20;  // maximum allowed slippage during order creation/modification
 
 int trailingScanPeriodSeconds = 3;
@@ -68,7 +67,7 @@ string   storedTestSignal = "";
 //|--- Function Prototypes                                          |
 //+------------------------------------------------------------------+
 void    PrintLog(string message);
-void    ProcessPriceRequest();
+
 Signal ReadSignalFile();
 Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false);
 Signal ParseBuySellSignal(string &parts[], bool shouldValidateTimestamp);
@@ -127,8 +126,7 @@ void OnTimer()
   if (!IsTradeAllowed() || !IsConnected() || IsStopped()) {
     return;
   }
-// Process any pending price requests first
-  ProcessPriceRequest();
+
   
 // Process dynamic trailing stop for existing positions
   ProcessDynamicTrailingStop();
@@ -628,6 +626,15 @@ void SendOrders(Signal &signal)
 // Only send orders for trading signals (BUY/SELL)
   if(signal.type != "BUY" && signal.type != "SELL") {
     return;
+  }
+
+  // Check for warmup signal (entry=0, TP=0, SL=0)
+  bool isWarmupSignal = (signal.entry == 0.0 && signal.stopLoss == 0.0 && 
+                         signal.tpCount >= 2 && signal.tpLevels[0] == 0.0 && signal.tpLevels[1] == 0.0);
+  
+  if(isWarmupSignal) {
+    PrintLog(eaName + ": WARMUP SIGNAL detected - Calculating TP/SL levels for GID=" + IntegerToString(signal.groupId));
+    CalculateWarmupLevels(signal);
   }
 
   if(signal.entry == 0.0) {
@@ -1452,6 +1459,44 @@ int GetMagic(string channelName)
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
+//| CalculateWarmupLevels: Calculate TP/SL for warmup signals       |
+//+------------------------------------------------------------------+
+void CalculateWarmupLevels(Signal &signal)
+{
+  RefreshRates();
+  double currentAsk = MarketInfo(signal.symbol, MODE_ASK);
+  double currentBid = MarketInfo(signal.symbol, MODE_BID);
+  
+  // Use current market price as entry
+  signal.entry = (signal.type == "BUY") ? currentAsk : currentBid;
+  
+  // Define warmup TP/SL differences (same as Python used before)
+  double tp1Diff = 4.83;  // Average TP1 difference from historical signals
+  double tp2Diff = 8.48;  // Average TP2 difference from historical signals  
+  double slDiff = 6.0;    // Average SL difference from historical signals
+  
+  // Calculate TP and SL based on signal type
+  if(signal.type == "BUY") {
+    signal.tpLevels[0] = signal.entry + tp1Diff;
+    signal.tpLevels[1] = signal.entry + tp2Diff;
+    signal.stopLoss = signal.entry - slDiff;
+  } else { // SELL
+    signal.tpLevels[0] = signal.entry - tp1Diff;
+    signal.tpLevels[1] = signal.entry - tp2Diff;
+    signal.stopLoss = signal.entry + slDiff;
+  }
+  
+  // Set TP count for warmup signals
+  signal.tpCount = 2;
+  
+  int digits = MarketInfo(signal.symbol, MODE_DIGITS);
+  PrintLog(eaName + ": Warmup levels calculated - Entry: " + DoubleToString(signal.entry, digits) +
+           " TP1: " + DoubleToString(signal.tpLevels[0], digits) +
+           " TP2: " + DoubleToString(signal.tpLevels[1], digits) +
+           " SL: " + DoubleToString(signal.stopLoss, digits));
+}
+
+//+------------------------------------------------------------------+
 //| getPositionSize: Calculate position size based on risk management|
 //+------------------------------------------------------------------+
 double GetPositionSize(Signal &signal)
@@ -1519,82 +1564,5 @@ double GetPositionSize(Signal &signal)
 }
 //+------------------------------------------------------------------+
 
-//+------------------------------------------------------------------+
-//| ProcessPriceRequest: Handle price requests from Python          |
-//+------------------------------------------------------------------+
-void ProcessPriceRequest()
-{
-  // Check if price request file exists
-  if (!FileExists(gPriceRequestFile)) {
-    return;
-  }
 
-  // Read the price request
-  int handle = FileOpen(gPriceRequestFile, FILE_READ|FILE_SHARE_READ|FILE_TXT|FILE_ANSI);
-  if (handle == INVALID_HANDLE) {
-    if (debugMode)
-      PrintLog(eaName + ": Failed to open price request file");
-    return;
-  }
-
-  string requestLine = FileReadString(handle);
-  FileClose(handle);
-  
-  // Delete the request file after reading
-  FileDelete(gPriceRequestFile);
-
-  if (StringLen(requestLine) == 0) {
-    if (debugMode)
-      PrintLog(eaName + ": Empty price request file");
-    return;
-  }
-
-  // Parse request: GET_PRICE|SYMBOL
-  string parts[];
-  int partCount = StringSplit(requestLine, '|', parts);
-  
-  if (partCount < 2) {
-    PrintLog(eaName + ": Invalid price request format: " + requestLine);
-    return;
-  }
-
-  string command = parts[0];
-  string requestedSymbol = parts[1];
-
-  if (command != "GET_PRICE") {
-    PrintLog(eaName + ": Unknown price request command: " + command);
-    return;
-  }
-
-  // Add symbol postfix if configured
-  string fullSymbol = requestedSymbol + symbolPostfix;
-  
-  // Check if symbol exists
-  if (MarketInfo(fullSymbol, MODE_TIME) == 0) {
-    PrintLog(eaName + ": Invalid symbol in price request: " + fullSymbol);
-    return;
-  }
-
-  // Get current market price (use Bid for general reference)
-  RefreshRates();
-  double currentPrice = MarketInfo(fullSymbol, MODE_BID);
-  int digits = MarketInfo(fullSymbol, MODE_DIGITS);
-  
-  // Format response: PRICE|SYMBOL|PRICE
-  string response = "PRICE|" + requestedSymbol + "|" + DoubleToString(currentPrice, digits);
-  
-  // Write response to price response file
-  int responseHandle = FileOpen(gPriceResponseFile, FILE_WRITE|FILE_TXT|FILE_ANSI);
-  if (responseHandle == INVALID_HANDLE) {
-    PrintLog(eaName + ": Failed to create price response file");
-    return;
-  }
-
-  FileWrite(responseHandle, response);
-  FileFlush(responseHandle);
-  FileClose(responseHandle);
-
-  if (debugMode)
-    PrintLog(eaName + ": Price request processed: " + requestLine + " -> " + response);
-}
 //+------------------------------------------------------------------+

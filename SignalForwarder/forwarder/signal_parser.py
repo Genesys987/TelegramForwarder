@@ -10,9 +10,6 @@ symbol_mappings = {
 # Load warmup signal settings from .env
 config = dotenv_values(".env")
 WARMUP_SIGNAL_ENABLED = config.get("WARMUP_SIGNAL_ENABLED", "false").lower() == "true"
-WARMUP_SIGNAL_TP1_DIFF = float(config.get("WARMUP_SIGNAL_TP1_DIFF", "4.83"))
-WARMUP_SIGNAL_TP2_DIFF = float(config.get("WARMUP_SIGNAL_TP2_DIFF", "8.48"))
-WARMUP_SIGNAL_SL_DIFF = float(config.get("WARMUP_SIGNAL_SL_DIFF", "4.83"))
 WARMUP_SIGNAL_CHANNEL = config.get("WARMUP_SIGNAL_CHANNEL", "FXTM")
 
 # Ready message patterns for warmup signals
@@ -752,42 +749,26 @@ def is_ready_message(text: str):
         
     return False, None, None
 
-def generate_warmup_signal(signal_type: str, current_market_price: float):
+def generate_warmup_signal(signal_type: str):
     """
-    Generate a warmup signal with average TP/SL differences.
+    Generate a warmup signal with zero values - EA calculates actual TP/SL.
     
     Args:
         signal_type: "BUY" or "SELL"
-        current_market_price: Current market price from EA (required)
         
     Returns:
-        dict: Generated warmup signal data or None if price not available
+        dict: Generated warmup signal data with zeros for EA calculation
     """
     if not WARMUP_SIGNAL_ENABLED:
         return None
         
-    if not current_market_price:
-        return None  # Cannot generate without real market price
-        
-    entry_price = current_market_price
-    
-    # Calculate TP and SL levels based on signal type and average differences
-    if signal_type == "BUY":
-        tp1 = entry_price + WARMUP_SIGNAL_TP1_DIFF
-        tp2 = entry_price + WARMUP_SIGNAL_TP2_DIFF  
-        sl = entry_price - WARMUP_SIGNAL_SL_DIFF
-    else:  # SELL
-        tp1 = entry_price - WARMUP_SIGNAL_TP1_DIFF
-        tp2 = entry_price - WARMUP_SIGNAL_TP2_DIFF
-        sl = entry_price + WARMUP_SIGNAL_SL_DIFF
-    
-    # Generate signal data structure
+    # Generate signal data structure with zeros - let EA calculate actual values
     signal_data = {
         "signal_type": signal_type,
         "symbol": "XAUUSD",  # Default to XAUUSD for GOLD signals
-        "entry": 0,  # Immediate entry like NOW signals
-        "take_profits": [tp1, tp2],
-        "stop_loss": sl,
+        "entry": 0,  # EA will use current market price
+        "take_profits": [0, 0],  # EA will calculate based on its logic
+        "stop_loss": 0,  # EA will calculate based on its logic
         "channel_name": WARMUP_SIGNAL_CHANNEL,  # Use configured channel name
         "is_warmup": True  # Flag to identify warmup signals
     }
