@@ -62,8 +62,70 @@ def clean_channel_name(channel_name: str) -> str:
     
     return result[:4]
 
+def parse_entry_price_with_range(entry_text, signal_type):
+    """
+    Parse entry price from text, handling range formats like '3334/3337', '3339-3344', '@3339-3344'
+    
+    Args:
+        entry_text: The entry price text to parse
+        signal_type: 'BUY' or 'SELL' to determine which price to use from ranges
+    
+    Returns:
+        tuple: (entry_price, has_range, range_info) where:
+        - entry_price: Parsed entry price as float or 0 if range detected (immediate entry)
+        - has_range: Boolean indicating if this was a range
+        - range_info: Dict with 'min' and 'max' prices if range detected, None otherwise
+    """
+    # Clean up the entry text - remove @ symbol and extra spaces
+    entry_text = entry_text.strip().lstrip('@').strip()
+    
+    # Handle different range separators (including space-separated like "3340.5 -3338")
+    if '/' in entry_text:
+        split = entry_text.split('/')
+    elif '-' in entry_text:
+        # Handle both "3339-3344" and "3340.5 -3338" formats
+        if ' -' in entry_text:
+            split = entry_text.split(' -')
+        else:
+            split = entry_text.split('-')
+    else:
+        # Single price - no range detected
+        try:
+            return float(entry_text), False, None
+        except ValueError:
+            return entry_text, False, None
+    
+    try:
+        # Convert to floats for proper comparison
+        prices = [float(p.strip()) for p in split if p.strip()]
+        
+        if not prices:
+            return entry_text, False, None
+            
+        if len(prices) < 2:
+            # Only one valid price found, treat as single entry
+            return prices[0], False, None
+            
+        # Range detected - store min/max for later use
+        min_price = min(prices)
+        max_price = max(prices)
+        range_info = {'min': min_price, 'max': max_price}
+        
+        # For range signals: BUY uses range bottom (min) for better entry, SELL uses range top (max)
+        if signal_type == "SELL":
+            entry_price = max_price  # SELL at range top (better price for seller)
+        else:
+            entry_price = min_price  # BUY at range bottom (better price for buyer)
+            
+        return entry_price, True, range_info
+        
+    except ValueError:
+        print(f"Warning: Invalid range format: {entry_text}")
+        return entry_text, False, None
+
 def parse_entry_price(entry_text, signal_type):
     """
+    Legacy function for backward compatibility
     Parse entry price from text, handling range formats like '3334/3337', '3339-3344', '@3339-3344'
     
     Args:
@@ -141,7 +203,10 @@ def parse_single_line_signal(text):
         signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
         signal["signal_type"] = pipe_match.group(2).upper()
         if not is_immediate:  # Only set entry if not immediate
-            signal["entry"] = parse_entry_price(pipe_match.group(3), signal["signal_type"])
+            entry_price, has_range, range_info = parse_entry_price_with_range(pipe_match.group(3), signal["signal_type"])
+            signal["entry"] = entry_price
+            if has_range:
+                signal["entry_range"] = range_info
     
     # Pattern 2: Enhanced regex patterns for NOW signals and regular signals
     if not signal.get("signal_type"):
@@ -194,43 +259,60 @@ def parse_single_line_signal(text):
                         signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
                         # Extract range from parentheses and use as entry price
                         range_text = match.group(3).strip()
-                        signal["entry"] = parse_entry_price(range_text, signal["signal_type"])
-                        signal["_range_info"] = range_text
+                        entry_price, has_range, range_info = parse_entry_price_with_range(range_text, signal["signal_type"])
+                        signal["entry"] = entry_price
+                        if has_range:
+                            signal["entry_range"] = range_info
                 elif 'FROM' in pattern:
                     # FROM format: SYMBOL BUY/SELL FROM price
                     raw_symbol = match.group(1).upper()
                     signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
                     signal["signal_type"] = match.group(2).upper()
                     if not is_immediate:
-                        signal["entry"] = parse_entry_price(match.group(3), signal["signal_type"])
+                        entry_price, has_range, range_info = parse_entry_price_with_range(match.group(3), signal["signal_type"])
+                        signal["entry"] = entry_price
+                        if has_range:
+                            signal["entry_range"] = range_info
                 elif '@' in pattern:
                     # @ format: SYMBOL BUY/SELL @price-range
                     raw_symbol = match.group(1).upper()
                     signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
                     signal["signal_type"] = match.group(2).upper()
                     if not is_immediate:
-                        signal["entry"] = parse_entry_price(match.group(3), signal["signal_type"])
+                        entry_price, has_range, range_info = parse_entry_price_with_range(match.group(3), signal["signal_type"])
+                        signal["entry"] = entry_price
+                        if has_range:
+                            signal["entry_range"] = range_info
                 elif pattern == r'([\w\.\/\-]+)\s+(BUY|SELL)\s+([\d\-@]+)':
                     # SYMBOL BUY/SELL price-range format: Gold Sell 3341-3346
                     raw_symbol = match.group(1).upper()
                     signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
                     signal["signal_type"] = match.group(2).upper()
                     if not is_immediate:
-                        signal["entry"] = parse_entry_price(match.group(3), signal["signal_type"])
+                        entry_price, has_range, range_info = parse_entry_price_with_range(match.group(3), signal["signal_type"])
+                        signal["entry"] = entry_price
+                        if has_range:
+                            signal["entry_range"] = range_info
                 elif pattern == r'([\w\.\/\-]+)\s+(BUY|SELL)\s+([\d\/\.]+)':
                     # SYMBOL BUY/SELL price format: XAUUSD BUY 3417
                     raw_symbol = match.group(1).upper()
                     signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
                     signal["signal_type"] = match.group(2).upper()
                     if not is_immediate:
-                        signal["entry"] = parse_entry_price(match.group(3), signal["signal_type"])
+                        entry_price, has_range, range_info = parse_entry_price_with_range(match.group(3), signal["signal_type"])
+                        signal["entry"] = entry_price
+                        if has_range:
+                            signal["entry_range"] = range_info
                 else:
                     # Regular format: BUY/SELL SYMBOL price
                     signal["signal_type"] = match.group(1).upper()
                     raw_symbol = match.group(2).upper()
                     signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
                     if len(match.groups()) >= 3 and not is_immediate:
-                        signal["entry"] = parse_entry_price(match.group(3), signal["signal_type"])
+                        entry_price, has_range, range_info = parse_entry_price_with_range(match.group(3), signal["signal_type"])
+                        signal["entry"] = entry_price
+                        if has_range:
+                            signal["entry_range"] = range_info
                 break
     
     # Extract all TP values using multiple patterns (enhanced for emojis)
@@ -354,7 +436,10 @@ def parse_signal(text: str):
                 signal["signal_type"] = match_symbol_type_from.group(2).upper()
                 # Also capture the entry price from the FROM clause
                 entry_text = match_symbol_type_from.group(3)
-                signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                entry_price, has_range, range_info = parse_entry_price_with_range(entry_text, signal["signal_type"])
+                signal["entry"] = entry_price
+                if has_range:
+                    signal["entry_range"] = range_info
                 continue
             
             # Format 1.5: "Sell Gold @3339-3344" or similar @ formats
@@ -364,7 +449,10 @@ def parse_signal(text: str):
                 raw_symbol = match_symbol_at.group(2).upper()
                 signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
                 entry_text = match_symbol_at.group(3)
-                signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                entry_price, has_range, range_info = parse_entry_price_with_range(entry_text, signal["signal_type"])
+                signal["entry"] = entry_price
+                if has_range:
+                    signal["entry_range"] = range_info
                 continue
             
             # Format 2: "BUY BTCUSD" or "SELL GOLD" or "BUY CHFJPY 180.430" or "GOLD SELL 3334/3337"
@@ -377,7 +465,10 @@ def parse_signal(text: str):
                 # Capture the entry price if present (including range formats)
                 entry_text = match_type_symbol.group(3).strip()
                 if entry_text:
-                    signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                    entry_price, has_range, range_info = parse_entry_price_with_range(entry_text, signal["signal_type"])
+                    signal["entry"] = entry_price
+                    if has_range:
+                        signal["entry_range"] = range_info
                 continue
             
             # Format 3: "SYMBOL SIGNAL_TYPE" or "SYMBOL SIGNAL_TYPE entry_range" (e.g., "GOLD SELL 3334/3337", "Gold Sell 3341-3346")
@@ -390,7 +481,10 @@ def parse_signal(text: str):
                 # Capture the entry price if present (including range formats)
                 entry_text = match_symbol_type_alt.group(3).strip()
                 if entry_text:
-                    signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                    entry_price, has_range, range_info = parse_entry_price_with_range(entry_text, signal["signal_type"])
+                    signal["entry"] = entry_price
+                    if has_range:
+                        signal["entry_range"] = range_info
                 continue
                 
             # Format 3.5: "SYMBOL SIGNAL_TYPE : entry_range" (e.g., "Gold buy : 3340.5 -3338")
@@ -402,7 +496,10 @@ def parse_signal(text: str):
                 # Capture the entry price with colon format
                 entry_text = match_symbol_type_colon.group(3).strip()
                 if entry_text:
-                    signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                    entry_price, has_range, range_info = parse_entry_price_with_range(entry_text, signal["signal_type"])
+                    signal["entry"] = entry_price
+                    if has_range:
+                        signal["entry_range"] = range_info
                 continue
             
             # Format 4: "EURUSD BUY" or "XAUUSD BUY" or "XAUUSD BUY 3417" or "XAUUSD / GOLD SELL" (symbol first, then type, optional price)
@@ -429,7 +526,10 @@ def parse_signal(text: str):
                 # Check if there's an entry price in the same line
                 entry_text = match_symbol_type_simple.group(3)
                 if entry_text:
-                    signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                    entry_price, has_range, range_info = parse_entry_price_with_range(entry_text, signal["signal_type"])
+                    signal["entry"] = entry_price
+                    if has_range:
+                        signal["entry_range"] = range_info
                 continue
             
             # Format 5: "BTCUSD | BUY 109500" (symbol | type price)
@@ -439,7 +539,10 @@ def parse_signal(text: str):
                 signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
                 signal["signal_type"] = match_pipe_format.group(2).upper()
                 entry_text = match_pipe_format.group(3)
-                signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                entry_price, has_range, range_info = parse_entry_price_with_range(entry_text, signal["signal_type"])
+                signal["entry"] = entry_price
+                if has_range:
+                    signal["entry_range"] = range_info
                 continue
             
             # Format 6: "I'M SELLING XAUUSD NOW (3337 - 3340)" - handle NOW with range in parentheses
@@ -451,8 +554,10 @@ def parse_signal(text: str):
                 signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
                 # Extract and parse the range from parentheses as entry price
                 range_text = match_im_now.group(3).strip()
-                signal["entry"] = parse_entry_price(range_text, signal["signal_type"])
-                signal["_range_info"] = range_text  # Keep for reference
+                entry_price, has_range, range_info = parse_entry_price_with_range(range_text, signal["signal_type"])
+                signal["entry"] = entry_price
+                if has_range:
+                    signal["entry_range"] = range_info
                 continue
 
         # Entry Price parsing
@@ -461,7 +566,10 @@ def parse_signal(text: str):
             m = re.search(r'ENTRY\s*:?\s*(?:at\s+)?([\d\/\.\-@]+)', line, re.IGNORECASE)
             if m:
                 entry_text = m.group(1)
-                signal["entry"] = parse_entry_price(entry_text, signal.get("signal_type", "BUY"))
+                entry_price, has_range, range_info = parse_entry_price_with_range(entry_text, signal.get("signal_type", "BUY"))
+                signal["entry"] = entry_price
+                if has_range:
+                    signal["entry_range"] = range_info
                 continue
             
             # NEW: Check for standalone entry price line (just numbers with optional slash)
@@ -471,12 +579,14 @@ def parse_signal(text: str):
             if entry_match and signal.get("signal_type") and signal.get("symbol"):
                 # Make sure this looks like an entry price and not TPs
                 entry_text = entry_match.group(1)
-                potential_entry = parse_entry_price(entry_text, signal.get("signal_type", "BUY"))
+                entry_price, has_range, range_info = parse_entry_price_with_range(entry_text, signal.get("signal_type", "BUY"))
                 
                 # Simple heuristic: if it's a range (contains /), treat as entry
                 # or if it's a single reasonable value for the symbol
-                if '/' in entry_text or (isinstance(potential_entry, (int, float)) and potential_entry > 0):
-                    signal["entry"] = potential_entry
+                if '/' in entry_text or (isinstance(entry_price, (int, float)) and entry_price >= 0):
+                    signal["entry"] = entry_price
+                    if has_range:
+                        signal["entry_range"] = range_info
                     continue
 
         # Take Profits parsing - consolidated and improved

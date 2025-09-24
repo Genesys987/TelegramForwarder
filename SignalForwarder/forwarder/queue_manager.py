@@ -97,9 +97,29 @@ def add_signal_to_queue(signal_data: dict) -> bool:
         tp_str = ",".join(str(tp) for tp in tps)
         raw_channel_name = signal_data.get("channel_name", "UNKNOWN")
         channel_name = clean_channel_name(raw_channel_name)  # Clean to 4-letter format
-        message = (f"{timestamp}|{signal_data['signal_type']}|{signal_data['symbol']}|{signal_data['entry']}|"
-                   f"{tp_str}|{signal_data['stop_loss']}|"
-                   f"GID:{signal_data['group_id']}|{channel_name}\n")
+        
+        # Check if there's entry range information and/or warmup flag
+        entry_range = signal_data.get("entry_range")
+        is_warmup = signal_data.get("is_warmup", False)
+        
+        # Build extra info parts
+        extra_parts = []
+        if entry_range:
+            range_str = f"{entry_range['min']}:{entry_range['max']}"
+            extra_parts.append(f"RANGE:{range_str}")
+        if is_warmup:
+            extra_parts.append("WARMUP:1")
+        
+        # Build message with optional extra parts
+        if extra_parts:
+            extra_str = "|".join(extra_parts)
+            message = (f"{timestamp}|{signal_data['signal_type']}|{signal_data['symbol']}|{signal_data['entry']}|"
+                       f"{tp_str}|{signal_data['stop_loss']}|"
+                       f"GID:{signal_data['group_id']}|{channel_name}|{extra_str}\n")
+        else:
+            message = (f"{timestamp}|{signal_data['signal_type']}|{signal_data['symbol']}|{signal_data['entry']}|"
+                       f"{tp_str}|{signal_data['stop_loss']}|"
+                       f"GID:{signal_data['group_id']}|{channel_name}\n")
 
         logger.info(f"🔄 [QueueAdd] Signal formázva csatorna névvel '{channel_name}' (eredeti: '{raw_channel_name}'): GID:{signal_data['group_id']}")
 

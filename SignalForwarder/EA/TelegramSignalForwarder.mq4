@@ -41,6 +41,10 @@ struct Signal {
   int                groupId;
   string             channelName;
   bool               isValid;
+  bool               hasRange;
+  double             rangeMin;
+  double             rangeMax;
+  bool               isWarmup;
 
                      Signal()
   {
@@ -54,6 +58,10 @@ struct Signal {
     groupId      = 0;
     channelName  = "";
     isValid      = false;
+    hasRange     = false;
+    rangeMin     = 0.0;
+    rangeMax     = 0.0;
+    isWarmup     = false;
   }
 };
 
@@ -63,6 +71,19 @@ struct Signal {
 string   eaName               = "TelegramSignalForwarder";
 int      signalFileHandle = -1;                  // File handle for reading signals in test mode
 string   storedTestSignal = "";
+
+// Limit order management
+struct LimitOrderInfo {
+  int      ticket;
+  int      groupId;
+  string   channelName;
+  datetime expirationTime;
+  string   symbol;
+  bool     isActive;
+};
+
+LimitOrderInfo activeLimitOrders[100];  // Support up to 100 concurrent limit orders
+int activeLimitOrderCount = 0;
 
 //+------------------------------------------------------------------+
 //|--- Function Prototypes                                          |
@@ -83,6 +104,17 @@ double  CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, strin
 bool    ParseOrderComment(string comment, int &groupId, string &channelName);
 bool CloseCurrentOrder(Signal &signal);
 bool SetCurrentOrderStopLoss(Signal &signal);
+
+// Range and limit order functions
+void    ProcessRangeSignal(Signal &signal);
+void    CreateLimitOrders(Signal &signal, double limitPrice);
+void    ProcessLimitOrderExpiration();
+void    AddLimitOrder(int ticket, int groupId, string channelName, string symbol);
+void    RemoveLimitOrder(int ticket);
+void    CloseAllLimitOrders(int groupId, string channelName);
+void    CloseAllOrdersForChannel(string channelName, string symbol);
+bool    IsCurrentPriceInRange(Signal &signal);
+bool    CheckWarmupRangeLogic(Signal &signal);
 
 // Utility functions
 bool    IsSignalTooOld(long signalTimestampMs);
@@ -129,6 +161,9 @@ void OnTimer()
   }
 // Process any pending price requests first
   ProcessPriceRequest();
+  
+// Process limit order expiration
+  ProcessLimitOrderExpiration();
   
 // Process dynamic trailing stop for existing positions
   ProcessDynamicTrailingStop();
@@ -439,6 +474,33 @@ Signal ParseBuySellSignal(string &parts[], bool shouldValidateTimestamp)
     signal.channelName = "LEGC";
   }
 
+// 8) Extra Information (optional) - check for RANGE: and WARMUP: parts
+  for(int extraIdx = 8; extraIdx < ArraySize(parts); extraIdx++) {
+    string extraPart = parts[extraIdx];
+    
+    if(StringFind(extraPart, "RANGE:") == 0) {
+      string rangeValues = StringSubstr(extraPart, 6); // Remove "RANGE:" prefix
+      string rangeParts[];
+      int rangePartCount = StringSplit(rangeValues, ':', rangeParts);
+      if(rangePartCount == 2) {
+        signal.hasRange = true;
+        signal.rangeMin = NormalizeDouble(StrToDouble(rangeParts[0]), MarketInfo(signal.symbol, MODE_DIGITS));
+        signal.rangeMax = NormalizeDouble(StrToDouble(rangeParts[1]), MarketInfo(signal.symbol, MODE_DIGITS));
+        if (shouldValidateTimestamp)
+          PrintLog(eaName + ": Range detected: " + DoubleToString(signal.rangeMin, MarketInfo(signal.symbol, MODE_DIGITS)) + 
+                   " - " + DoubleToString(signal.rangeMax, MarketInfo(signal.symbol, MODE_DIGITS)));
+      }
+    }
+    else if(StringFind(extraPart, "WARMUP:") == 0) {
+      string warmupValue = StringSubstr(extraPart, 7); // Remove "WARMUP:" prefix
+      if(warmupValue == "1") {
+        signal.isWarmup = true;
+        if (shouldValidateTimestamp)
+          PrintLog(eaName + ": Warmup signal detected");
+      }
+    }
+  }
+
   if (shouldValidateTimestamp)
     PrintLog(eaName + ": Parsed trading signal GID=" + IntegerToString(signal.groupId) + " from channel '" + signal.channelName + "'");
 
@@ -627,6 +689,12 @@ void SendOrders(Signal &signal)
 {
 // Only send orders for trading signals (BUY/SELL)
   if(signal.type != "BUY" && signal.type != "SELL") {
+    return;
+  }
+
+  // Handle range signals
+  if(signal.hasRange) {
+    ProcessRangeSignal(signal);
     return;
   }
 
@@ -891,6 +959,9 @@ void ProcessCloseSignal(Signal &signal)
     }
   }
 
+  // Also close any active limit orders for this GID
+  CloseAllLimitOrders(signal.groupId, signal.channelName);
+
   if(closedCount == 0) {
     PrintLog(eaName + ": ⚠️ No orders found with GID=" + IntegerToString(signal.groupId) + " to close");
   } else {
@@ -1022,6 +1093,9 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
 
   }
 
+  // Also close any active limit orders for this GID
+  CloseAllLimitOrders(signal.groupId, signal.channelName);
+  
   PrintLog(eaName + ": ✅ Close+Breakeven completed - Closed: " + IntegerToString(closedCount) +
            ", Breakeven: " + IntegerToString(breakevenCount) + " for GID=" + IntegerToString(signal.groupId));
 }
@@ -1503,12 +1577,21 @@ double GetPositionSize(Signal &signal)
 
 // Divide across TP levels
   positionSize = positionSize / signal.tpCount;
-  positionSize = MathFloor(positionSize / lotStep) * lotStep;
+  
+  // Round to nearest valid lot step (not floor, to avoid zero lots)
+  positionSize = MathRound(positionSize / lotStep) * lotStep;
 
 // Ensure lot size is within allowed range
   positionSize = MathMax(minLot, MathMin(maxLot, positionSize));
+  
+  // Final check: if still less than minimum after rounding, use minimum
+  if(positionSize < minLot) {
+    positionSize = minLot;
+  }
 
   PrintLog(eaName + ": Position sizing: " + symbol +
+           " MinLot=" + DoubleToString(minLot, 2) +
+           " LotStep=" + DoubleToString(lotStep, 2) +
            " RiskAmount=" + DoubleToString(riskAmount, 2) +
            " RiskPerLot=" + DoubleToString(riskValuePerLot, 4) +
            " TotalLots=" + DoubleToString(totalLots, 2) +
@@ -1596,5 +1679,557 @@ void ProcessPriceRequest()
 
   if (debugMode)
     PrintLog(eaName + ": Price request processed: " + requestLine + " -> " + response);
+}
+
+//+------------------------------------------------------------------+
+//| ProcessRangeSignal: Handle signals with entry ranges            |
+//+------------------------------------------------------------------+
+void ProcessRangeSignal(Signal &signal)
+{
+  RefreshRates();
+  double currentPrice = (signal.type == "BUY") ? MarketInfo(signal.symbol, MODE_ASK) : MarketInfo(signal.symbol, MODE_BID);
+  int digits = MarketInfo(signal.symbol, MODE_DIGITS);
+  
+  PrintLog(eaName + ": Processing range signal GID=" + IntegerToString(signal.groupId) + 
+           " Range: " + DoubleToString(signal.rangeMin, digits) + " - " + DoubleToString(signal.rangeMax, digits) +
+           " Entry price: " + DoubleToString(signal.entry, digits) +
+           " Current price: " + DoubleToString(currentPrice, digits));
+  
+  // Special handling for warmup signals with ranges
+  if(signal.isWarmup && CheckWarmupRangeLogic(signal)) {
+    return; // Warmup logic handled the signal
+  }
+  
+  // Check if current price is within range
+  if(IsCurrentPriceInRange(signal)) {
+    PrintLog(eaName + ": Current price is within range - executing market orders immediately");
+    // Set entry to current market price and execute normally
+    signal.entry = currentPrice;
+    signal.hasRange = false; // Temporarily disable range to avoid recursion
+    SendOrders(signal);
+    return;
+  }
+  
+  // Check if current price is very close to range (within 5 points)
+  double point = MarketInfo(signal.symbol, MODE_POINT);
+  double distanceToRange = 0;
+  if(signal.type == "BUY") {
+    distanceToRange = signal.rangeMin - currentPrice; // Distance below range
+  } else {
+    distanceToRange = currentPrice - signal.rangeMax; // Distance above range  
+  }
+  
+  if(distanceToRange > 0 && distanceToRange <= point * 5) {
+    PrintLog(eaName + ": Current price very close to range (" + 
+             DoubleToString(distanceToRange, MarketInfo(signal.symbol, MODE_DIGITS)) + 
+             " points) - executing market orders immediately");
+    signal.entry = currentPrice;
+    signal.hasRange = false; // Temporarily disable range to avoid recursion
+    SendOrders(signal);
+    return;
+  }
+  
+  // Price is outside range - use the entry price from signal (range edge)
+  // signal.entry is already set to range bottom (SELL) or range top (BUY)
+  double limitPrice = signal.entry;
+  
+  PrintLog(eaName + ": Current price outside range - creating limit orders at " + 
+           DoubleToString(limitPrice, digits));
+  
+  // Create limit orders
+  CreateLimitOrders(signal, limitPrice);
+}
+
+//+------------------------------------------------------------------+
+//| CreateLimitOrders: Create limit orders with 10-minute expiration|
+//+------------------------------------------------------------------+
+void CreateLimitOrders(Signal &signal, double limitPrice)
+{
+  int digits = MarketInfo(signal.symbol, MODE_DIGITS);
+  double point = MarketInfo(signal.symbol, MODE_POINT);
+  int stopLevel = MarketInfo(signal.symbol, MODE_STOPLEVEL);
+  
+  bool shouldBuy = signal.type == "BUY";
+  RefreshRates();
+  double currentPrice = shouldBuy ? MarketInfo(signal.symbol, MODE_ASK) : MarketInfo(signal.symbol, MODE_BID);
+  
+  // Determine correct order type based on current price vs limit price
+  int orderType;
+  if(shouldBuy) {
+    // BUY: if limit price > current price, use BUYSTOP; if limit price < current price, use BUYLIMIT
+    orderType = (limitPrice > currentPrice) ? OP_BUYSTOP : OP_BUYLIMIT;
+  } else {
+    // SELL: if limit price < current price, use SELLSTOP; if limit price > current price, use SELLLIMIT  
+    orderType = (limitPrice < currentPrice) ? OP_SELLSTOP : OP_SELLLIMIT;
+  }
+  
+  // Normalize limit price
+  limitPrice = NormalizeDouble(limitPrice, digits);
+  
+  // Apply minimum distance for pending orders
+  double minDist = MathMax(stopLevel * point, point * 5); // Ensure at least 5 points minimum
+  
+  PrintLog(eaName + ": Order parameters - StopLevel=" + IntegerToString(stopLevel) + 
+           " Point=" + DoubleToString(point, digits) + 
+           " MinDist=" + DoubleToString(minDist, digits));
+  
+  // Ensure limit price respects minimum distance from current price
+  if(orderType == OP_BUYSTOP && limitPrice - currentPrice < minDist) {
+    limitPrice = currentPrice + minDist;
+    limitPrice = NormalizeDouble(limitPrice, digits);
+    PrintLog(eaName + ": Adjusted BUYSTOP price to " + DoubleToString(limitPrice, digits));
+  } else if(orderType == OP_SELLSTOP && currentPrice - limitPrice < minDist) {
+    limitPrice = currentPrice - minDist;
+    limitPrice = NormalizeDouble(limitPrice, digits);
+    PrintLog(eaName + ": Adjusted SELLSTOP price to " + DoubleToString(limitPrice, digits));
+  } else if(orderType == OP_BUYLIMIT && currentPrice - limitPrice < minDist) {
+    limitPrice = currentPrice - minDist;
+    limitPrice = NormalizeDouble(limitPrice, digits);
+    PrintLog(eaName + ": Adjusted BUYLIMIT price to " + DoubleToString(limitPrice, digits));
+  } else if(orderType == OP_SELLLIMIT && limitPrice - currentPrice < minDist) {
+    limitPrice = currentPrice + minDist;
+    limitPrice = NormalizeDouble(limitPrice, digits);
+    PrintLog(eaName + ": Adjusted SELLLIMIT price to " + DoubleToString(limitPrice, digits));
+  }
+  
+  // Prepare SL with enhanced minimum distance check
+  double rawSL = NormalizeDouble(signal.stopLoss, digits);
+  double originalSL = rawSL;
+  
+  if(shouldBuy && limitPrice - rawSL < minDist) {
+    rawSL = limitPrice - minDist;
+    PrintLog(eaName + ": Adjusted BUY SL from " + DoubleToString(originalSL, digits) + 
+             " to " + DoubleToString(rawSL, digits));
+  }
+  if(!shouldBuy && rawSL - limitPrice < minDist) {
+    rawSL = limitPrice + minDist;
+    PrintLog(eaName + ": Adjusted SELL SL from " + DoubleToString(originalSL, digits) + 
+             " to " + DoubleToString(rawSL, digits));
+  }
+  rawSL = NormalizeDouble(rawSL, digits);
+  
+  // Normalize all TP levels with enhanced distance check
+  for(int j=0; j<signal.tpCount; j++) {
+    double originalTP = signal.tpLevels[j];
+    signal.tpLevels[j] = NormalizeDouble(signal.tpLevels[j], digits);
+    double dist = MathAbs(signal.tpLevels[j] - limitPrice);
+    if(dist < minDist) {
+      signal.tpLevels[j] = shouldBuy ? limitPrice + minDist : limitPrice - minDist;
+      PrintLog(eaName + ": Adjusted TP[" + IntegerToString(j) + "] from " + 
+               DoubleToString(originalTP, digits) + " to " + 
+               DoubleToString(signal.tpLevels[j], digits));
+    }
+    signal.tpLevels[j] = NormalizeDouble(signal.tpLevels[j], digits);
+  }
+  
+  string orderTypeName = "";
+  switch(orderType) {
+    case OP_BUYLIMIT: orderTypeName = "BUYLIMIT"; break;
+    case OP_BUYSTOP: orderTypeName = "BUYSTOP"; break;
+    case OP_SELLLIMIT: orderTypeName = "SELLLIMIT"; break;
+    case OP_SELLSTOP: orderTypeName = "SELLSTOP"; break;
+  }
+  
+  PrintLog(eaName + ": Creating " + orderTypeName + " orders for GID=" + IntegerToString(signal.groupId) +
+           " Current Price=" + DoubleToString(currentPrice, digits) +
+           " Limit Price=" + DoubleToString(limitPrice, digits) +
+           " SL=" + DoubleToString(rawSL, digits) +
+           " TP Count=" + IntegerToString(signal.tpCount));
+  
+  color cols[6] = { clrBlue, clrGreen, clrRed, clrYellow, clrMagenta, clrCyan };
+  double lotSize = GetPositionSize(signal);
+  
+  // Additional safety check - ensure we have enough margin for this lot size
+  int marginCheckType = shouldBuy ? OP_BUY : OP_SELL;
+  double availableMargin = AccountFreeMarginCheck(signal.symbol, marginCheckType, lotSize);
+  if(availableMargin < 0) {
+    // Reduce lot size until we have sufficient margin
+    double minLot = MarketInfo(signal.symbol, MODE_MINLOT);
+    double lotStep = MarketInfo(signal.symbol, MODE_LOTSTEP);
+    while(lotSize >= minLot && availableMargin < 0) {
+      lotSize -= lotStep;
+      lotSize = NormalizeDouble(lotSize, 2);
+      availableMargin = AccountFreeMarginCheck(signal.symbol, marginCheckType, lotSize);
+    }
+    if(lotSize < minLot) {
+      PrintLog(eaName + ": Cannot create orders - insufficient margin even for minimum lot size");
+      return;
+    }
+    PrintLog(eaName + ": Reduced lot size to " + DoubleToString(lotSize, 2) + " due to margin constraints");
+  }
+  
+  // Set expiration time (try without expiration first to avoid broker restrictions)
+  datetime expirationTime = 0; // No expiration - let's see if this works
+  
+  // Create limit orders for each TP level
+  for(int k=0; k < signal.tpCount; k++) {
+    string comment = FormatMT4Comment(signal.groupId, signal.channelName, k + 1);
+    int magicNumber = GetMagic(signal.channelName);
+    
+    PrintLog(eaName + ": Limit Order[" + IntegerToString(k) + "] parameters: " +
+             "Symbol=" + signal.symbol +
+             " Type=" + IntegerToString(orderType) +
+             " Lots=" + DoubleToString(lotSize, 2) +
+             " Price=" + DoubleToString(limitPrice, digits) +
+             " SL=" + DoubleToString(rawSL, digits) +
+             " TP=" + DoubleToString(signal.tpLevels[k], digits) +
+             " Expiration=" + TimeToString(expirationTime) +
+             " Comment=" + comment +
+             " Magic=" + magicNumber);
+    
+    // Pre-flight validation - use market order type for margin check since pending orders aren't supported by AccountFreeMarginCheck
+    double marginRequired = AccountFreeMarginCheck(signal.symbol, marginCheckType, lotSize);
+    if(marginRequired < 0 || GetLastError() != 0) {
+      PrintLog(eaName + ": Insufficient margin for order[" + IntegerToString(k) + 
+               "] - required margin check failed. Available: " + DoubleToString(AccountFreeMargin(), 2));
+      continue;
+    }
+    
+    // Validate lot size
+    double minLot = MarketInfo(signal.symbol, MODE_MINLOT);
+    double maxLot = MarketInfo(signal.symbol, MODE_MAXLOT);
+    if(lotSize < minLot || lotSize > maxLot) {
+      PrintLog(eaName + ": Invalid lot size " + DoubleToString(lotSize, 2) + 
+               " for order[" + IntegerToString(k) + "] (min=" + DoubleToString(minLot, 2) + 
+               " max=" + DoubleToString(maxLot, 2) + ")");
+      continue;
+    }
+    
+    // Final distance validation
+    PrintLog(eaName + ": Final validation - Price=" + DoubleToString(limitPrice, digits) + 
+             " SL=" + DoubleToString(rawSL, digits) + 
+             " TP=" + DoubleToString(signal.tpLevels[k], digits) + 
+             " SL_Dist=" + DoubleToString(MathAbs(limitPrice - rawSL), digits) + 
+             " TP_Dist=" + DoubleToString(MathAbs(signal.tpLevels[k] - limitPrice), digits) + 
+             " MinDist=" + DoubleToString(minDist, digits));
+    
+    int colorIndex = k % 6;
+    ResetLastError(); // Clear any previous errors
+    int ticket = OrderSend(signal.symbol, orderType, lotSize, limitPrice, slippage,
+                           rawSL, signal.tpLevels[k], comment, magicNumber, expirationTime, cols[colorIndex]);
+    
+    if(ticket > 0) {
+      PrintLog(eaName + ": Limit Order[" + IntegerToString(k) + "] created successfully. Ticket=" + IntegerToString(ticket));
+      AddLimitOrder(ticket, signal.groupId, signal.channelName, signal.symbol);
+    } else {
+      int errorCode = GetLastError();
+      PrintLog(eaName + ": Error creating limit order[" + IntegerToString(k) + "] error=" + IntegerToString(errorCode) + 
+               " (" + ErrorDescription(errorCode) + ")");
+    }
+  }
+}
+
+//+------------------------------------------------------------------+
+//| ProcessLimitOrderExpiration: Check and close expired limit orders|
+//+------------------------------------------------------------------+
+void ProcessLimitOrderExpiration()
+{
+  datetime currentTime = TimeCurrent();
+  
+  for(int i = activeLimitOrderCount - 1; i >= 0; i--) {
+    if(!activeLimitOrders[i].isActive) continue;
+    
+    // Check if order still exists
+    if(!OrderSelect(activeLimitOrders[i].ticket, SELECT_BY_TICKET)) {
+      // Order doesn't exist anymore (filled or cancelled)
+      RemoveLimitOrder(activeLimitOrders[i].ticket);
+      continue;
+    }
+    
+    // Check expiration
+    if(currentTime >= activeLimitOrders[i].expirationTime) {
+      PrintLog(eaName + ": Limit order " + IntegerToString(activeLimitOrders[i].ticket) + 
+               " expired - closing");
+      
+      if(OrderDelete(activeLimitOrders[i].ticket)) {
+        PrintLog(eaName + ": Expired limit order " + IntegerToString(activeLimitOrders[i].ticket) + " closed successfully");
+      } else {
+        PrintLog(eaName + ": Failed to close expired limit order " + IntegerToString(activeLimitOrders[i].ticket) + 
+                 " error=" + IntegerToString(GetLastError()));
+      }
+      
+      RemoveLimitOrder(activeLimitOrders[i].ticket);
+    }
+  }
+}
+
+//+------------------------------------------------------------------+
+//| AddLimitOrder: Add limit order to tracking array                |
+//+------------------------------------------------------------------+
+void AddLimitOrder(int ticket, int groupId, string channelName, string symbol)
+{
+  if(activeLimitOrderCount >= 100) {
+    PrintLog(eaName + ": Warning: Maximum limit orders reached, cannot add more");
+    return;
+  }
+  
+  activeLimitOrders[activeLimitOrderCount].ticket = ticket;
+  activeLimitOrders[activeLimitOrderCount].groupId = groupId;
+  activeLimitOrders[activeLimitOrderCount].channelName = channelName;
+  activeLimitOrders[activeLimitOrderCount].expirationTime = TimeCurrent() + 600; // 10 minutes
+  activeLimitOrders[activeLimitOrderCount].symbol = symbol;
+  activeLimitOrders[activeLimitOrderCount].isActive = true;
+  
+  activeLimitOrderCount++;
+  
+  if(debugMode)
+    PrintLog(eaName + ": Added limit order tracking: ticket=" + IntegerToString(ticket) + 
+             " GID=" + IntegerToString(groupId) + " Channel=" + channelName);
+}
+
+//+------------------------------------------------------------------+
+//| RemoveLimitOrder: Remove limit order from tracking array        |
+//+------------------------------------------------------------------+
+void RemoveLimitOrder(int ticket)
+{
+  for(int i = 0; i < activeLimitOrderCount; i++) {
+    if(activeLimitOrders[i].ticket == ticket && activeLimitOrders[i].isActive) {
+      activeLimitOrders[i].isActive = false;
+      
+      // Shift remaining orders down
+      for(int j = i; j < activeLimitOrderCount - 1; j++) {
+        activeLimitOrders[j] = activeLimitOrders[j + 1];
+      }
+      activeLimitOrderCount--;
+      
+      if(debugMode)
+        PrintLog(eaName + ": Removed limit order tracking: ticket=" + IntegerToString(ticket));
+      break;
+    }
+  }
+}
+
+//+------------------------------------------------------------------+
+//| CloseAllLimitOrders: Close all limit orders for specific GID/Channel |
+//+------------------------------------------------------------------+
+void CloseAllLimitOrders(int groupId, string channelName)
+{
+  int closedCount = 0;
+  
+  for(int i = activeLimitOrderCount - 1; i >= 0; i--) {
+    if(!activeLimitOrders[i].isActive) continue;
+    
+    if(activeLimitOrders[i].groupId == groupId && activeLimitOrders[i].channelName == channelName) {
+      if(OrderSelect(activeLimitOrders[i].ticket, SELECT_BY_TICKET)) {
+        if(OrderDelete(activeLimitOrders[i].ticket)) {
+          PrintLog(eaName + ": Closed limit order " + IntegerToString(activeLimitOrders[i].ticket) + 
+                   " for GID=" + IntegerToString(groupId));
+          closedCount++;
+        } else {
+          PrintLog(eaName + ": Failed to close limit order " + IntegerToString(activeLimitOrders[i].ticket) + 
+                   " error=" + IntegerToString(GetLastError()));
+        }
+      }
+      
+      RemoveLimitOrder(activeLimitOrders[i].ticket);
+    }
+  }
+  
+  if(closedCount > 0) {
+    PrintLog(eaName + ": Closed " + IntegerToString(closedCount) + " limit orders for GID=" + 
+             IntegerToString(groupId) + " Channel=" + channelName);
+  }
+}
+
+//+------------------------------------------------------------------+
+//| IsCurrentPriceInRange: Check if current market price is within range |
+//+------------------------------------------------------------------+
+bool IsCurrentPriceInRange(Signal &signal)
+{
+  if(!signal.hasRange) return true;
+  
+  RefreshRates();
+  double currentPrice = (signal.type == "BUY") ? MarketInfo(signal.symbol, MODE_ASK) : MarketInfo(signal.symbol, MODE_BID);
+  
+  return (currentPrice >= signal.rangeMin && currentPrice <= signal.rangeMax);
+}
+
+//+------------------------------------------------------------------+
+//| CheckWarmupRangeLogic: Special logic for warmup signals with ranges |
+//+------------------------------------------------------------------+
+bool CheckWarmupRangeLogic(Signal &signal)
+{
+  if(!signal.isWarmup || !signal.hasRange) {
+    return false; // Not a warmup signal with range
+  }
+  
+  // Check if there are existing warmup orders for this channel
+  bool hasExistingWarmup = false;
+  double existingWarmupEntry = 0.0;
+  int digits = MarketInfo(signal.symbol, MODE_DIGITS);
+  
+  for(int i = 0; i < OrdersTotal(); i++) {
+    if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+      int orderGid;
+      string orderChannel;
+      if(ParseOrderComment(OrderComment(), orderGid, orderChannel)) {
+        if(orderChannel == signal.channelName && OrderSymbol() == signal.symbol) {
+          // Found existing order from same channel and symbol
+          hasExistingWarmup = true;
+          existingWarmupEntry = OrderOpenPrice();
+          
+          PrintLog(eaName + ": Found existing warmup order from channel '" + signal.channelName + 
+                   "' with entry: " + DoubleToString(existingWarmupEntry, digits));
+          break;
+        }
+      }
+    }
+  }
+  
+  if(!hasExistingWarmup) {
+    PrintLog(eaName + ": No existing warmup orders found - using standard range logic");
+    return false; // No existing warmup, use standard range logic
+  }
+  
+  // Check if existing warmup entry is within new signal's range
+  bool warmupInRange = (existingWarmupEntry >= signal.rangeMin && existingWarmupEntry <= signal.rangeMax);
+  
+  PrintLog(eaName + ": Warmup range check - Existing entry: " + DoubleToString(existingWarmupEntry, digits) +
+           " Range: " + DoubleToString(signal.rangeMin, digits) + " - " + DoubleToString(signal.rangeMax, digits) +
+           " In range: " + (warmupInRange ? "YES" : "NO"));
+  
+  if(warmupInRange) {
+    // Warmup entry is within range - just modify existing orders
+    PrintLog(eaName + ": Warmup entry is within range - modifying existing orders only");
+    UpdateExistingOrdersSL(signal);
+    return true; // Handled by modification only
+  }
+  
+  // Warmup entry is outside range - check if it's worse than range
+  RefreshRates();
+  double currentPrice = (signal.type == "BUY") ? MarketInfo(signal.symbol, MODE_ASK) : MarketInfo(signal.symbol, MODE_BID);
+  bool shouldCreateLimit = false;
+  
+  if(signal.type == "BUY") {
+    // For BUY: warmup entry is worse if it's higher than range max
+    // Example: BUY (1111-1115), warmup entered at 1116 -> worse, create limit at 1111
+    if(existingWarmupEntry > signal.rangeMax) {
+      shouldCreateLimit = true;
+      PrintLog(eaName + ": BUY warmup entry " + DoubleToString(existingWarmupEntry, digits) + 
+               " is worse than range max " + DoubleToString(signal.rangeMax, digits) + " - closing and creating limit");
+    } else {
+      PrintLog(eaName + ": BUY warmup entry " + DoubleToString(existingWarmupEntry, digits) + 
+               " is better than or equal to range - modifying only");
+    }
+  } else {
+    // For SELL: warmup entry is worse if it's lower than range min  
+    // Example: SELL (1111-1115), warmup entered at 1110 -> worse, create limit at 1115
+    if(existingWarmupEntry < signal.rangeMin) {
+      shouldCreateLimit = true;
+      PrintLog(eaName + ": SELL warmup entry " + DoubleToString(existingWarmupEntry, digits) + 
+               " is worse than range min " + DoubleToString(signal.rangeMin, digits) + " - closing and creating limit");
+    } else {
+      PrintLog(eaName + ": SELL warmup entry " + DoubleToString(existingWarmupEntry, digits) + 
+               " is better than or equal to range - modifying only");
+    }
+  }
+  
+  if(shouldCreateLimit) {
+    // Close existing warmup orders and create limit orders at range edge
+    CloseAllOrdersForChannel(signal.channelName, signal.symbol);
+    
+    // Use entry price (already set correctly by Python: range bottom for SELL, range top for BUY)
+    double limitPrice = signal.entry;
+    PrintLog(eaName + ": Creating limit orders at range edge: " + DoubleToString(limitPrice, digits));
+    CreateLimitOrders(signal, limitPrice);
+  } else {
+    // Just modify existing orders
+    UpdateExistingOrdersSL(signal);
+  }
+  
+  return true; // Warmup logic handled the signal
+}
+
+//+------------------------------------------------------------------+
+//| CloseAllOrdersForChannel: Close all orders for specific channel/symbol |
+//+------------------------------------------------------------------+
+void CloseAllOrdersForChannel(string channelName, string symbol)
+{
+  int closedCount = 0;
+  int total = OrdersTotal();
+  
+  // Close orders in reverse order to avoid index issues
+  for(int i = total - 1; i >= 0; i--) {
+    if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+      continue;
+    }
+    
+    // Check if order matches channel and symbol
+    int orderGid;
+    string orderChannel;
+    if(!ParseOrderComment(OrderComment(), orderGid, orderChannel)) {
+      continue;
+    }
+    
+    if(orderChannel == channelName && OrderSymbol() == symbol) {
+      int orderType = OrderType();
+      bool success = false;
+      
+      if(orderType == OP_BUY || orderType == OP_SELL) {
+        // Market order - close it
+        double closePrice = (orderType == OP_BUY) ? MarketInfo(symbol, MODE_BID) : MarketInfo(symbol, MODE_ASK);
+        success = OrderClose(OrderTicket(), OrderLots(), closePrice, slippage, clrRed);
+      } else {
+        // Pending order - delete it
+        success = OrderDelete(OrderTicket());
+      }
+      
+      if(success) {
+        PrintLog(eaName + ": Closed order " + IntegerToString(OrderTicket()) + 
+                 " from channel '" + channelName + "' symbol " + symbol);
+        closedCount++;
+      } else {
+        PrintLog(eaName + ": Failed to close order " + IntegerToString(OrderTicket()) + 
+                 " error=" + IntegerToString(GetLastError()));
+      }
+    }
+  }
+  
+  if(closedCount > 0) {
+    PrintLog(eaName + ": Closed " + IntegerToString(closedCount) + " orders for channel '" + 
+             channelName + "' symbol " + symbol);
+  }
+}
+
+//+------------------------------------------------------------------+
+//| ErrorDescription: Convert error code to human readable string   |
+//+------------------------------------------------------------------+
+string ErrorDescription(int errorCode)
+{
+  switch(errorCode) {
+    case 0: return "No error";
+    case 1: return "No error returned but result unknown";
+    case 2: return "Common error";
+    case 3: return "Invalid trade parameters";
+    case 4: return "Trade server is busy";
+    case 5: return "Old version of client terminal";
+    case 6: return "No connection with trade server";
+    case 7: return "Not enough rights";
+    case 8: return "Too frequent requests";
+    case 9: return "Malfunctioned trade operation";
+    case 64: return "Account disabled";
+    case 65: return "Invalid account";
+    case 128: return "Trade timeout";
+    case 129: return "Invalid price";
+    case 130: return "Invalid stops";
+    case 131: return "Invalid trade volume";
+    case 132: return "Market is closed";
+    case 133: return "Trade is disabled";
+    case 134: return "Not enough money";
+    case 135: return "Price changed";
+    case 136: return "Off quotes";
+    case 137: return "Broker is busy";
+    case 138: return "Requote";
+    case 139: return "Order is locked";
+    case 140: return "Long positions only allowed";
+    case 141: return "Too many requests";
+    case 145: return "Modification denied because order is too close to market";
+    case 146: return "Trade context is busy";
+    case 147: return "Expirations are denied by broker";
+    case 148: return "Amount of open and pending orders has reached the limit";
+    case 149: return "Hedging is prohibited";
+    case 150: return "Prohibited by FIFO rules";
+    default: return "Unknown error " + IntegerToString(errorCode);
+  }
 }
 //+------------------------------------------------------------------+
