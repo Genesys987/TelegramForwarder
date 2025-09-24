@@ -698,6 +698,15 @@ void SendOrders(Signal &signal)
     return;
   }
 
+  // Check for warmup signal (entry=0, TP=0, SL=0)
+  bool isWarmupSignal = (signal.entry == 0.0 && signal.stopLoss == 0.0 && 
+                         signal.tpCount >= 2 && signal.tpLevels[0] == 0.0 && signal.tpLevels[1] == 0.0);
+  
+  if(isWarmupSignal) {
+    PrintLog(eaName + ": WARMUP SIGNAL detected - Calculating TP/SL levels for GID=" + IntegerToString(signal.groupId));
+    CalculateWarmupLevels(signal);
+  }
+
   if(signal.entry == 0.0) {
     // using market entry
     RefreshRates();
@@ -1524,6 +1533,44 @@ int GetMagic(string channelName)
   return magic;
 }
 //+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| CalculateWarmupLevels: Calculate TP/SL for warmup signals       |
+//+------------------------------------------------------------------+
+void CalculateWarmupLevels(Signal &signal)
+{
+  RefreshRates();
+  double currentAsk = MarketInfo(signal.symbol, MODE_ASK);
+  double currentBid = MarketInfo(signal.symbol, MODE_BID);
+  
+  // Use current market price as entry
+  signal.entry = (signal.type == "BUY") ? currentAsk : currentBid;
+  
+  // Define warmup TP/SL differences (same as Python used before)
+  double tp1Diff = 4.83;  // Average TP1 difference from historical signals
+  double tp2Diff = 8.48;  // Average TP2 difference from historical signals  
+  double slDiff = 6.0;    // Average SL difference from historical signals
+  
+  // Calculate TP and SL based on signal type
+  if(signal.type == "BUY") {
+    signal.tpLevels[0] = signal.entry + tp1Diff;
+    signal.tpLevels[1] = signal.entry + tp2Diff;
+    signal.stopLoss = signal.entry - slDiff;
+  } else { // SELL
+    signal.tpLevels[0] = signal.entry - tp1Diff;
+    signal.tpLevels[1] = signal.entry - tp2Diff;
+    signal.stopLoss = signal.entry + slDiff;
+  }
+  
+  // Set TP count for warmup signals
+  signal.tpCount = 2;
+  
+  int digits = MarketInfo(signal.symbol, MODE_DIGITS);
+  PrintLog(eaName + ": Warmup levels calculated - Entry: " + DoubleToString(signal.entry, digits) +
+           " TP1: " + DoubleToString(signal.tpLevels[0], digits) +
+           " TP2: " + DoubleToString(signal.tpLevels[1], digits) +
+           " SL: " + DoubleToString(signal.stopLoss, digits));
+}
 
 //+------------------------------------------------------------------+
 //| getPositionSize: Calculate position size based on risk management|
