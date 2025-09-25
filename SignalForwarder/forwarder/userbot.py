@@ -183,11 +183,16 @@ async def process_fxtm_signal_modify(signal_data: dict):
     logger.info(f"   FXTM signal modify: GID {current_warmup_gid} frissítése új TP/SL értékekkel")
     
     # Create modify signal with new TP/SL values but keep original GID
+    # Ensure take_profits has at least one element for queue validation
+    tps = signal_data.get("take_profits", [])
+    if not tps or len(tps) == 0:
+        tps = [0, 0]  # Default TP values for MODIFY (EA will handle)
+    
     modify_data = {
         "signal_type": "MODIFY",
         "group_id": current_warmup_gid,  # Use original warmup GID
         "symbol": signal_data.get("symbol", "XAUUSD"),
-        "take_profits": signal_data.get("take_profits", []),
+        "take_profits": tps,
         "stop_loss": signal_data.get("stop_loss"),
         "channel_name": WARMUP_SIGNAL_CHANNEL,  # Use configured channel for EA recognition
         "timestamp_utc": signal_data.get("timestamp_utc"),

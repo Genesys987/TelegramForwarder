@@ -16,6 +16,7 @@ extern double fallbackLotSize             = 0.02;  // Default lot size for FX or
 extern double accountRiskPercentage = 1.0; // Risk percentage per trade
 extern double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0.0 = entry, 1.0 = keep original SL
 extern double marginBufferPercentage             = 70.0;   // Amount of free margin to use maximum
+extern int    warmupTimeoutMinutes     = 1;     // Warmup signal timeout in minutes (close if no MODIFY)
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -56,12 +57,31 @@ struct Signal {
   }
 };
 
+struct WarmupOrder {
+  int                groupId;
+  string             channelName;
+  datetime           createdTime;
+  bool               isActive;
+  
+                     WarmupOrder()
+  {
+    groupId      = 0;
+    channelName  = "";
+    createdTime  = 0;
+    isActive     = false;
+  }
+};
+
 //+------------------------------------------------------------------+
 //|--- Global State Variables                                       |
 //+------------------------------------------------------------------+
 string   eaName               = "TelegramSignalForwarder";
 int      signalFileHandle = -1;                  // File handle for reading signals in test mode
 string   storedTestSignal = "";
+
+// Warmup order tracking
+WarmupOrder warmupOrders[100];  // Max 100 concurrent warmup orders
+int         warmupOrderCount = 0;
 
 //+------------------------------------------------------------------+
 //|--- Function Prototypes                                          |
@@ -82,6 +102,13 @@ double  CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, strin
 bool    ParseOrderComment(string comment, int &groupId, string &channelName);
 bool CloseCurrentOrder(Signal &signal);
 bool SetCurrentOrderStopLoss(Signal &signal);
+
+// Warmup order management
+void    AddWarmupOrder(int groupId, string channelName);
+void    RemoveWarmupOrder(int groupId, string channelName);
+void    ProcessWarmupTimeouts();
+void    CloseWarmupOrders(int groupId, string channelName);
+int     GetActiveWarmupCount();
 
 // Utility functions
 bool    IsSignalTooOld(long signalTimestampMs);
@@ -127,6 +154,8 @@ void OnTimer()
     return;
   }
 
+// Process warmup order timeouts first
+  ProcessWarmupTimeouts();
   
 // Process dynamic trailing stop for existing positions
   ProcessDynamicTrailingStop();
@@ -635,6 +664,9 @@ void SendOrders(Signal &signal)
   if(isWarmupSignal) {
     PrintLog(eaName + ": WARMUP SIGNAL detected - Calculating TP/SL levels for GID=" + IntegerToString(signal.groupId));
     CalculateWarmupLevels(signal);
+    
+    // Add to warmup tracking (will be monitored for timeout)
+    AddWarmupOrder(signal.groupId, signal.channelName);
   }
 
   if(signal.entry == 0.0) {
@@ -750,6 +782,9 @@ void ProcessModifySlSignal(Signal &signal)
     PrintLog(eaName + ": Invalid GID in signal: " + IntegerToString(signal.groupId));
     return;
   }
+
+// Remove from warmup tracking (MODIFY signal received)
+  RemoveWarmupOrder(signal.groupId, signal.channelName);
 
 // if not modify, then breakeven
   bool isModifySignal = signal.type == "MODIFY";
@@ -1561,6 +1596,164 @@ double GetPositionSize(Signal &signal)
            " TPCount=" + IntegerToString(signal.tpCount));
 
   return positionSize;
+}
+
+//+------------------------------------------------------------------+
+//| AddWarmupOrder: Add warmup order to tracking list               |
+//+------------------------------------------------------------------+
+void AddWarmupOrder(int groupId, string channelName)
+{
+  // Check if already exists (avoid duplicates)
+  for(int i = 0; i < warmupOrderCount; i++) {
+    if(warmupOrders[i].isActive && 
+       warmupOrders[i].groupId == groupId && 
+       warmupOrders[i].channelName == channelName) {
+      PrintLog(eaName + ": Warmup order GID=" + IntegerToString(groupId) + " already tracked");
+      return;
+    }
+  }
+  
+  // Find empty slot or add new
+  int slot = -1;
+  for(int i = 0; i < warmupOrderCount; i++) {
+    if(!warmupOrders[i].isActive) {
+      slot = i;
+      break;
+    }
+  }
+  
+  if(slot == -1 && warmupOrderCount < 100) {
+    slot = warmupOrderCount;
+    warmupOrderCount++;
+  }
+  
+  if(slot >= 0) {
+    warmupOrders[slot].groupId = groupId;
+    warmupOrders[slot].channelName = channelName;
+    warmupOrders[slot].createdTime = TimeCurrent();
+    warmupOrders[slot].isActive = true;
+    
+    PrintLog(eaName + ": Added warmup order tracking: GID=" + IntegerToString(groupId) + 
+             " Channel=" + channelName + " Time=" + TimeToString(warmupOrders[slot].createdTime) +
+             " (Active warmups: " + IntegerToString(GetActiveWarmupCount()) + ")");
+  } else {
+    PrintLog(eaName + ": ERROR: Warmup tracking array full, cannot add GID=" + IntegerToString(groupId));
+  }
+}
+
+//+------------------------------------------------------------------+
+//| RemoveWarmupOrder: Remove warmup order from tracking            |
+//+------------------------------------------------------------------+
+void RemoveWarmupOrder(int groupId, string channelName)
+{
+  for(int i = 0; i < warmupOrderCount; i++) {
+    if(warmupOrders[i].isActive && 
+       warmupOrders[i].groupId == groupId && 
+       warmupOrders[i].channelName == channelName) {
+      warmupOrders[i].isActive = false;
+      PrintLog(eaName + ": Removed warmup tracking: GID=" + IntegerToString(groupId) + " (MODIFY received)" +
+               " (Active warmups: " + IntegerToString(GetActiveWarmupCount()) + ")");
+      return;
+    }
+  }
+  
+  if(debugMode) {
+    PrintLog(eaName + ": Warmup order GID=" + IntegerToString(groupId) + " not found in tracking");
+  }
+}
+
+//+------------------------------------------------------------------+
+//| ProcessWarmupTimeouts: Close expired warmup orders              |
+//+------------------------------------------------------------------+
+void ProcessWarmupTimeouts()
+{
+  // Early return if no active warmup orders - performance optimization
+  bool hasActiveWarmups = false;
+  for(int i = 0; i < warmupOrderCount; i++) {
+    if(warmupOrders[i].isActive) {
+      hasActiveWarmups = true;
+      break;
+    }
+  }
+  
+  if(!hasActiveWarmups) {
+    return; // No warmup orders to check
+  }
+  
+  datetime currentTime = TimeCurrent();
+  int timeoutSeconds = warmupTimeoutMinutes * 60;
+  
+  for(int i = 0; i < warmupOrderCount; i++) {
+    if(!warmupOrders[i].isActive) continue;
+    
+    // Check if warmup order has expired
+    if(currentTime - warmupOrders[i].createdTime >= timeoutSeconds) {
+      PrintLog(eaName + ": WARMUP TIMEOUT: GID=" + IntegerToString(warmupOrders[i].groupId) + 
+               " Channel=" + warmupOrders[i].channelName + 
+               " Age=" + IntegerToString(currentTime - warmupOrders[i].createdTime) + "s");
+      
+      // Close all orders with this GID and channel
+      CloseWarmupOrders(warmupOrders[i].groupId, warmupOrders[i].channelName);
+      
+      // Remove from tracking
+      warmupOrders[i].isActive = false;
+      if(debugMode) {
+        PrintLog(eaName + ": Remaining active warmups: " + IntegerToString(GetActiveWarmupCount()));
+      }
+    }
+  }
+}
+
+//+------------------------------------------------------------------+
+//| CloseWarmupOrders: Close orders by GID and channel              |
+//+------------------------------------------------------------------+
+void CloseWarmupOrders(int groupId, string channelName)
+{
+  int closedCount = 0;
+  int total = OrdersTotal();
+  
+  // Close orders in reverse order to avoid index issues
+  for(int i = total - 1; i >= 0; i--) {
+    if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+      continue;
+    }
+    
+    // Parse order comment to check GID and channel match
+    int orderGid;
+    string orderChannel;
+    if(!ParseOrderComment(OrderComment(), orderGid, orderChannel)) {
+      continue;
+    }
+    
+    if(orderGid == groupId && orderChannel == channelName) {
+      double closePrice = (OrderType() == OP_BUY) ? MarketInfo(OrderSymbol(), MODE_BID) : MarketInfo(OrderSymbol(), MODE_ASK);
+      
+      if(OrderClose(OrderTicket(), OrderLots(), closePrice, slippage, clrRed)) {
+        PrintLog(eaName + ": Closed warmup order: Ticket=" + IntegerToString(OrderTicket()) + 
+                 " GID=" + IntegerToString(groupId) + " (timeout)");
+        closedCount++;
+      } else {
+        PrintLog(eaName + ": Failed to close warmup order: Ticket=" + IntegerToString(OrderTicket()) + 
+                 " Error=" + IntegerToString(GetLastError()));
+      }
+    }
+  }
+  
+  PrintLog(eaName + ": Closed " + IntegerToString(closedCount) + " warmup orders for GID=" + IntegerToString(groupId));
+}
+
+//+------------------------------------------------------------------+
+//| GetActiveWarmupCount: Count active warmup orders in tracking    |
+//+------------------------------------------------------------------+
+int GetActiveWarmupCount()
+{
+  int count = 0;
+  for(int i = 0; i < warmupOrderCount; i++) {
+    if(warmupOrders[i].isActive) {
+      count++;
+    }
+  }
+  return count;
 }
 //+------------------------------------------------------------------+
 
