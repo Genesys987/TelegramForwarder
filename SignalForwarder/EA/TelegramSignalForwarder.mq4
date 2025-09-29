@@ -369,27 +369,29 @@ Signal ParseBuySellSignal(string &parts[], bool shouldValidateTimestamp)
     signal.tpLevels[i] = NormalizeDouble(StrToDouble(tpsArr[i]), MarketInfo(signal.symbol, MODE_DIGITS));
   }
 
-// Validate TP order and remove duplicates
-  bool shouldBuy = signal.type == "BUY";
-  for(int i=0; i<signal.tpCount; i++) {
-    if(i > 0) {
-      if(shouldBuy && signal.tpLevels[i] <= signal.tpLevels[i-1]) {
-        PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
-                 " should be higher than TP[" + IntegerToString(i-1) + "] " + DoubleToString(signal.tpLevels[i-1], MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
-      } else if(!shouldBuy && signal.tpLevels[i] >= signal.tpLevels[i-1]) {
-        PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
-                 " should be lower than TP[" + IntegerToString(i-1) + "] " + DoubleToString(signal.tpLevels[i-1], MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
+// Skip TP validation for warmup signals (entry=0, SL=0)
+  if(!(signal.entry == 0.0 && signal.stopLoss == 0.0)) {
+    bool shouldBuy = signal.type == "BUY";
+    for(int i=0; i<signal.tpCount; i++) {
+      if(i > 0) {
+        if(shouldBuy && signal.tpLevels[i] <= signal.tpLevels[i-1]) {
+          PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+                   " should be higher than TP[" + IntegerToString(i-1) + "] " + DoubleToString(signal.tpLevels[i-1], MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
+        } else if(!shouldBuy && signal.tpLevels[i] >= signal.tpLevels[i-1]) {
+          PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+                   " should be lower than TP[" + IntegerToString(i-1) + "] " + DoubleToString(signal.tpLevels[i-1], MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
+        }
       }
-    }
 
-    // Check TP direction relative to entry
-    if (signal.entry != 0.0) {
-      if(shouldBuy && signal.tpLevels[i] <= signal.entry) {
-        PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
-                 " should be higher than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
-      } else if(!shouldBuy && signal.tpLevels[i] >= signal.entry) {
-        PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
-                 " should be lower than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
+      // Check TP direction relative to entry
+      if (signal.entry != 0.0) {
+        if(shouldBuy && signal.tpLevels[i] <= signal.entry) {
+          PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+                   " should be higher than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
+        } else if(!shouldBuy && signal.tpLevels[i] >= signal.entry) {
+          PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+                   " should be lower than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
+        }
       }
     }
   }
@@ -1334,46 +1336,72 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
   }
 
   if (tpHitLevel == 1) {
-    // NEW LOGIC: Check for XAUUSD/BTCUSD specific close entry condition
-    bool useBreakevenForTP1 = false;
+    // NEW LOGIC: Reverse calculation from TP1 for XAUUSD/BTCUSD close entry detection
+    bool useMultiplierForLateTrade = false;
     
     if((StringFind(symbolUpper, "XAUUSD") >= 0 || StringFind(symbolUpper, "GOLD") >= 0 || 
         StringFind(symbolUpper, "BTCUSD") >= 0 || StringFind(symbolUpper, "BTC") >= 0) && 
        signal.tpCount > 0) {
       
-      // Calculate current market position between entry and TP1
-      double entryPrice = OrderOpenPrice();
-      double tp1Price = signal.tpLevels[0];
-      double entryToTp1Distance = MathAbs(tp1Price - entryPrice);
-      
-      // Current market price 
-      double currentPrice = isBuy ? Bid : Ask;
-      double currentProgress = MathAbs(currentPrice - entryPrice);
-      
-      // Calculate progress percentage (how far we've moved toward TP1)
-      double progressPercentage = 0.0;
-      if(entryToTp1Distance > 0) {
-        progressPercentage = currentProgress / entryToTp1Distance;
+      // Define fixed distances based on historical analysis
+      double fixedDistance = 0.0;
+      if(StringFind(symbolUpper, "XAUUSD") >= 0 || StringFind(symbolUpper, "GOLD") >= 0) {
+        fixedDistance = 6.0;  // 6.0 pips for XAUUSD
+      } else if(StringFind(symbolUpper, "BTCUSD") >= 0 || StringFind(symbolUpper, "BTC") >= 0) {
+        fixedDistance = 200.0; // 200 points for BTCUSD
       }
       
-      // Use breakeven if we haven't reached 75% of the way to TP1
-      if(progressPercentage <= 0.75) {
-        useBreakevenForTP1 = true;
+      // Calculate 25% threshold from TP1 (not from ideal entry)
+      double tp1Price = signal.tpLevels[0];
+      double threshold25Percent = fixedDistance * 0.25;  // 25% of fixed distance
+      double actualEntry = OrderOpenPrice();
+      double distanceFromTP1 = MathAbs(actualEntry - tp1Price);
+      
+      // Late entry detection: entry is within 25% range from TP1
+      bool isLateEntry = false;
+      
+      if(isBuy) {
+        // BUY: Late if entry >= (TP1 - 25% threshold)
+        // Example: TP1=111820, threshold=50 → Late if entry >= 111770
+        if(actualEntry >= (tp1Price - threshold25Percent)) {
+          isLateEntry = true;
+        }
+      } else {
+        // SELL: Late if entry <= (TP1 + 25% threshold)  
+        // Example: TP1=3748, threshold=1.5 → Late if entry <= 3749.5
+        if(actualEntry <= (tp1Price + threshold25Percent)) {
+          isLateEntry = true;
+        }
+      }
+      
+      if(isLateEntry) {
+        useMultiplierForLateTrade = true;
         if(debugMode)
-          PrintLog(eaName + ": " + symbolUpper + " using breakeven - Progress: " + 
-                  DoubleToString(progressPercentage * 100, 1) + "% (≤75%) toward TP1");
+          PrintLog(eaName + ": " + symbolUpper + " late entry detected - Entry: " + 
+                  DoubleToString(actualEntry, digits) + ", TP1: " + 
+                  DoubleToString(tp1Price, digits) + ", Distance: " + 
+                  DoubleToString(distanceFromTP1, digits) + " (≤" + 
+                  DoubleToString(threshold25Percent, digits) + " = 25%) - Using 0.2 multiplier");
       } else {
         if(debugMode)
-          PrintLog(eaName + ": " + symbolUpper + " using multiplier - Progress: " + 
-                  DoubleToString(progressPercentage * 100, 1) + "% (>75%) toward TP1");
+          PrintLog(eaName + ": " + symbolUpper + " good entry - Entry: " + 
+                  DoubleToString(actualEntry, digits) + ", TP1: " + 
+                  DoubleToString(tp1Price, digits) + ", Distance: " + 
+                  DoubleToString(distanceFromTP1, digits) + " (>" + 
+                  DoubleToString(threshold25Percent, digits) + " = 25%) - Using breakeven");
       }
     }
     
-    if(useBreakevenForTP1) {
-      // Use breakeven (entry price) instead of multiplier-based SL
+    if(useMultiplierForLateTrade) {
+      // Use 0.2 multiplier for late entries (need more swing room)
+      double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * 0.2;
+      newSL = isBuy ? OrderOpenPrice() - diff : OrderOpenPrice() + diff;
+    } else if((StringFind(symbolUpper, "XAUUSD") >= 0 || StringFind(symbolUpper, "GOLD") >= 0 || 
+               StringFind(symbolUpper, "BTCUSD") >= 0 || StringFind(symbolUpper, "BTC") >= 0)) {
+      // Use breakeven for good entries
       newSL = OrderOpenPrice();
     } else {
-      // Use original logic with multiplier
+      // Use original logic with multiplier for other symbols
       double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * dynamicStopLossMultiplier;
       newSL = isBuy ? OrderOpenPrice() - diff : OrderOpenPrice() + diff;
     }

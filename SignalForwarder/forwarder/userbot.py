@@ -66,8 +66,8 @@ SESSION_NAME = "userbot_session"
 client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 
 # --- Fő Feldolgozó Függvények ---
-sl_clause="(sl|stoploss|stop loss)"
-stoploss_regexp=fr"{sl_clause}?.*(level|change|move|moving|adjust|set|update).*{sl_clause}"
+# Simple SL-only modification pattern - csak SL variánsok + pontosan egy szám
+stoploss_regexp = r'\b(sl|stoploss|stop\s*loss)\b.*?\b(\d{1,8}(?:\.\d{1,5})?)\b'
 
 async def process_new_standard_signal(message_text: str, message_id: int, message_date, channel_name: str = None):
     logger.info(f"   Standard szignál feldolgozása (ID: {message_id}) csatornából: {channel_name or 'UNKNOWN'}...")
@@ -268,11 +268,17 @@ async def run_userbot():
                 clean_channel = clean_channel_name(chat_title)
 
                 # --- Unified trading instruction pattern matching ---
+                # SMART PRIORITY: SL + single number = MODIFY, multiple numbers = signal/spam
                 signal_type = None
-                # MODIFY (SL adjust)
-                if re.search(stoploss_regexp, message_text, re.IGNORECASE):
+                
+                # Check if message contains SL pattern + count total numbers
+                sl_match = re.search(stoploss_regexp, message_text, re.IGNORECASE)
+                total_numbers = len(re.findall(r'\b\d{1,8}(?:\.\d{1,5})?\b', message_text))
+                
+                # MODIFY (SL adjust) - ONLY if SL pattern + exactly 1 number
+                if sl_match and total_numbers == 1:
                     signal_type = SignalType.MODIFY
-                # CLOSE_HALF_BREAKEVEN
+                # CLOSE_HALF_BREAKEVEN - only if NO numeric value
                 elif re.search(r'close.*(profit|half|all).*breakeven', message_text, re.IGNORECASE) or \
                      re.search(r'close.*half.*hold', message_text, re.IGNORECASE) or \
                      re.search(r'close.*entries.*breakeven', message_text, re.IGNORECASE) or \
