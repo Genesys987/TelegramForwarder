@@ -1025,30 +1025,44 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
       continue;
     }
 
-    // Check if order is in loss before applying breakeven
-    double currentSL = OrderStopLoss();
+    // Check if current price is still before TP1 before applying breakeven
     double entryPrice = OrderOpenPrice();
     int orderType = OrderType();
+    string orderSymbol = OrderSymbol();
+    double currentPrice = (orderType == OP_BUY) ? MarketInfo(orderSymbol, MODE_BID) : MarketInfo(orderSymbol, MODE_ASK);
     bool shouldBreakeven = false;
     
-    if(orderType == OP_BUY) {
-      // For BUY: breakeven only if SL is below entry (in loss position)
-      shouldBreakeven = (currentSL < entryPrice) || (currentSL == 0.0);
-    } else if(orderType == OP_SELL) {
-      // For SELL: breakeven only if SL is above entry (in loss position)
-      shouldBreakeven = (currentSL > entryPrice) || (currentSL == 0.0);
-    }
-    
-    if(shouldBreakeven) {
+    // Only apply breakeven if signal has TP levels and price hasn't reached TP1 yet
+    if(signal.tpCount > 0) {
+      double tp1Price = signal.tpLevels[0];
+      
+      if(orderType == OP_BUY) {
+        // For BUY: breakeven only if current price is still below TP1
+        shouldBreakeven = (currentPrice < tp1Price);
+      } else if(orderType == OP_SELL) {
+        // For SELL: breakeven only if current price is still above TP1
+        shouldBreakeven = (currentPrice > tp1Price);
+      }
+      
+      if(shouldBreakeven) {
+        if (SetCurrentOrderStopLoss(signal)) {
+          breakevenCount++;
+          PrintLog(eaName + ": ✅ Breakeven applied to ticket " + IntegerToString(OrderTicket()) + 
+                  " (Price " + DoubleToString(currentPrice, MarketInfo(orderSymbol, MODE_DIGITS)) + 
+                  " still before TP1 " + DoubleToString(tp1Price, MarketInfo(orderSymbol, MODE_DIGITS)) + ")");
+        }
+      } else {
+        PrintLog(eaName + ": ⚠️ Skipping breakeven for ticket " + IntegerToString(OrderTicket()) + 
+                " - Price already past TP1 (Current: " + DoubleToString(currentPrice, MarketInfo(orderSymbol, MODE_DIGITS)) + 
+                ", TP1: " + DoubleToString(tp1Price, MarketInfo(orderSymbol, MODE_DIGITS)) + ")");
+      }
+    } else {
+      // No TP levels available, apply breakeven as fallback
       if (SetCurrentOrderStopLoss(signal)) {
         breakevenCount++;
         PrintLog(eaName + ": ✅ Breakeven applied to ticket " + IntegerToString(OrderTicket()) + 
-                " (SL was in loss position)");
+                " (No TP levels available - fallback mode)");
       }
-    } else {
-      PrintLog(eaName + ": ⚠️ Skipping breakeven for ticket " + IntegerToString(OrderTicket()) + 
-              " - SL already in profit (Entry: " + DoubleToString(entryPrice, MarketInfo(OrderSymbol(), MODE_DIGITS)) + 
-              ", Current SL: " + DoubleToString(currentSL, MarketInfo(OrderSymbol(), MODE_DIGITS)) + ")");
     }
   }
 
