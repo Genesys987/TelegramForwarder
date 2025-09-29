@@ -1017,16 +1017,37 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
     }
   }
 
-// Move remaining orders to breakeven
+// Move remaining orders to breakeven (only if SL is currently below/above entry)
   for(int i=ordersToClose; i<matchingCount; i++) {
     if(!OrderSelect(matchingTickets[i], SELECT_BY_TICKET)) {
       continue;
     }
 
-    if (SetCurrentOrderStopLoss(signal)) {
-      breakevenCount++;
+    // Check if order is in loss before applying breakeven
+    double currentSL = OrderStopLoss();
+    double entryPrice = OrderOpenPrice();
+    int orderType = OrderType();
+    bool shouldBreakeven = false;
+    
+    if(orderType == OP_BUY) {
+      // For BUY: breakeven only if SL is below entry (in loss position)
+      shouldBreakeven = (currentSL < entryPrice) || (currentSL == 0.0);
+    } else if(orderType == OP_SELL) {
+      // For SELL: breakeven only if SL is above entry (in loss position)
+      shouldBreakeven = (currentSL > entryPrice) || (currentSL == 0.0);
     }
-
+    
+    if(shouldBreakeven) {
+      if (SetCurrentOrderStopLoss(signal)) {
+        breakevenCount++;
+        PrintLog(eaName + ": ✅ Breakeven applied to ticket " + IntegerToString(OrderTicket()) + 
+                " (SL was in loss position)");
+      }
+    } else {
+      PrintLog(eaName + ": ⚠️ Skipping breakeven for ticket " + IntegerToString(OrderTicket()) + 
+              " - SL already in profit (Entry: " + DoubleToString(entryPrice, MarketInfo(OrderSymbol(), MODE_DIGITS)) + 
+              ", Current SL: " + DoubleToString(currentSL, MarketInfo(OrderSymbol(), MODE_DIGITS)) + ")");
+    }
   }
 
   PrintLog(eaName + ": ✅ Close+Breakeven completed - Closed: " + IntegerToString(closedCount) +
@@ -1313,9 +1334,49 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
   }
 
   if (tpHitLevel == 1) {
-    // Use OrderOpenPrice and not signal.entry, because of slippage, actual open price might differ slightly
-    double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * dynamicStopLossMultiplier;
-    newSL = isBuy ? OrderOpenPrice() - diff : OrderOpenPrice() + diff;
+    // NEW LOGIC: Check for XAUUSD/BTCUSD specific close entry condition
+    bool useBreakevenForTP1 = false;
+    
+    if((StringFind(symbolUpper, "XAUUSD") >= 0 || StringFind(symbolUpper, "GOLD") >= 0 || 
+        StringFind(symbolUpper, "BTCUSD") >= 0 || StringFind(symbolUpper, "BTC") >= 0) && 
+       signal.tpCount > 0) {
+      
+      // Calculate current market position between entry and TP1
+      double entryPrice = OrderOpenPrice();
+      double tp1Price = signal.tpLevels[0];
+      double entryToTp1Distance = MathAbs(tp1Price - entryPrice);
+      
+      // Current market price 
+      double currentPrice = isBuy ? Bid : Ask;
+      double currentProgress = MathAbs(currentPrice - entryPrice);
+      
+      // Calculate progress percentage (how far we've moved toward TP1)
+      double progressPercentage = 0.0;
+      if(entryToTp1Distance > 0) {
+        progressPercentage = currentProgress / entryToTp1Distance;
+      }
+      
+      // Use breakeven if we haven't reached 75% of the way to TP1
+      if(progressPercentage <= 0.75) {
+        useBreakevenForTP1 = true;
+        if(debugMode)
+          PrintLog(eaName + ": " + symbolUpper + " using breakeven - Progress: " + 
+                  DoubleToString(progressPercentage * 100, 1) + "% (≤75%) toward TP1");
+      } else {
+        if(debugMode)
+          PrintLog(eaName + ": " + symbolUpper + " using multiplier - Progress: " + 
+                  DoubleToString(progressPercentage * 100, 1) + "% (>75%) toward TP1");
+      }
+    }
+    
+    if(useBreakevenForTP1) {
+      // Use breakeven (entry price) instead of multiplier-based SL
+      newSL = OrderOpenPrice();
+    } else {
+      // Use original logic with multiplier
+      double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * dynamicStopLossMultiplier;
+      newSL = isBuy ? OrderOpenPrice() - diff : OrderOpenPrice() + diff;
+    }
   } else {
     if (signal.tpCount < tpHitLevel) {
       PrintLog(eaName + ": Invalid TP hit level " + IntegerToString(tpHitLevel) +

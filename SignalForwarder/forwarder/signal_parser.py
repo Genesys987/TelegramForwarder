@@ -23,7 +23,9 @@ READY_MESSAGE_PATTERNS = [
     r"Double\s+sell\s+ready", 
     r"HIGH\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly",
     r"GOLD\s+SELL\s+READY",
-    r"ANOTHER\s+GOLD\s+BUY\s+READY"
+    r"ANOTHER\s+GOLD\s+BUY\s+READY",
+    r"Gold\s+buy\s+now",
+    r"Gold\s+sell\s+now"
 ]
 
 def clean_channel_name(channel_name: str) -> str:
@@ -147,6 +149,7 @@ def parse_single_line_signal(text):
             r'🚨?\s*([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*🚨?',                    # 🚨 GOLD SELL NOW 🚨
             r'(BUY|SELL)\s+([\w\.\/\-]+)\s+NOW',                                # BUY GOLD NOW
             r'([\w\.\/\-]+)\s+NOW\s+(BUY|SELL)',                                # GOLD NOW SELL
+            r'([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW',                                # GOLD BUY NOW, GOLD SELL NOW
             r'NOW\s+(BUY|SELL)\s+([\w\.\/\-]+)',                                # NOW BUY BTCUSD
             r'I[\'\u2019]?M\s+(SELLING|BUYING)\s+([\w\.\/\-]+)\s+NOW\s*\(([\d\-\s@\.]+)\)', # I'M SELLING XAUUSD NOW (3337 - 3340)
             # Regular patterns (existing + new @ and - range formats)
@@ -175,6 +178,11 @@ def parse_single_line_signal(text):
                         signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
                     elif pattern == r'([\w\.\/\-]+)\s+NOW\s+(BUY|SELL)':
                         # SYMBOL NOW BUY/SELL
+                        raw_symbol = match.group(1).upper()
+                        signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                        signal["signal_type"] = match.group(2).upper()
+                    elif pattern == r'([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW':
+                        # SYMBOL BUY/SELL NOW (Gold buy now, Gold sell now)
                         raw_symbol = match.group(1).upper()
                         signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
                         signal["signal_type"] = match.group(2).upper()
@@ -720,7 +728,8 @@ def is_ready_message(text: str):
         r"^ready\s+buy[\s\w]*[\.\!]*$",
         r"^Mid\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly[\.\!]*$", 
         r"^HIGH\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly[\.\!]*$",
-        r"^ANOTHER\s+GOLD\s+BUY\s+READY[\.\!]*$"
+        r"^ANOTHER\s+GOLD\s+BUY\s+READY[\.\!]*$",
+        r"^Gold\s+buy\s+now[\.\!]*$"
     ]
     
     # SELL patterns - exact matching for ready messages  
@@ -729,7 +738,8 @@ def is_ready_message(text: str):
         r"^Let'?s\s+scalping\s+sell\s+gold\s+slowly\s+mid\s+risk[\.\!]*$",
         r"^ready\s+sell[\s\w]*[\.\!]*$",
         r"^Double\s+sell\s+ready[\.\!]*$",
-        r"^GOLD\s+SELL\s+READY[\.\!]*$"
+        r"^GOLD\s+SELL\s+READY[\.\!]*$",
+        r"^Gold\s+sell\s+now[\.\!]*$"
     ]
     
     for pattern in buy_patterns:

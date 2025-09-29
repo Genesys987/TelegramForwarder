@@ -276,7 +276,8 @@ async def run_userbot():
                 elif re.search(r'close.*(profit|half|all).*breakeven', message_text, re.IGNORECASE) or \
                      re.search(r'close.*half.*hold', message_text, re.IGNORECASE) or \
                      re.search(r'close.*entries.*breakeven', message_text, re.IGNORECASE) or \
-                     re.search(r'secure.*(entry|entries|first|profit)', message_text, re.IGNORECASE):
+                     re.search(r'secure.*(entry|entries|first|profit)', message_text, re.IGNORECASE) or \
+                     re.search(r'cut.*(lower\s+entries|entries)', message_text, re.IGNORECASE):
                     signal_type = SignalType.CLOSE_HALF_BREAKEVEN
                 # BREAKEVEN
                 elif re.search(r'(breakeven|break\s*even|set\s+breakeven)', message_text, re.IGNORECASE):
