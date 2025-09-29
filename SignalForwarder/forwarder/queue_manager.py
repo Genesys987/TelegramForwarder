@@ -97,11 +97,34 @@ def add_signal_to_queue(signal_data: dict) -> bool:
         tp_str = ",".join(str(tp) for tp in tps)
         raw_channel_name = signal_data.get("channel_name", "UNKNOWN")
         channel_name = clean_channel_name(raw_channel_name)  # Clean to 4-letter format
-        message = (f"{timestamp}|{signal_data['signal_type']}|{signal_data['symbol']}|{signal_data['entry']}|"
-                   f"{tp_str}|{signal_data['stop_loss']}|"
-                   f"GID:{signal_data['group_id']}|{channel_name}\n")
+        
+        # Check for range and warmup info
+        extra_parts = []
+        if signal_data.get("entry_range"):
+            range_info = signal_data["entry_range"]
+            range_str = f"{range_info['min']}:{range_info['max']}"
+            extra_parts.append(f"RANGE:{range_str}")
+        if signal_data.get("is_warmup", False):
+            extra_parts.append("WARMUP:1")
+        if signal_data.get("is_warmup_modify", False):
+            extra_parts.append("WARMUP_MODIFY:1")
+        
+        # Base message format: timestamp|type|symbol|entry|tps|sl|GID:xxx|channel
+        base_message = (f"{timestamp}|{signal_data['signal_type']}|{signal_data['symbol']}|{signal_data['entry']}|"
+                       f"{tp_str}|{signal_data['stop_loss']}|"
+                       f"GID:{signal_data['group_id']}|{channel_name}")
+        
+        # Add extra information if present
+        if extra_parts:
+            extra_str = "|".join(extra_parts)
+            message = f"{base_message}|{extra_str}\n"
+        else:
+            message = f"{base_message}\n"
 
-        logger.info(f"🔄 [QueueAdd] Signal formázva csatorna névvel '{channel_name}' (eredeti: '{raw_channel_name}'): GID:{signal_data['group_id']}")
+        if extra_parts:
+            logger.info(f"🔄 [QueueAdd] Signal formázva csatorna névvel '{channel_name}' és extra info: {extra_parts}: GID:{signal_data['group_id']}")
+        else:
+            logger.info(f"🔄 [QueueAdd] Signal formázva csatorna névvel '{channel_name}' (eredeti: '{raw_channel_name}'): GID:{signal_data['group_id']}")
 
         # 5) I/O művelet: Hozzáfűzés az összes queue-fájlhoz
         return write_message_to_queue(message)

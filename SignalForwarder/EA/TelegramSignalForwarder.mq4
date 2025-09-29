@@ -40,6 +40,15 @@ struct Signal {
   int                groupId;
   string             channelName;
   bool               isValid;
+  
+  // Range detection fields
+  bool               hasRange;
+  double             rangeMin;
+  double             rangeMax;
+  
+  // Warmup signal fields
+  bool               isWarmup;
+  bool               isWarmupModify;
 
                      Signal()
   {
@@ -53,6 +62,13 @@ struct Signal {
     groupId      = 0;
     channelName  = "";
     isValid      = false;
+    
+    // Initialize new fields
+    hasRange     = false;
+    rangeMin     = 0.0;
+    rangeMax     = 0.0;
+    isWarmup     = false;
+    isWarmupModify = false;
   }
 };
 
@@ -62,6 +78,11 @@ struct Signal {
 string   eaName               = "TelegramSignalForwarder";
 int      signalFileHandle = -1;                  // File handle for reading signals in test mode
 string   storedTestSignal = "";
+
+// Limit order tracking
+bool     hasActiveLimitOrders = false;          // Track if we have active limit orders
+datetime limitOrderCreationTime = 0;           // When limit orders were created
+int      limitOrderExpirationMinutes = 10;     // Limit orders expire after 10 minutes
 
 //+------------------------------------------------------------------+
 //|--- Function Prototypes                                          |
@@ -82,6 +103,14 @@ double  CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, strin
 bool    ParseOrderComment(string comment, int &groupId, string &channelName);
 bool CloseCurrentOrder(Signal &signal);
 bool SetCurrentOrderStopLoss(Signal &signal);
+
+// Range and limit order functions
+void    ProcessRangeSignal(Signal &signal);
+bool    IsCurrentPriceInRange(Signal &signal);
+void    CreateLimitOrders(Signal &signal, double limitPrice);
+void    ProcessLimitOrderExpiration();
+void    ProcessWarmupSignal(Signal &signal);
+bool    CheckWarmupEntryInRange(Signal &warmupSignal, Signal &rangeSignal);
 
 // Utility functions
 bool    IsSignalTooOld(long signalTimestampMs);
@@ -127,6 +156,10 @@ void OnTimer()
     return;
   }
 
+// Process limit order expiration ONLY if we have active limit orders
+  if(hasActiveLimitOrders) {
+    ProcessLimitOrderExpiration();
+  }
   
 // Process dynamic trailing stop for existing positions
   ProcessDynamicTrailingStop();
@@ -141,7 +174,19 @@ void OnTimer()
 
 // Handle different signal types
   if(signal.type == "BUY" || signal.type == "SELL") {
-    // Process trading signals
+    // Check if this is a warmup signal
+    if(signal.isWarmup) {
+      ProcessWarmupSignal(signal);
+      return;
+    }
+    
+    // Check if this signal has a range - use range processing
+    if(signal.hasRange) {
+      ProcessRangeSignal(signal);
+      return;
+    }
+    
+    // Process regular trading signals
     if(debugMode)
       PrintLog(eaName + ": Processing " + signal.type + " signal from channel '" + signal.channelName + "' - GID=" + IntegerToString(signal.groupId) + " with " + IntegerToString(signal.tpCount) + " TP levels");
 
@@ -437,6 +482,41 @@ Signal ParseBuySellSignal(string &parts[], bool shouldValidateTimestamp)
     signal.channelName = "LEGC";
   }
 
+  // 8+) Extra Information parsing (range, warmup flags)
+  int partCount = ArraySize(parts);
+  for(int extraIdx = 8; extraIdx < partCount; extraIdx++) {
+    string extraPart = parts[extraIdx];
+    
+    if(StringFind(extraPart, "RANGE:") == 0) {
+      // Parse range: RANGE:min:max
+      string rangeValues = StringSubstr(extraPart, 6);  // Skip "RANGE:"
+      string rangeParts[];
+      int rangePartCount = StringSplit(rangeValues, ':', rangeParts);
+      if(rangePartCount == 2) {
+        signal.hasRange = true;
+        signal.rangeMin = NormalizeDouble(StrToDouble(rangeParts[0]), MarketInfo(signal.symbol, MODE_DIGITS));
+        signal.rangeMax = NormalizeDouble(StrToDouble(rangeParts[1]), MarketInfo(signal.symbol, MODE_DIGITS));
+        if(shouldValidateTimestamp)
+          PrintLog(eaName + ": Range detected: " + DoubleToString(signal.rangeMin, MarketInfo(signal.symbol, MODE_DIGITS)) + 
+                   "-" + DoubleToString(signal.rangeMax, MarketInfo(signal.symbol, MODE_DIGITS)));
+      }
+    }
+    else if(StringFind(extraPart, "WARMUP:") == 0) {
+      if(StringSubstr(extraPart, 7) == "1") {
+        signal.isWarmup = true;
+        if(shouldValidateTimestamp)
+          PrintLog(eaName + ": Warmup signal detected");
+      }
+    }
+    else if(StringFind(extraPart, "WARMUP_MODIFY:") == 0) {
+      if(StringSubstr(extraPart, 14) == "1") {
+        signal.isWarmupModify = true;
+        if(shouldValidateTimestamp)
+          PrintLog(eaName + ": Warmup modify signal detected");
+      }
+    }
+  }
+
   if (shouldValidateTimestamp)
     PrintLog(eaName + ": Parsed trading signal GID=" + IntegerToString(signal.groupId) + " from channel '" + signal.channelName + "'");
 
@@ -543,6 +623,42 @@ Signal ParseActionSignal(string &parts[], bool shouldValidateTimestamp)
     if(StringLen(rawChannelName) == 0)
       rawChannelName = "UNKNOWN";
     signal.channelName = CleanChannelName(rawChannelName);
+  }
+
+  // Parse extra information (range, warmup flags) for MODIFY signals
+  int partCount = ArraySize(parts);
+  int startIdx = isModifySignal ? ((partCount >= 7) ? 8 : 5) : 4; // New format starts at 8, old format at 5, other signals at 4
+  for(int extraIdx = startIdx; extraIdx < partCount; extraIdx++) {
+    string extraPart = parts[extraIdx];
+    
+    if(StringFind(extraPart, "RANGE:") == 0) {
+      // Parse range: RANGE:min:max
+      string rangeValues = StringSubstr(extraPart, 6);  // Skip "RANGE:"
+      string rangeParts[];
+      int rangePartCount = StringSplit(rangeValues, ':', rangeParts);
+      if(rangePartCount == 2) {
+        signal.hasRange = true;
+        signal.rangeMin = NormalizeDouble(StrToDouble(rangeParts[0]), MarketInfo(signal.symbol, MODE_DIGITS));
+        signal.rangeMax = NormalizeDouble(StrToDouble(rangeParts[1]), MarketInfo(signal.symbol, MODE_DIGITS));
+        if(shouldValidateTimestamp)
+          PrintLog(eaName + ": MODIFY Range detected: " + DoubleToString(signal.rangeMin, MarketInfo(signal.symbol, MODE_DIGITS)) + 
+                   "-" + DoubleToString(signal.rangeMax, MarketInfo(signal.symbol, MODE_DIGITS)));
+      }
+    }
+    else if(StringFind(extraPart, "WARMUP:") == 0) {
+      if(StringSubstr(extraPart, 7) == "1") {
+        signal.isWarmup = true;
+        if(shouldValidateTimestamp)
+          PrintLog(eaName + ": MODIFY Warmup signal detected");
+      }
+    }
+    else if(StringFind(extraPart, "WARMUP_MODIFY:") == 0) {
+      if(StringSubstr(extraPart, 14) == "1") {
+        signal.isWarmupModify = true;
+        if(shouldValidateTimestamp)
+          PrintLog(eaName + ": MODIFY Warmup modify signal detected");
+      }
+    }
   }
 
   signal.isValid = true;
@@ -751,6 +867,18 @@ void ProcessModifySlSignal(Signal &signal)
     return;
   }
 
+  // Debug: Check warmup modify and range flags
+  if(debugMode)
+    PrintLog(eaName + ": Debug flags - isWarmupModify=" + (signal.isWarmupModify ? "true" : "false") + 
+             ", hasRange=" + (signal.hasRange ? "true" : "false") + 
+             ", type=" + signal.type);
+
+  // Handle warmup modify signals with range checking
+  if(signal.isWarmupModify && signal.hasRange) {
+    ProcessWarmupModifyWithRange(signal);
+    return;
+  }
+
 // if not modify, then breakeven
   bool isModifySignal = signal.type == "MODIFY";
   string operation = isModifySignal ? "SL modification" : "SL breakeven";
@@ -916,28 +1044,45 @@ bool CloseCurrentOrder(Signal &signal)
   string symbol = OrderSymbol();
   int orderType = OrderType();
 
-  RefreshRates();
-  double closePrice;
-  if(orderType == OP_BUY) {
-    closePrice = MarketInfo(symbol, MODE_BID);
-  } else if(orderType == OP_SELL) {
-    closePrice = MarketInfo(symbol, MODE_ASK);
+  bool result = false;
+  
+  if(orderType <= 1) {
+    // Market orders (OP_BUY, OP_SELL) - close them
+    RefreshRates();
+    double closePrice;
+    if(orderType == OP_BUY) {
+      closePrice = MarketInfo(symbol, MODE_BID);
+    } else {
+      closePrice = MarketInfo(symbol, MODE_ASK);
+    }
+    
+    result = OrderClose(ticket, lots, closePrice, slippage, clrRed);
+    if(result) {
+      PrintLog(eaName + ": ✅ Closed market order ticket " + IntegerToString(ticket) +
+               " GID=" + IntegerToString(signal.groupId) +
+               " Symbol=" + symbol +
+               " Lots=" + DoubleToString(lots, 2));
+    } else {
+      PrintLog(eaName + ": ❌ Failed to close market order ticket " + IntegerToString(ticket) +
+               " GID=" + IntegerToString(signal.groupId) +
+               " error=" + IntegerToString(GetLastError()));
+    }
   } else {
-    return false; // Skip pending orders for now
+    // Pending orders (limit/stop orders) - delete them
+    result = OrderDelete(ticket);
+    if(result) {
+      PrintLog(eaName + ": ✅ Deleted pending order ticket " + IntegerToString(ticket) +
+               " GID=" + IntegerToString(signal.groupId) +
+               " Symbol=" + symbol +
+               " Lots=" + DoubleToString(lots, 2));
+    } else {
+      PrintLog(eaName + ": ❌ Failed to delete pending order ticket " + IntegerToString(ticket) +
+               " GID=" + IntegerToString(signal.groupId) +
+               " error=" + IntegerToString(GetLastError()));
+    }
   }
-
-  if(OrderClose(ticket, lots, closePrice, slippage, clrRed)) {
-    PrintLog(eaName + ": ✅ Closed order ticket " + IntegerToString(ticket) +
-             " GID=" + IntegerToString(signal.groupId) +
-             " Symbol=" + symbol +
-             " Lots=" + DoubleToString(lots, 2));
-    return true;
-  } else {
-    PrintLog(eaName + ": ❌ Failed to close order ticket " + IntegerToString(ticket) +
-             " GID=" + IntegerToString(signal.groupId) +
-             " error=" + IntegerToString(GetLastError()));
-    return false;
-  }
+  
+  return result;
 }
 
 //+------------------------------------------------------------------+
@@ -1562,7 +1707,400 @@ double GetPositionSize(Signal &signal)
 
   return positionSize;
 }
-//+------------------------------------------------------------------+
 
+//+------------------------------------------------------------------+
+//| ProcessRangeSignal: Handle signals with entry ranges            |
+//+------------------------------------------------------------------+
+void ProcessRangeSignal(Signal &signal)
+{
+  if(debugMode)
+    PrintLog(eaName + ": Processing range signal GID=" + IntegerToString(signal.groupId) + 
+             " Range: " + DoubleToString(signal.rangeMin, MarketInfo(signal.symbol, MODE_DIGITS)) + 
+             "-" + DoubleToString(signal.rangeMax, MarketInfo(signal.symbol, MODE_DIGITS)));
+             
+  // Check if current price is within range
+  if(IsCurrentPriceInRange(signal)) {
+    // Execute market orders immediately
+    RefreshRates();
+    double currentPrice = (signal.type == "BUY") ? MarketInfo(signal.symbol, MODE_ASK) : MarketInfo(signal.symbol, MODE_BID);
+    signal.entry = currentPrice;
+    signal.hasRange = false;  // Remove range flag for normal processing
+    
+    if(debugMode)
+      PrintLog(eaName + ": Current price " + DoubleToString(currentPrice, MarketInfo(signal.symbol, MODE_DIGITS)) + 
+               " is within range, executing market orders");
+    
+    SendOrders(signal);
+  } else {
+    // Create limit orders at range edge (signal.entry already set correctly by Python)
+    if(debugMode)
+      PrintLog(eaName + ": Current price outside range, creating limit orders at " + 
+               DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)));
+               
+    CreateLimitOrders(signal, signal.entry);
+  }
+}
+
+//+------------------------------------------------------------------+
+//| IsCurrentPriceInRange: Check if current price is within range   |
+//+------------------------------------------------------------------+
+bool IsCurrentPriceInRange(Signal &signal)
+{
+  if(!signal.hasRange) return true;
+  
+  RefreshRates();
+  double currentPrice = (signal.type == "BUY") ? MarketInfo(signal.symbol, MODE_ASK) : MarketInfo(signal.symbol, MODE_BID);
+  
+  return (currentPrice >= signal.rangeMin && currentPrice <= signal.rangeMax);
+}
+
+//+------------------------------------------------------------------+
+//| CreateLimitOrders: Create limit orders at range edge            |
+//+------------------------------------------------------------------+
+void CreateLimitOrders(Signal &signal, double limitPrice)
+{
+  int digits = MarketInfo(signal.symbol, MODE_DIGITS);
+  double point = MarketInfo(signal.symbol, MODE_POINT);
+  int stopLevel = MarketInfo(signal.symbol, MODE_STOPLEVEL);
+  
+  bool shouldBuy = (signal.type == "BUY");
+  RefreshRates();
+  double currentPrice = shouldBuy ? MarketInfo(signal.symbol, MODE_ASK) : MarketInfo(signal.symbol, MODE_BID);
+  
+  // Correct order type selection
+  int orderType;
+  if(shouldBuy) {
+    orderType = (limitPrice > currentPrice) ? OP_BUYSTOP : OP_BUYLIMIT;
+  } else {
+    orderType = (limitPrice < currentPrice) ? OP_SELLSTOP : OP_SELLLIMIT;
+  }
+  
+  // Distance validation
+  double minDist = MathMax(stopLevel * point, point * 5);
+  limitPrice = NormalizeDouble(limitPrice, digits);
+  
+  // SL/TP distance validation
+  double rawSL = NormalizeDouble(signal.stopLoss, digits);
+  if(shouldBuy && limitPrice - rawSL < minDist) {
+    rawSL = limitPrice - minDist;
+  }
+  if(!shouldBuy && rawSL - limitPrice < minDist) {
+    rawSL = limitPrice + minDist;
+  }
+  
+  // Create orders for each TP
+  double lotSize = GetPositionSize(signal);
+  datetime expirationTime = 0; // No expiration (we'll manually expire them)
+  int magicNumber = GetMagic(signal.channelName);
+  color orderColor = shouldBuy ? Blue : Red;
+  
+  bool ordersCreated = false;
+  for(int k = 0; k < signal.tpCount; k++) {
+    // Margin validation using market order type (fix for AccountFreeMarginCheck)
+    int marginCheckType = shouldBuy ? OP_BUY : OP_SELL;
+    double marginRequired = AccountFreeMarginCheck(signal.symbol, marginCheckType, lotSize);
+    
+    if(marginRequired < 0) {
+      PrintLog(eaName + ": Insufficient margin for limit order " + IntegerToString(k+1) + 
+               ", required: " + DoubleToString(-marginRequired, 2));
+      continue;
+    }
+    
+    // Format comment for limit orders
+    string comment = FormatMT4Comment(signal.groupId, signal.channelName, k+1);
+    
+    int ticket = OrderSend(signal.symbol, orderType, lotSize, limitPrice, slippage,
+                          rawSL, signal.tpLevels[k], comment, magicNumber, expirationTime, orderColor);
+    
+    if(ticket > 0) {
+      ordersCreated = true;
+      if(debugMode)
+        PrintLog(eaName + ": Limit order " + IntegerToString(ticket) + " created: " + 
+                 signal.type + " " + DoubleToString(lotSize, 2) + " " + signal.symbol + 
+                 " at " + DoubleToString(limitPrice, digits) + 
+                 " SL:" + DoubleToString(rawSL, digits) + 
+                 " TP:" + DoubleToString(signal.tpLevels[k], digits));
+    } else {
+      PrintLog(eaName + ": Failed to create limit order " + IntegerToString(k+1) + 
+               " Error: " + IntegerToString(GetLastError()));
+    }
+  }
+  
+  // Track limit order creation time if any orders were created
+  if(ordersCreated) {
+    hasActiveLimitOrders = true;
+    limitOrderCreationTime = TimeCurrent();
+    if(debugMode)
+      PrintLog(eaName + ": Limit orders created at " + TimeToString(limitOrderCreationTime) + 
+               " (will expire in " + IntegerToString(limitOrderExpirationMinutes) + " minutes)");
+  }
+}
+
+//+------------------------------------------------------------------+
+//| ProcessLimitOrderExpiration: Close expired limit orders         |
+//+------------------------------------------------------------------+
+void ProcessLimitOrderExpiration()
+{
+  if(!hasActiveLimitOrders || limitOrderCreationTime == 0) {
+    return;
+  }
+  
+  datetime currentTime = TimeCurrent();
+  int elapsedMinutes = (int)((currentTime - limitOrderCreationTime) / 60);
+  
+  if(elapsedMinutes >= limitOrderExpirationMinutes) {
+    if(debugMode)
+      PrintLog(eaName + ": Limit orders expired after " + IntegerToString(elapsedMinutes) + " minutes, closing pending orders");
+      
+    // Close all pending limit orders
+    bool foundPendingOrders = false;
+    for(int i = OrdersTotal() - 1; i >= 0; i--) {
+      if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+        if(OrderType() > 1) { // Pending orders (OP_BUYLIMIT, OP_SELLLIMIT, OP_BUYSTOP, OP_SELLSTOP)
+          bool deleteResult = OrderDelete(OrderTicket());
+          if(deleteResult) {
+            foundPendingOrders = true;
+            if(debugMode)
+              PrintLog(eaName + ": Deleted expired limit order " + IntegerToString(OrderTicket()));
+          } else {
+            PrintLog(eaName + ": Failed to delete limit order " + IntegerToString(OrderTicket()) + 
+                     " Error: " + IntegerToString(GetLastError()));
+          }
+        }
+      }
+    }
+    
+    // Reset tracking if we processed any pending orders or if none found
+    hasActiveLimitOrders = false;
+    limitOrderCreationTime = 0;
+  }
+}
+
+//+------------------------------------------------------------------+
+//| ProcessWarmupSignal: Handle warmup signals with EA calculations |
+//+------------------------------------------------------------------+
+void ProcessWarmupSignal(Signal &signal)
+{
+  if(debugMode)
+    PrintLog(eaName + ": Processing warmup signal GID=" + IntegerToString(signal.groupId) + " from channel '" + signal.channelName + "'");
+    
+  // Calculate warmup levels (already implemented in CalculateWarmupLevels function)
+  CalculateWarmupLevels(signal);
+  
+  // Create market orders immediately
+  SendOrders(signal);
+}
+
+//+------------------------------------------------------------------+
+//| ProcessWarmupModifyWithRange: Handle warmup modify with range   |
+//+------------------------------------------------------------------+
+void ProcessWarmupModifyWithRange(Signal &signal)
+{
+  if(debugMode)
+    PrintLog(eaName + ": Processing warmup modify with range GID=" + IntegerToString(signal.groupId) + 
+             " Range: " + DoubleToString(signal.rangeMin, MarketInfo(signal.symbol, MODE_DIGITS)) + 
+             "-" + DoubleToString(signal.rangeMax, MarketInfo(signal.symbol, MODE_DIGITS)));
+             
+  // Check if current market price is within the range
+  RefreshRates();
+  double currentPrice = (signal.type == "BUY") ? MarketInfo(signal.symbol, MODE_ASK) : MarketInfo(signal.symbol, MODE_BID);
+  bool priceInRange = (currentPrice >= signal.rangeMin && currentPrice <= signal.rangeMax);
+  
+  if(priceInRange) {
+    // Current price is in range - just modify existing warmup orders with new TP/SL
+    if(debugMode)
+      PrintLog(eaName + ": Current price " + DoubleToString(currentPrice, MarketInfo(signal.symbol, MODE_DIGITS)) + 
+               " is within range, modifying existing orders");
+               
+    // Use standard modify logic but update the TP levels too
+    ProcessWarmupModifyOrders(signal);
+  } else {
+    // Current price is outside range - need to check warmup entry vs range
+    double warmupEntry = GetWarmupEntryPrice(signal.groupId);
+    bool needLimitOrder = false;
+    
+    // Get the original order type from existing warmup order
+    string originalOrderType = GetWarmupOrderType(signal.groupId);
+    
+    if(debugMode)
+      PrintLog(eaName + ": Warmup analysis - Entry: " + DoubleToString(warmupEntry, MarketInfo(signal.symbol, MODE_DIGITS)) + 
+               ", Type: " + originalOrderType + ", Range: " + DoubleToString(signal.rangeMin, MarketInfo(signal.symbol, MODE_DIGITS)) + 
+               "-" + DoubleToString(signal.rangeMax, MarketInfo(signal.symbol, MODE_DIGITS)));
+    
+    if(originalOrderType == "BUY") {
+      // BUY: if warmup entry > range_max, need limit order at range_min
+      needLimitOrder = (warmupEntry > signal.rangeMax);
+      if(debugMode)
+        PrintLog(eaName + ": BUY analysis - warmupEntry(" + DoubleToString(warmupEntry, MarketInfo(signal.symbol, MODE_DIGITS)) + 
+                 ") > rangeMax(" + DoubleToString(signal.rangeMax, MarketInfo(signal.symbol, MODE_DIGITS)) + ") = " + 
+                 (needLimitOrder ? "true" : "false"));
+    } else if(originalOrderType == "SELL") {
+      // SELL: if warmup entry < range_min, need limit order at range_max  
+      needLimitOrder = (warmupEntry < signal.rangeMin);
+      if(debugMode)
+        PrintLog(eaName + ": SELL analysis - warmupEntry(" + DoubleToString(warmupEntry, MarketInfo(signal.symbol, MODE_DIGITS)) + 
+                 ") < rangeMin(" + DoubleToString(signal.rangeMin, MarketInfo(signal.symbol, MODE_DIGITS)) + ") = " + 
+                 (needLimitOrder ? "true" : "false"));
+    }
+    
+    if(needLimitOrder) {
+      if(debugMode)
+        PrintLog(eaName + ": Warmup entry " + DoubleToString(warmupEntry, MarketInfo(signal.symbol, MODE_DIGITS)) + 
+                 " is outside optimal range, closing warmup and creating limit orders");
+                 
+      // Close existing warmup orders
+      CloseOrdersByGroupId(signal.groupId, signal.channelName);
+      
+      // Create limit orders at range edge - use original order type
+      signal.entry = (originalOrderType == "BUY") ? signal.rangeMin : signal.rangeMax;
+      signal.type = originalOrderType; // Set correct type for CreateLimitOrders
+      CreateLimitOrders(signal, signal.entry);
+    } else {
+      // Warmup entry is acceptable, just modify
+      if(debugMode)
+        PrintLog(eaName + ": Warmup entry " + DoubleToString(warmupEntry, MarketInfo(signal.symbol, MODE_DIGITS)) + 
+                 " is acceptable, modifying orders");
+      ProcessWarmupModifyOrders(signal);
+    }
+  }
+}
+
+//+------------------------------------------------------------------+
+//| ProcessWarmupModifyOrders: Modify existing warmup orders        |
+//+------------------------------------------------------------------+
+void ProcessWarmupModifyOrders(Signal &signal)
+{
+  int updatedCount = 0;
+  int total = OrdersTotal();
+  
+  for(int i = total - 1; i >= 0; i--) {
+    if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+      continue;
+    }
+    
+    int orderGid;
+    string orderChannel;
+    if(!ParseOrderComment(OrderComment(), orderGid, orderChannel)) {
+      continue;
+    }
+    
+    if(orderGid != signal.groupId || orderChannel != signal.channelName) {
+      continue;
+    }
+    
+    // Update both SL and TP for warmup modify
+    bool modified = false;
+    double newSL = NormalizeDouble(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS));
+    
+    // Determine which TP level this order should have based on comment
+    int tpLevel = 1; // Default to TP1
+    string comment = OrderComment();
+    if(StringFind(comment, "|2") > 0) tpLevel = 2;
+    else if(StringFind(comment, "|3") > 0) tpLevel = 3;
+    
+    double newTP = 0;
+    if(tpLevel <= signal.tpCount) {
+      newTP = NormalizeDouble(signal.tpLevels[tpLevel - 1], MarketInfo(signal.symbol, MODE_DIGITS));
+    }
+    
+    modified = OrderModify(OrderTicket(), OrderOpenPrice(), newSL, newTP, 0, clrBlue);
+    
+    if(modified) {
+      updatedCount++;
+      if(debugMode)
+        PrintLog(eaName + ": Modified warmup order " + IntegerToString(OrderTicket()) + 
+                 " SL:" + DoubleToString(newSL, MarketInfo(signal.symbol, MODE_DIGITS)) +
+                 " TP:" + DoubleToString(newTP, MarketInfo(signal.symbol, MODE_DIGITS)));
+    } else {
+      PrintLog(eaName + ": Failed to modify warmup order " + IntegerToString(OrderTicket()) + 
+               " Error: " + IntegerToString(GetLastError()));
+    }
+  }
+  
+  PrintLog(eaName + ": ✅ Warmup modify completed for " + IntegerToString(updatedCount) + " orders with GID=" + IntegerToString(signal.groupId));
+}
+
+//+------------------------------------------------------------------+
+//| GetWarmupEntryPrice: Get entry price from existing warmup order |
+//+------------------------------------------------------------------+
+double GetWarmupEntryPrice(int groupId)
+{
+  for(int i = 0; i < OrdersTotal(); i++) {
+    if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+      int orderGid;
+      string orderChannel;
+      if(ParseOrderComment(OrderComment(), orderGid, orderChannel)) {
+        if(orderGid == groupId) {
+          return OrderOpenPrice();
+        }
+      }
+    }
+  }
+  return 0; // Not found
+}
+
+//+------------------------------------------------------------------+
+//| GetWarmupOrderType: Get order type from existing warmup order   |
+//+------------------------------------------------------------------+
+string GetWarmupOrderType(int groupId)
+{
+  for(int i = 0; i < OrdersTotal(); i++) {
+    if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+      int orderGid;
+      string orderChannel;
+      if(ParseOrderComment(OrderComment(), orderGid, orderChannel)) {
+        if(orderGid == groupId) {
+          if(OrderType() == OP_BUY || OrderType() == OP_BUYLIMIT || OrderType() == OP_BUYSTOP) {
+            return "BUY";
+          } else if(OrderType() == OP_SELL || OrderType() == OP_SELLLIMIT || OrderType() == OP_SELLSTOP) {
+            return "SELL";
+          }
+        }
+      }
+    }
+  }
+  return ""; // Not found
+}
+
+//+------------------------------------------------------------------+
+//| CloseOrdersByGroupId: Close all orders with specific group ID   |
+//+------------------------------------------------------------------+
+void CloseOrdersByGroupId(int groupId, string channelName)
+{
+  int closedCount = 0;
+  for(int i = OrdersTotal() - 1; i >= 0; i--) {
+    if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+      int orderGid;
+      string orderChannel;
+      if(ParseOrderComment(OrderComment(), orderGid, orderChannel)) {
+        if(orderGid == groupId && orderChannel == channelName) {
+          bool closeResult = false;
+          if(OrderType() <= 1) {
+            // Market order - close it
+            RefreshRates();
+            double closePrice = (OrderType() == OP_BUY) ? MarketInfo(OrderSymbol(), MODE_BID) : MarketInfo(OrderSymbol(), MODE_ASK);
+            closeResult = OrderClose(OrderTicket(), OrderLots(), closePrice, slippage, clrRed);
+          } else {
+            // Pending order - delete it
+            closeResult = OrderDelete(OrderTicket());
+          }
+          
+          if(closeResult) {
+            closedCount++;
+            if(debugMode)
+              PrintLog(eaName + ": Closed warmup order " + IntegerToString(OrderTicket()));
+          } else {
+            PrintLog(eaName + ": Failed to close warmup order " + IntegerToString(OrderTicket()) + 
+                     " Error: " + IntegerToString(GetLastError()));
+          }
+        }
+      }
+    }
+  }
+  
+  if(closedCount > 0) {
+    PrintLog(eaName + ": Closed " + IntegerToString(closedCount) + " warmup orders for GID=" + IntegerToString(groupId));
+  }
+}
 
 //+------------------------------------------------------------------+

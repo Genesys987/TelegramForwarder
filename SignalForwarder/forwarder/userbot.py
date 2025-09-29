@@ -172,7 +172,10 @@ async def process_warmup_signal(message_text: str, message_id: int, message_date
         return None
 
 async def process_fxtm_signal_modify(signal_data: dict):
-    """Process FXTM signals as modifications to existing warmup signals."""
+    """
+    Process FXTM signals as modifications to existing warmup signals.
+    Handles range detection and warmup entry validation.
+    """
     global current_warmup_gid
     
     # Check if there's a pending warmup signal
@@ -182,17 +185,50 @@ async def process_fxtm_signal_modify(signal_data: dict):
         
     logger.info(f"   FXTM signal modify: GID {current_warmup_gid} frissítése új TP/SL értékekkel")
     
-    # Create modify signal with new TP/SL values but keep original GID
-    modify_data = {
-        "signal_type": "MODIFY",
-        "group_id": current_warmup_gid,  # Use original warmup GID
-        "symbol": signal_data.get("symbol", "XAUUSD"),
-        "take_profits": signal_data.get("take_profits", []),
-        "stop_loss": signal_data.get("stop_loss"),
-        "channel_name": WARMUP_SIGNAL_CHANNEL,  # Use configured channel for EA recognition
-        "timestamp_utc": signal_data.get("timestamp_utc"),
-        "is_modify": True
-    }
+    # Check if the signal has a range
+    has_range = "entry_range" in signal_data
+    if has_range:
+        range_info = signal_data["entry_range"]
+        range_min = range_info["min"]
+        range_max = range_info["max"]
+        warmup_entry = 0  # Warmup signals always have entry = 0 (market price)
+        
+        logger.info(f"   Range detected: {range_min}-{range_max}")
+        
+        # TODO: Get current market price for warmup entry validation
+        # For now, we'll assume we need to check if the warmup entry (market price at warmup time)
+        # would be within the range. Since we can't get historical prices, we'll process as modify
+        # and let the EA handle the range validation with current market prices.
+        
+        # Create modify signal with range information
+        modify_data = {
+            "signal_type": "MODIFY",
+            "group_id": current_warmup_gid,
+            "symbol": signal_data.get("symbol", "XAUUSD"),
+            "entry": signal_data.get("entry"),  # Keep the range-calculated entry price
+            "take_profits": signal_data.get("take_profits", []),
+            "stop_loss": signal_data.get("stop_loss"),
+            "channel_name": WARMUP_SIGNAL_CHANNEL,
+            "timestamp_utc": signal_data.get("timestamp_utc"),
+            "entry_range": range_info,  # Pass range info to EA
+            "is_modify": True,
+            "is_warmup_modify": True  # Special flag for warmup modifications
+        }
+        
+        logger.info(f"   Warmup modify with range: {range_min}-{range_max}, entry: {signal_data.get('entry')}")
+    else:
+        # No range - standard modify
+        modify_data = {
+            "signal_type": "MODIFY",
+            "group_id": current_warmup_gid,
+            "symbol": signal_data.get("symbol", "XAUUSD"),
+            "take_profits": signal_data.get("take_profits", []),
+            "stop_loss": signal_data.get("stop_loss"),
+            "channel_name": WARMUP_SIGNAL_CHANNEL,
+            "timestamp_utc": signal_data.get("timestamp_utc"),
+            "is_modify": True,
+            "is_warmup_modify": True
+        }
     
     # Add to queue as modification
     if add_signal_to_queue(modify_data):
