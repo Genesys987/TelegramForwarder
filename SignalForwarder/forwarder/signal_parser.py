@@ -1,16 +1,10 @@
 import re
-import os
-from dotenv import dotenv_values
+from signal_data import SignalData
 
 # Dictionary of common symbol mappings
 symbol_mappings = {
     'GOLD': 'XAUUSD'
 }
-
-# Load warmup signal settings from .env
-config = dotenv_values(".env")
-WARMUP_SIGNAL_ENABLED = config.get("WARMUP_SIGNAL_ENABLED", "false").lower() == "true"
-WARMUP_SIGNAL_CHANNEL = config.get("WARMUP_SIGNAL_CHANNEL", "FXTM")
 
 # Ready message patterns for warmup signals
 READY_MESSAGE_PATTERNS = [
@@ -106,7 +100,7 @@ def parse_entry_price(entry_text, signal_type):
         print(f"Warning: Invalid range format: {entry_text}")
         return entry_text
 
-def parse_single_line_signal(text):
+def parse_single_line_signal(text) -> SignalData | None:
     """
     Parse a single-line signal where all components are on one line
     Example: "BUY BTCUSD ENTRY 89300.00 TP 89500.00 SL 88600.00"
@@ -122,8 +116,8 @@ def parse_single_line_signal(text):
         if len(lines) > 1:
             return None  # Let multi-line parser handle this
     
-    signal = {}
-    take_profits = []
+    # Use SignalData as the signal object from the start
+    signal = SignalData()
     
     # Check for immediate entry (NOW keyword) first
     is_immediate = 'NOW' in text.upper()
@@ -135,13 +129,13 @@ def parse_single_line_signal(text):
     pipe_match = re.search(pipe_pattern, text, re.IGNORECASE)
     if pipe_match:
         raw_symbol = pipe_match.group(1).upper()
-        signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-        signal["signal_type"] = pipe_match.group(2).upper()
+        signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+        signal.signal_type = pipe_match.group(2).upper()
         if not is_immediate:  # Only set entry if not immediate
-            signal["entry"] = parse_entry_price(pipe_match.group(3), signal["signal_type"])
+            signal.entry = parse_entry_price(pipe_match.group(3), signal.signal_type)
     
     # Pattern 2: Enhanced regex patterns for NOW signals and regular signals
-    if not signal.get("signal_type"):
+    if not signal.signal_type:
         regular_patterns = [
             # Enhanced patterns for NOW signals with emojis
             r'🚨?\s*([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*🚨?',                    # 🚨 GOLD SELL NOW 🚨
@@ -166,68 +160,67 @@ def parse_single_line_signal(text):
                     if pattern == r'🚨?\s*([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*🚨?':
                         # 🚨 SYMBOL BUY/SELL NOW 🚨
                         raw_symbol = match.group(1).upper()
-                        signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                        signal["signal_type"] = match.group(2).upper()
+                        signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                        signal.signal_type = match.group(2).upper()
                     elif pattern == r'(BUY|SELL)\s+([\w\.\/\-]+)\s+NOW':
                         # BUY/SELL SYMBOL NOW
-                        signal["signal_type"] = match.group(1).upper()
+                        signal.signal_type = match.group(1).upper()
                         raw_symbol = match.group(2).upper()
-                        signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                        signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                     elif pattern == r'([\w\.\/\-]+)\s+NOW\s+(BUY|SELL)':
                         # SYMBOL NOW BUY/SELL
                         raw_symbol = match.group(1).upper()
-                        signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                        signal["signal_type"] = match.group(2).upper()
+                        signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                        signal.signal_type = match.group(2).upper()
                     elif pattern == r'NOW\s+(BUY|SELL)\s+([\w\.\/\-]+)':
                         # NOW BUY/SELL SYMBOL
-                        signal["signal_type"] = match.group(1).upper()
+                        signal.signal_type = match.group(1).upper()
                         raw_symbol = match.group(2).upper()
-                        signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                        signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                     elif pattern == r'I[\'\u2019]?M\s+(SELLING|BUYING)\s+([\w\.\/\-]+)\s+NOW\s*\(([\d\-\s@\.]+)\)':
                         # I'M SELLING XAUUSD NOW (3337 - 3340)
                         action = match.group(1).upper()
-                        signal["signal_type"] = "SELL" if action == "SELLING" else "BUY"
+                        signal.signal_type = "SELL" if action == "SELLING" else "BUY"
                         raw_symbol = match.group(2).upper()
-                        signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                        signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                         # Extract range from parentheses and use as entry price
                         range_text = match.group(3).strip()
-                        signal["entry"] = parse_entry_price(range_text, signal["signal_type"])
-                        signal["_range_info"] = range_text
+                        signal.entry = parse_entry_price(range_text, signal.signal_type)
                 elif 'FROM' in pattern:
                     # FROM format: SYMBOL BUY/SELL FROM price
                     raw_symbol = match.group(1).upper()
-                    signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                    signal["signal_type"] = match.group(2).upper()
+                    signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                    signal.signal_type = match.group(2).upper()
                     if not is_immediate:
-                        signal["entry"] = parse_entry_price(match.group(3), signal["signal_type"])
+                        signal.entry = parse_entry_price(match.group(3), signal.signal_type)
                 elif '@' in pattern:
                     # @ format: SYMBOL BUY/SELL @price-range
                     raw_symbol = match.group(1).upper()
-                    signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                    signal["signal_type"] = match.group(2).upper()
+                    signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                    signal.signal_type = match.group(2).upper()
                     if not is_immediate:
-                        signal["entry"] = parse_entry_price(match.group(3), signal["signal_type"])
+                        signal.entry = parse_entry_price(match.group(3), signal.signal_type)
                 elif pattern == r'([\w\.\/\-]+)\s+(BUY|SELL)\s+([\d\-@]+)':
                     # SYMBOL BUY/SELL price-range format: Gold Sell 3341-3346
                     raw_symbol = match.group(1).upper()
-                    signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                    signal["signal_type"] = match.group(2).upper()
+                    signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                    signal.signal_type = match.group(2).upper()
                     if not is_immediate:
-                        signal["entry"] = parse_entry_price(match.group(3), signal["signal_type"])
+                        signal.entry = parse_entry_price(match.group(3), signal.signal_type)
                 elif pattern == r'([\w\.\/\-]+)\s+(BUY|SELL)\s+([\d\/\.]+)':
                     # SYMBOL BUY/SELL price format: XAUUSD BUY 3417
                     raw_symbol = match.group(1).upper()
-                    signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                    signal["signal_type"] = match.group(2).upper()
+                    signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                    signal.signal_type = match.group(2).upper()
                     if not is_immediate:
-                        signal["entry"] = parse_entry_price(match.group(3), signal["signal_type"])
+                        signal.entry = parse_entry_price(match.group(3), signal.signal_type)
                 else:
                     # Regular format: BUY/SELL SYMBOL price
-                    signal["signal_type"] = match.group(1).upper()
+                    signal.signal_type = match.group(1).upper()
                     raw_symbol = match.group(2).upper()
-                    signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                    signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                     if len(match.groups()) >= 3 and not is_immediate:
-                        signal["entry"] = parse_entry_price(match.group(3), signal["signal_type"])
+                        signal.entry = parse_entry_price(match.group(3), signal.signal_type)
                 break
     
     # Extract all TP values using multiple patterns (enhanced for emojis)
@@ -251,8 +244,8 @@ def parse_single_line_signal(text):
                     # Single capture group or string
                     tp_value = float(tp_match if isinstance(tp_match, str) else tp_match[0])
                 
-                if tp_value not in take_profits and tp_value > 0.1:  # Filter out very small numbers but allow forex values
-                    take_profits.append(tp_value)
+                if tp_value not in signal.take_profits and tp_value > 0.1:
+                    signal.take_profits.append(tp_value)
             except (ValueError, IndexError):
                 continue
     
@@ -269,35 +262,26 @@ def parse_single_line_signal(text):
         sl_match = re.search(sl_pattern, text, re.IGNORECASE)
         if sl_match:
             try:
-                signal["stop_loss"] = float(sl_match.group(1))
+                signal.stop_loss = float(sl_match.group(1))
                 break
             except ValueError:
                 continue
     
     # Set entry to 0 for immediate signals
-    if is_immediate and signal.get("signal_type") and signal.get("symbol"):
-        signal["entry"] = 0
+    if is_immediate and signal.signal_type and signal.symbol:
+        signal.entry = 0
     
     # Sort take profits
-    if take_profits:
-        if signal.get("signal_type") == "BUY":
-            take_profits.sort()
+    if signal.take_profits:
+        if signal.signal_type == "BUY":
+            signal.take_profits.sort()
         else:
-            take_profits.sort(reverse=True)
-        signal["take_profits"] = take_profits
+            signal.take_profits.sort(reverse=True)
     
     # Validate essential components
-    if (signal.get("signal_type") and 
-        signal.get("symbol") and 
-        signal.get("entry") is not None and
-        signal.get("take_profits") and
-        len(signal.get("take_profits", [])) > 0 and
-        signal.get("stop_loss") is not None):
-        return signal
-    
-    return None
+    return signal if signal.is_valid() else None
 
-def parse_signal(text: str):
+def parse_signal(text: str) -> SignalData | None:
     """
     Parses signal text into a dictionary. Handles known formats.
 
@@ -316,6 +300,9 @@ def parse_signal(text: str):
     if not text: 
         return None # Handle empty input
 
+    signal = SignalData()
+    take_profits = signal.take_profits
+
     # First, try to parse as a single line with all components
     single_line_result = parse_single_line_signal(text)
     if single_line_result:
@@ -323,58 +310,54 @@ def parse_signal(text: str):
 
     # If single line parsing fails, use multi-line parsing
     lines = text.splitlines()
-    signal = {}
-    take_profits = []  # Collect all TPs, will be sorted later
-    
     for line in lines:
         line = line.strip()
         if not line: 
             continue # Skip empty lines
 
         # Signal Type and Symbol parsing - handle multiple formats
-        if not signal.get("signal_type"):
+        if not signal.signal_type:
             # Format 0: NOW signals with emojis like "🚨 GOLD SELL NOW 🚨"
             match_emoji_now = re.match(r'^🚨?\s*([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*🚨?', line, re.IGNORECASE)
             if match_emoji_now:
                 raw_symbol = match_emoji_now.group(1).upper()
-                signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                signal["signal_type"] = match_emoji_now.group(2).upper()
-                # NOW signals have entry = 0
-                signal["entry"] = 0
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_emoji_now.group(2).upper()
+                signal.entry = 0
                 continue
-                
+            
             # Format 1: "GOLD SELL FROM 3313/3315" or "SYMBOL BUY FROM price" (check this first, it's more specific)
             match_symbol_type_from = re.match(r'^([\w\.\/\-]+)\s+(BUY|SELL)\s+FROM\s+([\d\/\.\-@]+)', line, re.IGNORECASE)
             if match_symbol_type_from:
                 raw_symbol = match_symbol_type_from.group(1).upper()
-                signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                signal["signal_type"] = match_symbol_type_from.group(2).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_symbol_type_from.group(2).upper()
                 # Also capture the entry price from the FROM clause
                 entry_text = match_symbol_type_from.group(3)
-                signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
             
             # Format 1.5: "Sell Gold @3339-3344" or similar @ formats
             match_symbol_at = re.match(r'^(BUY|SELL)\s+([\w\.\/\-]+)\s+@([\d\-]+)', line, re.IGNORECASE)
             if match_symbol_at:
-                signal["signal_type"] = match_symbol_at.group(1).upper()
+                signal.signal_type = match_symbol_at.group(1).upper()
                 raw_symbol = match_symbol_at.group(2).upper()
-                signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                 entry_text = match_symbol_at.group(3)
-                signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
             
             # Format 2: "BUY BTCUSD" or "SELL GOLD" or "BUY CHFJPY 180.430" or "GOLD SELL 3334/3337"
             match_type_symbol = re.match(r'^(BUY|SELL)\s+([\w\.\/\-]+)\s*([\d\/\.\-@]*)', line, re.IGNORECASE)
             if match_type_symbol:
-                signal["signal_type"] = match_type_symbol.group(1).upper()
+                signal.signal_type = match_type_symbol.group(1).upper()
                 raw_symbol = match_type_symbol.group(2).upper()
                 # Map symbol if it exists in our mappings, otherwise use as-is
-                signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                 # Capture the entry price if present (including range formats)
                 entry_text = match_type_symbol.group(3).strip()
                 if entry_text:
-                    signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                    signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
             
             # Format 3: "SYMBOL SIGNAL_TYPE" or "SYMBOL SIGNAL_TYPE entry_range" (e.g., "GOLD SELL 3334/3337", "Gold Sell 3341-3346")
@@ -382,24 +365,24 @@ def parse_signal(text: str):
             match_symbol_type_alt = re.match(r'^([\w\.\/\-]+)\s+(BUY|SELL)(?!\s*:)\s*([\d\/\.\-@]*)', line, re.IGNORECASE)
             if match_symbol_type_alt:
                 raw_symbol = match_symbol_type_alt.group(1).upper()
-                signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                signal["signal_type"] = match_symbol_type_alt.group(2).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_symbol_type_alt.group(2).upper()
                 # Capture the entry price if present (including range formats)
                 entry_text = match_symbol_type_alt.group(3).strip()
                 if entry_text:
-                    signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                    signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
                 
             # Format 3.5: "SYMBOL SIGNAL_TYPE : entry_range" (e.g., "Gold buy : 3340.5 -3338")
             match_symbol_type_colon = re.match(r'^([\w\.\/\-]+)\s+(BUY|SELL)\s*:\s*([\d\/\.\-@\s]+)', line, re.IGNORECASE)
             if match_symbol_type_colon:
                 raw_symbol = match_symbol_type_colon.group(1).upper()
-                signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                signal["signal_type"] = match_symbol_type_colon.group(2).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_symbol_type_colon.group(2).upper()
                 # Capture the entry price with colon format
                 entry_text = match_symbol_type_colon.group(3).strip()
                 if entry_text:
-                    signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                    signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
             
             # Format 4: "EURUSD BUY" or "XAUUSD BUY" or "XAUUSD BUY 3417" or "XAUUSD / GOLD SELL" (symbol first, then type, optional price)
@@ -421,59 +404,58 @@ def parse_signal(text: str):
                         # If no mapping found, use the first symbol
                         raw_symbol = symbol_parts[0]
                 
-                signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                signal["signal_type"] = match_symbol_type_simple.group(2).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_symbol_type_simple.group(2).upper()
                 # Check if there's an entry price in the same line
                 entry_text = match_symbol_type_simple.group(3)
                 if entry_text:
-                    signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                    signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
             
             # Format 5: "BTCUSD | BUY 109500" (symbol | type price)
             match_pipe_format = re.match(r'^([\w\.\/\-]+)\s*\|\s*(BUY|SELL)\s+([\d\/\.\-@]+)', line, re.IGNORECASE)
             if match_pipe_format:
                 raw_symbol = match_pipe_format.group(1).upper()
-                signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
-                signal["signal_type"] = match_pipe_format.group(2).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_pipe_format.group(2).upper()
                 entry_text = match_pipe_format.group(3)
-                signal["entry"] = parse_entry_price(entry_text, signal["signal_type"])
+                signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
             
             # Format 6: "I'M SELLING XAUUSD NOW (3337 - 3340)" - handle NOW with range in parentheses
             match_im_now = re.match(r'^I[\'\u2019]?M\s+(SELLING|BUYING)\s+([\w\.\/\-]+)\s+NOW\s*\(([\d\-\s@\.]+)\)', line, re.IGNORECASE)
             if match_im_now:
                 action = match_im_now.group(1).upper()
-                signal["signal_type"] = "SELL" if action == "SELLING" else "BUY"
+                signal.signal_type = "SELL" if action == "SELLING" else "BUY"
                 raw_symbol = match_im_now.group(2).upper()
-                signal["symbol"] = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                 # Extract and parse the range from parentheses as entry price
                 range_text = match_im_now.group(3).strip()
-                signal["entry"] = parse_entry_price(range_text, signal["signal_type"])
-                signal["_range_info"] = range_text  # Keep for reference
+                signal.entry = parse_entry_price(range_text, signal.signal_type)
                 continue
 
         # Entry Price parsing
-        if not signal.get("entry"):
+        if not signal.entry:
             # Look for ENTRY keyword with optional colon
             m = re.search(r'ENTRY\s*:?\s*(?:at\s+)?([\d\/\.\-@]+)', line, re.IGNORECASE)
             if m:
                 entry_text = m.group(1)
-                signal["entry"] = parse_entry_price(entry_text, signal.get("signal_type", "BUY"))
+                signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
             
             # NEW: Check for standalone entry price line (just numbers with optional slash)
             # This should be a line that looks like an entry price but not TPs
             entry_standalone_pattern = r'^([\d\.]+(?:/[\d\.]+)?)$'
             entry_match = re.match(entry_standalone_pattern, line.strip())
-            if entry_match and signal.get("signal_type") and signal.get("symbol"):
+            if entry_match and signal.signal_type and signal.symbol:
                 # Make sure this looks like an entry price and not TPs
                 entry_text = entry_match.group(1)
-                potential_entry = parse_entry_price(entry_text, signal.get("signal_type", "BUY"))
+                potential_entry = parse_entry_price(entry_text, signal.signal_type)
                 
                 # Simple heuristic: if it's a range (contains /), treat as entry
                 # or if it's a single reasonable value for the symbol
                 if '/' in entry_text or (isinstance(potential_entry, (int, float)) and potential_entry > 0):
-                    signal["entry"] = potential_entry
+                    signal.entry = potential_entry
                     continue
 
         # Take Profits parsing - consolidated and improved
@@ -545,7 +527,7 @@ def parse_signal(text: str):
                 # Also check for single numeric TP (but only if we already have signal info and entry)
                 single_tp_pattern = r'^([\d\.]+)$'
                 single_match = re.match(single_tp_pattern, line.strip())
-                if single_match and signal.get("signal_type") and signal.get("entry") is not None:
+                if single_match and signal.signal_type and signal.entry is not None:
                     # This is likely a single TP since we already have entry
                     try:
                         tp_value = float(single_match.group(1))
@@ -559,7 +541,7 @@ def parse_signal(text: str):
             continue
 
         # Stop Loss parsing - enhanced to handle different formats
-        if not signal.get("stop_loss"):
+        if not signal.stop_loss:
             sl_patterns = [
                 r'[🔴❌🛑]\s*(?:SL|Stop\s*Loss|STOP\s*LOSS)\s*:?\s*([\d\.]+)',      # Emoji SL formats
                 r'(?:STOP\s*LOSS|SL|S\.L)\s*:?\s*(?:at\s+)?([\d\.]+)(?:\s*\([^)]*\))?',  # Regular SL with optional parentheses, including S.L format
@@ -571,7 +553,7 @@ def parse_signal(text: str):
                 m = re.search(sl_pattern, line, re.IGNORECASE)
                 if m:
                     try:
-                        signal["stop_loss"] = float(m.group(1))
+                        signal.stop_loss = float(m.group(1))
                         break
                     except ValueError:
                         print(f"Warning: Invalid number for Stop Loss: {m.group(1)}")
@@ -586,17 +568,17 @@ def parse_signal(text: str):
                 if i > 0 and isinstance(processed_tps[i-1], (int, float)):
                     # Case 1: Previous TP exists - use prev_tp ± 4
                     prev_tp = processed_tps[i-1]
-                    if signal.get("signal_type") == "BUY":
+                    if signal.signal_type == "BUY":
                         # For BUY: open TP should be higher (prev_tp + 4)
                         calculated_tp = prev_tp + 4
                     else:
                         # For SELL: open TP should be lower (prev_tp - 4)
                         calculated_tp = prev_tp - 4
                     processed_tps.append(calculated_tp)
-                elif signal.get("entry") is not None and signal.get("entry") != 0:
+                elif signal.entry is not None and signal.entry != 0:
                     # Case 2: No previous TP but have entry - use entry ± 6
-                    entry_price = signal.get("entry")
-                    if signal.get("signal_type") == "BUY":
+                    entry_price = signal.entry
+                    if signal.signal_type == "BUY":
                         # For BUY: open TP should be higher (entry + 6)
                         calculated_tp = entry_price + 6
                     else:
@@ -613,46 +595,28 @@ def parse_signal(text: str):
         take_profits = processed_tps
         
         # Sort TPs based on signal type
-        if signal.get("signal_type") == "BUY":
+        if signal.signal_type == "BUY":
             # For BUY signals, TPs should be in ascending order (higher prices)
             take_profits.sort()
         else:
             # For SELL signals, TPs should be in descending order (lower prices)
             take_profits.sort(reverse=True)
-        signal["take_profits"] = take_profits
+        signal.take_profits = take_profits
 
     # NEW: Simple check for immediate entry - set entry to 0 if NOW keyword found BUT no entry was set
-    if 'NOW' in text.upper() and signal.get("entry") is None:
-        signal["entry"] = 0
+    if 'NOW' in text.upper() and signal.entry is None:
+        signal.entry = 0
 
     # Final Validation: Check if all essential parts were found
-    if (signal.get("signal_type") and
-        signal.get("symbol") and
-        signal.get("entry") is not None and
-        signal.get("take_profits") and
-        len(signal.get("take_profits", [])) > 0 and
-        signal.get("stop_loss") is not None):
+    if (signal.is_valid()):
         
         # Debug: Show parsed signal info
-        if signal.get("channel_name"):
-            print(f"Debug: Successfully parsed signal from channel '{signal['channel_name']}': {signal['signal_type']} {signal['symbol']}")
-        
+        if signal.channel_name:
+            print(f"Debug: Successfully parsed signal from channel '{signal.channel_name}': {signal.signal_type} {signal.symbol}")
+
         return signal
     else:
-        # Log which parts are missing if debugging is needed
-        missing = []
-        if not signal.get("signal_type"):
-            missing.append("signal_type")
-        if not signal.get("symbol"):
-            missing.append("symbol")
-        if signal.get("entry") is None:
-            missing.append("entry")
-        if not signal.get("take_profits") or len(signal.get("take_profits", [])) == 0:
-            missing.append("take_profits")
-        if signal.get("stop_loss") is None:
-            missing.append("stop_loss")
-            
-        print(f"Debug: Signal parsing incomplete. Missing or invalid parts: {missing}. Original text: {text[:100]}...")
+        signal.debug_missing_parts()
         return None
 
 def format_mt4_comment(group_id: int, channel_name: str, stop_loss: float, digits: int = 5) -> str:

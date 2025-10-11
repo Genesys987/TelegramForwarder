@@ -4,16 +4,14 @@ from datetime import datetime, timezone
 from telethon import TelegramClient, events
 import traceback
 import os
-import asyncio
 import logging
-from SignalForwarder.forwarder.warmup_signals import generate_warmup_signal, is_ready_message
+from warmup_signals import generate_warmup_signal, is_ready_message
 from signal_parser import clean_channel_name, parse_signal
 from queue_manager import add_signal_to_queue
 from stoploss_update import process_stoploss_reply, SignalType, process_signal, process_stoploss_non_reply
 from config import (API_ID, API_HASH, INVITE_LINKS,
-           LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL, NON_REPLY_SL_CHANNEL_ID, WARMUP_SIGNAL_ENABLED, WARMUP_SIGNAL_CHANNEL,
-           MT4_SIGNAL_FILE_PATHS)
-import time
+           LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL, NON_REPLY_SL_CHANNEL_ID, WARMUP_SIGNAL_ENABLED, WARMUP_SIGNAL_CHANNEL)
+from signal_parser import SignalData
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +76,10 @@ async def process_new_standard_signal(message_text: str, message_id: int, messag
     # Add cleaned channel name to signal data
     if channel_name:
         clean_name = clean_channel_name(channel_name)
-        signal_data["channel_name"] = clean_name
+        signal_data.channel_name = clean_name
         logger.info(f"   Csatorna név hozzáadva: '{channel_name}' -> '{clean_name}'")
     else:
-        signal_data["channel_name"] = clean_channel_name("UNKNOWN")
+        signal_data.channel_name = clean_channel_name("UNKNOWN")
         logger.warning(f"   Figyelmeztetés: Nincs csatorna név, 'UNKN' használata")
     
     # Extract UTC timestamp in milliseconds
@@ -94,15 +92,15 @@ async def process_new_standard_signal(message_text: str, message_id: int, messag
         
         # Convert to UNIX milliseconds
         timestamp = int(message_date.timestamp())
-        signal_data["timestamp_utc"] = timestamp
+        signal_data.timestamp_utc = timestamp
         logger.info(f"   Timestamp hozzáadva: {timestamp} ({message_date.isoformat()})")
     else:
         logger.warning(f"   Figyelmeztetés: Nincs üzenet dátum, jelenlegi időt használjuk")
         timestamp = int(datetime.now(timezone.utc).timestamp())
-        signal_data["timestamp_utc"] = timestamp
+        signal_data.timestamp_utc = timestamp
 
     group_id = get_next_group_id() # Generáljuk az ÚJ GID-t
-    signal_data["group_id"] = group_id # Hozzáadjuk a dict-hez
+    signal_data.group_id = group_id # Hozzáadjuk a dict-hez
     logger.info(f"   Új GroupID: {group_id}")
 
     add_gid_mapping(message_id, group_id) # Eltároljuk az összerendelést
@@ -131,10 +129,10 @@ async def process_warmup_signal(message_text: str, message_id: int, message_date
     # Add metadata
     if channel_name:
         clean_name = clean_channel_name(channel_name)
-        signal_data["original_channel"] = clean_name  # Store original channel
+        signal_data.original_channel = clean_name  # Store original channel
         logger.info(f"   Eredeti csatorna: '{channel_name}' -> '{clean_name}'")
     else:
-        signal_data["original_channel"] = clean_channel_name("UNKNOWN")
+        signal_data.original_channel = clean_channel_name("UNKNOWN")
         logger.warning(f"   Figyelmeztetés: Nincs csatorna név, 'UNKN' használata")
     
     # Extract UTC timestamp
@@ -144,14 +142,14 @@ async def process_warmup_signal(message_text: str, message_id: int, message_date
         else:
             message_date = message_date.astimezone(timezone.utc)
         timestamp = int(message_date.timestamp())
-        signal_data["timestamp_utc"] = timestamp
+        signal_data.timestamp_utc = timestamp
         logger.info(f"   Timestamp hozzáadva: {timestamp} ({message_date.isoformat()})")
     else:
         timestamp = int(datetime.now(timezone.utc).timestamp())
-        signal_data["timestamp_utc"] = timestamp
+        signal_data.timestamp_utc = timestamp
 
     group_id = get_next_group_id()
-    signal_data["group_id"] = group_id
+    signal_data.group_id = group_id
     logger.info(f"   Új Warmup GroupID: {group_id}")
 
     add_gid_mapping(message_id, group_id)
@@ -184,16 +182,16 @@ async def process_fxtm_signal_modify(signal_data: dict):
     logger.info(f"   FXTM signal modify: GID {current_warmup_gid} frissítése új TP/SL értékekkel")
     
     # Create modify signal with new TP/SL values but keep original GID
-    modify_data = {
-        "signal_type": "MODIFY",
-        "group_id": current_warmup_gid,  # Use original warmup GID
-        "symbol": signal_data.get("symbol", "XAUUSD"),
-        "take_profits": signal_data.get("take_profits", []),
-        "stop_loss": signal_data.get("stop_loss"),
-        "channel_name": WARMUP_SIGNAL_CHANNEL,  # Use configured channel for EA recognition
-        "timestamp_utc": signal_data.get("timestamp_utc"),
-        "is_modify": True
-    }
+    modify_data = SignalData(
+      signal_type="MODIFY",
+      group_id=current_warmup_gid,  # Use original warmup GID
+      symbol=signal_data.get("symbol", "XAUUSD"),
+      take_profits=signal_data.get("take_profits", []),
+      stop_loss=signal_data.get("stop_loss"),
+      channel_name=WARMUP_SIGNAL_CHANNEL,  # Use configured channel for EA recognition
+      timestamp_utc=signal_data.get("timestamp_utc"),
+      is_modify=True
+    )
     
     # Add to queue as modification
     if add_signal_to_queue(modify_data):
@@ -353,10 +351,10 @@ async def run_userbot():
                                 message_date = message.date.replace(tzinfo=timezone.utc)
                             else:
                                 message_date = message.date.astimezone(timezone.utc)
-                            signal_data["timestamp_utc"] = int(message_date.timestamp())
+                            signal_data.timestamp_utc = int(message_date.timestamp())
                         else:
-                            signal_data["timestamp_utc"] = int(datetime.now(timezone.utc).timestamp())
-                        
+                            signal_data.timestamp_utc = int(datetime.now(timezone.utc).timestamp())
+
                         # Process as modify signal
                         warmup_gid = await process_fxtm_signal_modify(signal_data)
                         if warmup_gid:

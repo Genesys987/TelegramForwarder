@@ -1,7 +1,5 @@
 from dotenv import dotenv_values
-from SignalForwarder.forwarder.signal_parser import WARMUP_SIGNAL_ENABLED
-from SignalForwarder.forwarder.signal_data import SignalData
-
+from signal_data import SignalData
 
 import re
 

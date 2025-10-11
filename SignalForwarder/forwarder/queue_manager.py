@@ -10,6 +10,7 @@ Feladata:
 import os
 import traceback
 import logging
+from signal_data import SignalData
 from config import MT4_QUEUE_FILE_PATHS, MT4_SIGNAL_FILE_PATHS
 from signal_parser import clean_channel_name
 from datetime import datetime
@@ -44,7 +45,7 @@ def write_message_to_queue(message: str) -> bool:
             return False
     return True
 
-def add_signal_to_queue(signal_data: dict) -> bool:
+def add_signal_to_queue(signal_data: SignalData) -> bool:
     """
     Feladata, hogy a 'signal_data' dict tartalmából elkészítse azt a sort,
     amit a queue-fájlba (MT4_QUEUE_FILE_PATH) fűz hozzá.
@@ -67,41 +68,41 @@ def add_signal_to_queue(signal_data: dict) -> bool:
     """
     try:
         # 1) Alap ellenőrzés - MODIFY signaloknál entry nem kötelező
-        if signal_data.get("signal_type") == "MODIFY":
-            required_keys = ["timestamp_utc", "signal_type", "symbol", "take_profits",
+        if signal_data.signal_type == "MODIFY":
+            required_attrs = ["timestamp_utc", "signal_type", "symbol", "take_profits",
                              "stop_loss", "group_id", "channel_name"]
             # Set entry to 0 for MODIFY signals if not present
-            if "entry" not in signal_data:
-                signal_data["entry"] = 0
+            if signal_data.entry is None:
+                signal_data.entry = 0
         else:
-            required_keys = ["timestamp_utc", "signal_type", "symbol", "entry", "take_profits",
+            required_attrs = ["timestamp_utc", "signal_type", "symbol", "entry", "take_profits",
                              "stop_loss", "group_id", "channel_name"]
-        
-        if not all(key in signal_data for key in required_keys):
-            logger.error(f"❌ [QueueAdd] Hiányzó kulcsok. Van: {list(signal_data.keys())}, Kellene: {required_keys}")
+
+        if not all(hasattr(signal_data, attr) for attr in required_attrs):
+            logger.error(f"❌ [QueueAdd] Hiányzó attribútum(ok). Van: {signal_data.__dict__.keys()}, Kellene: {required_attrs}")
             return False
 
         # 2) TPs ellenőrzés - support any number of TPs (minimum 1)
-        tps = signal_data["take_profits"]
+        tps = signal_data.take_profits
         if not isinstance(tps, list) or len(tps) < 1:
             logger.error(f"❌ [QueueAdd] Érvénytelen take_profits: {tps}")
             return False
 
         # 3) Timestamp ellenőrzés
-        timestamp = signal_data["timestamp_utc"]
+        timestamp = signal_data.timestamp_utc
         if not isinstance(timestamp, int) or timestamp <= 0:
             logger.error(f"❌ [QueueAdd] Érvénytelen timestamp: {timestamp}")
             return False
 
         # 4) Sor összerakása timestamp-pel kezdve (prefix nélkül)
         tp_str = ",".join(str(tp) for tp in tps)
-        raw_channel_name = signal_data.get("channel_name", "UNKNOWN")
+        raw_channel_name = signal_data.channel_name if hasattr(signal_data, "channel_name") else "UNKNOWN"
         channel_name = clean_channel_name(raw_channel_name)  # Clean to 4-letter format
-        message = (f"{timestamp}|{signal_data['signal_type']}|{signal_data['symbol']}|{signal_data['entry']}|"
-                   f"{tp_str}|{signal_data['stop_loss']}|"
-                   f"GID:{signal_data['group_id']}|{channel_name}\n")
+        message = (f"{signal_data.timestamp_utc}|{signal_data.signal_type}|{signal_data.symbol}|{signal_data.entry}|"
+                   f"{tp_str}|{signal_data.stop_loss}|"
+                   f"GID:{signal_data.group_id}|{channel_name}\n")
 
-        logger.info(f"🔄 [QueueAdd] Signal formázva csatorna névvel '{channel_name}' (eredeti: '{raw_channel_name}'): GID:{signal_data['group_id']}")
+        logger.info(f"🔄 [QueueAdd] Signal formázva csatorna névvel '{channel_name}' (eredeti: '{raw_channel_name}'): GID:{signal_data.group_id}")
 
         # 5) I/O művelet: Hozzáfűzés az összes queue-fájlhoz
         return write_message_to_queue(message)
