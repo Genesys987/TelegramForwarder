@@ -6,7 +6,7 @@ class SignalData:
         signal_type: Optional[str] = None,
         symbol: Optional[str] = None,
         entry: Optional[float] = None,
-        take_profits: Optional[List[float | str]] = None,
+        take_profits: Optional[List[float]] = None,
         stop_loss: Optional[float] = None,
         channel_name: Optional[str] = None,
         is_warmup: bool = False,
@@ -49,7 +49,7 @@ class SignalData:
             self.stop_loss is not None
         )
 
-    def debug_missing_parts(self):
+    def debug_missing_parts(self, messageText: str):
         # Log which parts are missing if debugging is needed
         missing = []
         if not self.signal_type:
@@ -63,5 +63,5 @@ class SignalData:
         if not self.stop_loss:
             missing.append("stop_loss")
             
-        print(f"Debug: Signal parsing incomplete. Missing or invalid parts: {missing}. Original text: {text[:100]}...")
+        print(f"Debug: Signal parsing incomplete. Missing or invalid parts: {missing}. Original text: {messageText[:1000]}...")
         return None

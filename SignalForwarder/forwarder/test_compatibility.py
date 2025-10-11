@@ -5,8 +5,8 @@ Tests the complete workflow from Python signal generation to MT4 parsing
 """
 
 import unittest
-import tempfile
 import os
+from signal_data import SignalData
 from signal_parser import clean_channel_name, format_mt4_comment
 from queue_manager import add_signal_to_queue
 
@@ -102,16 +102,16 @@ class TestPythonMT4Compatibility(unittest.TestCase):
         """Test that queue file format is compatible with MT4 ReadSignalFile"""
         
         # Create test signal
-        signal_data = {
-            "timestamp_utc": 1234567890000,
-            "signal_type": "BUY",
-            "symbol": "EURUSD",
-            "entry": 1.1234,
-            "take_profits": [1.1250, 1.1270, 1.1300],
-            "stop_loss": 1.1200,
-            "group_id": 1234,
-            "channel_name": "TEST_CHANNEL"
-        }
+        signal_data = SignalData(
+            timestamp_utc=1234567890000,
+            signal_type="BUY",
+            symbol="EURUSD",
+            entry=1.1234,
+            take_profits=[1.1250, 1.1270, 1.1300],
+            stop_loss=1.1200,
+            group_id=1234,
+            channel_name="TEST_CHANNEL"
+        )
         
         # Add to queue (this generates the format)
         result = add_signal_to_queue(signal_data)
@@ -201,16 +201,16 @@ class TestPythonMT4Compatibility(unittest.TestCase):
         print("\nTesting TP array handling:")
         
         for i, tps in enumerate(tp_test_cases):
-            signal_data = {
-                "timestamp_utc": 1234567890000,
-                "signal_type": "BUY", 
-                "symbol": "EURUSD",
-                "entry": 1.1234,
-                "take_profits": tps,
-                "stop_loss": 1.1200,
-                "group_id": 1000 + i,
-                "channel_name": f"TEST{i}"
-            }
+            signal_data = SignalData(
+              timestamp_utc=1234567890000,
+              signal_type="BUY",
+              symbol="EURUSD",
+              entry=1.1234,
+              take_profits=tps,
+              stop_loss=1.1200,
+              group_id=1000 + i,
+              channel_name=f"TEST{i}"
+            )
             
             # Test Python handling
             result = add_signal_to_queue(signal_data)

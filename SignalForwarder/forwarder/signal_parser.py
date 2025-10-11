@@ -616,7 +616,7 @@ def parse_signal(text: str) -> SignalData | None:
 
         return signal
     else:
-        signal.debug_missing_parts()
+        signal.debug_missing_parts(text)
         return None
 
 def format_mt4_comment(group_id: int, channel_name: str, stop_loss: float, digits: int = 5) -> str:
