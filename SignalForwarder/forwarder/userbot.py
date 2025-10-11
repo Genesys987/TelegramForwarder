@@ -68,20 +68,19 @@ client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 sl_clause="(sl|stoploss|stop loss)"
 stoploss_regexp=fr"{sl_clause}?.*(level|change|move|moving|adjust|set|update).*{sl_clause}"
 
-async def process_new_standard_signal(message_text: str, message_id: int, message_date, channel_name: str = None):
-    logger.info(f"   Standard szignál feldolgozása (ID: {message_id}) csatornából: {channel_name or 'UNKNOWN'}...")
-    signal_data = parse_signal(message_text)
-    if not signal_data: logger.warning(f"   Szignál parse sikertelen."); return None
-    
+def populate_signal_metadata(signal_data, message_date, channel_name, is_warmup=False):
+    """
+    Populate signal_data with channel name and UTC timestamp.
+    For warmup signals, set .original_channel instead of .channel_name.
+    """
     # Add cleaned channel name to signal data
-    if channel_name:
-        clean_name = clean_channel_name(channel_name)
-        signal_data.channel_name = clean_name
-        logger.info(f"   Csatorna név hozzáadva: '{channel_name}' -> '{clean_name}'")
+    clean_name = clean_channel_name(channel_name) if channel_name else clean_channel_name("UNKNOWN")
+    if is_warmup:
+      signal_data.original_channel = clean_name
     else:
-        signal_data.channel_name = clean_channel_name("UNKNOWN")
-        logger.warning(f"   Figyelmeztetés: Nincs csatorna név, 'UNKN' használata")
-    
+      signal_data.channel_name = clean_name
+    logger.info(f"   Csatorna név hozzáadva: '{channel_name or 'UNKNOWN'}' -> '{clean_name}'")
+
     # Extract UTC timestamp in milliseconds
     if message_date:
         # Convert to UTC if not already
@@ -89,8 +88,6 @@ async def process_new_standard_signal(message_text: str, message_id: int, messag
             message_date = message_date.replace(tzinfo=timezone.utc)
         else:
             message_date = message_date.astimezone(timezone.utc)
-        
-        # Convert to UNIX milliseconds
         timestamp = int(message_date.timestamp())
         signal_data.timestamp_utc = timestamp
         logger.info(f"   Timestamp hozzáadva: {timestamp} ({message_date.isoformat()})")
@@ -98,6 +95,14 @@ async def process_new_standard_signal(message_text: str, message_id: int, messag
         logger.warning(f"   Figyelmeztetés: Nincs üzenet dátum, jelenlegi időt használjuk")
         timestamp = int(datetime.now(timezone.utc).timestamp())
         signal_data.timestamp_utc = timestamp
+
+async def process_new_standard_signal(message_text: str, message_id: int, message_date, channel_name: str = None):
+    logger.info(f"   Standard szignál feldolgozása (ID: {message_id}) csatornából: {channel_name or 'UNKNOWN'}...")
+    signal_data = parse_signal(message_text)
+    if not signal_data: logger.warning(f"   Szignál parse sikertelen."); return None
+
+    # Use helper for metadata
+    populate_signal_metadata(signal_data, message_date, channel_name, is_warmup=False)
 
     group_id = get_next_group_id() # Generáljuk az ÚJ GID-t
     signal_data.group_id = group_id # Hozzáadjuk a dict-hez
@@ -113,40 +118,21 @@ async def process_new_standard_signal(message_text: str, message_id: int, messag
 async def process_warmup_signal(message_text: str, message_id: int, message_date, channel_name: str = None):
     """Process ready messages and generate warmup signals."""
     logger.info(f"   Warmup szignál feldolgozása (ID: {message_id}) csatornából: {channel_name or 'UNKNOWN'}...")
-    
+
     is_ready, signal_type, _ = is_ready_message(message_text)
     if not is_ready:
         return None
-        
+
     logger.info(f"   Ready üzenet felismerve: {signal_type} (EA számítja ki TP/SL értékeket)")
-    
+
     # Generate warmup signal
     signal_data = generate_warmup_signal(signal_type)
     if not signal_data:
         logger.error("   Warmup signal generálás sikertelen")
         return None
-    
-    # Add metadata
-    if channel_name:
-        clean_name = clean_channel_name(channel_name)
-        signal_data.original_channel = clean_name  # Store original channel
-        logger.info(f"   Eredeti csatorna: '{channel_name}' -> '{clean_name}'")
-    else:
-        signal_data.original_channel = clean_channel_name("UNKNOWN")
-        logger.warning(f"   Figyelmeztetés: Nincs csatorna név, 'UNKN' használata")
-    
-    # Extract UTC timestamp
-    if message_date:
-        if message_date.tzinfo is None:
-            message_date = message_date.replace(tzinfo=timezone.utc)
-        else:
-            message_date = message_date.astimezone(timezone.utc)
-        timestamp = int(message_date.timestamp())
-        signal_data.timestamp_utc = timestamp
-        logger.info(f"   Timestamp hozzáadva: {timestamp} ({message_date.isoformat()})")
-    else:
-        timestamp = int(datetime.now(timezone.utc).timestamp())
-        signal_data.timestamp_utc = timestamp
+
+    # Use helper for metadata (is_warmup=True)
+    populate_signal_metadata(signal_data, message_date, channel_name, is_warmup=True)
 
     group_id = get_next_group_id()
     signal_data.group_id = group_id
