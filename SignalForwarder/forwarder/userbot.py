@@ -6,7 +6,8 @@ import traceback
 import os
 import asyncio
 import logging
-from signal_parser import clean_channel_name, parse_signal, is_ready_message, generate_warmup_signal
+from SignalForwarder.forwarder.warmup_signals import generate_warmup_signal, is_ready_message
+from signal_parser import clean_channel_name, parse_signal
 from queue_manager import add_signal_to_queue
 from stoploss_update import process_stoploss_reply, SignalType, process_signal, process_stoploss_non_reply
 from config import (API_ID, API_HASH, INVITE_LINKS,
