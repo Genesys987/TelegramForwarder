@@ -1,14 +1,10 @@
 from dotenv import dotenv_values
+from config import WARMUP_SIGNAL_CHANNEL
 from signal_data import SignalData
 
 import re
 
-# Load warmup signal settings from .env
-config = dotenv_values(".env")
-WARMUP_SIGNAL_ENABLED = config.get("WARMUP_SIGNAL_ENABLED", "false").lower() == "true"
-WARMUP_SIGNAL_CHANNEL = config.get("WARMUP_SIGNAL_CHANNEL", "FXTM")
-
-def is_ready_message(text: str):
+def is_warmup_message(text: str):
     """
     Check if the message matches any ready message pattern for warmup signals.
 
@@ -18,8 +14,6 @@ def is_ready_message(text: str):
     Returns:
         tuple: (is_ready: bool, signal_type: str or None, current_price: float or None)
     """
-    if not WARMUP_SIGNAL_ENABLED:
-        return False, None, None
 
     text_lower = text.lower()
 
@@ -72,8 +66,6 @@ def generate_warmup_signal(signal_type: str):
     Returns:
         SignalData: Generated warmup signal data with zeros for EA calculation
     """
-    if not WARMUP_SIGNAL_ENABLED:
-        return None
 
     signal_data = SignalData(
         signal_type=signal_type,

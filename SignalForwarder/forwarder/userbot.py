@@ -5,12 +5,12 @@ from telethon import TelegramClient, events
 import traceback
 import os
 import logging
-from warmup_signals import generate_warmup_signal, is_ready_message
+from warmup_signals import generate_warmup_signal, is_warmup_message
 from signal_parser import clean_channel_name, parse_signal
 from queue_manager import add_signal_to_queue
 from stoploss_update import process_stoploss_reply, SignalType, process_signal, process_stoploss_non_reply
 from config import (API_ID, API_HASH, INVITE_LINKS,
-           LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL, NON_REPLY_SL_CHANNEL_ID, WARMUP_SIGNAL_ENABLED, WARMUP_SIGNAL_CHANNEL)
+           LAST_GID_FILE, MESSAGE_GID_MAP_FILE, ARCHIVE_CHANNEL, NON_REPLY_SL_CHANNEL_ID, WARMUP_SIGNAL_CHANNEL)
 from signal_parser import SignalData
 
 logger = logging.getLogger(__name__)
@@ -119,7 +119,7 @@ async def process_warmup_signal(message_text: str, message_id: int, message_date
     """Process ready messages and generate warmup signals."""
     logger.info(f"   Warmup szignál feldolgozása (ID: {message_id}) csatornából: {channel_name or 'UNKNOWN'}...")
 
-    is_ready, signal_type, _ = is_ready_message(message_text)
+    is_ready, signal_type, _ = is_warmup_message(message_text)
     if not is_ready:
         return None
 
@@ -315,14 +315,13 @@ async def run_userbot():
                 group_id = None
                 
                 # First check if warmup signals are enabled and this is a ready message
-                if WARMUP_SIGNAL_ENABLED:
-                    is_ready, signal_type, _ = is_ready_message(message_text)
-                    if is_ready:
-                        # Process warmup signal (EA will calculate TP/SL from zeros)
-                        group_id = await process_warmup_signal(message_text, message_id, message.date, chat_title)
-                        if group_id is not None:
-                            await forward_to_archive(message, chat_title, group_id)
-                        return  # Don't process as standard signal
+                is_ready, signal_type, _ = is_warmup_message(message_text)
+                if is_ready:
+                    # Process warmup signal (EA will calculate TP/SL from zeros)
+                    group_id = await process_warmup_signal(message_text, message_id, message.date, chat_title)
+                    if group_id is not None:
+                        await forward_to_archive(message, chat_title, group_id)
+                    return  # Don't process as standard signal
                 
                 # Try to parse as standard signal
                 signal_data = parse_signal(message_text)
