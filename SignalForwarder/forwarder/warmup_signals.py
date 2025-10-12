@@ -67,7 +67,7 @@ def generate_warmup_signal(signal_type: str):
         SignalData: Generated warmup signal data with zeros for EA calculation
     """
 
-    signal_data = SignalData(
+    return SignalData(
         signal_type=signal_type,
         symbol="XAUUSD",  # Default to XAUUSD for GOLD signals
         entry=0,  # EA will use current market price
@@ -77,4 +77,3 @@ def generate_warmup_signal(signal_type: str):
         is_warmup=True  # Flag to identify warmup signals
     )
 
-    return signal_data

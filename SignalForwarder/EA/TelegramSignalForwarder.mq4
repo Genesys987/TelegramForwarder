@@ -72,9 +72,6 @@ int      warmupTickets[];
 //+------------------------------------------------------------------+
 void    PrintLog(string message);
 
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
 Signal ReadSignalFile();
 Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false);
 Signal ParseBuySellSignal(string &parts[]);
