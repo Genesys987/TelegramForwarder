@@ -68,10 +68,13 @@ string   storedTestSignal = "";
 //+------------------------------------------------------------------+
 void    PrintLog(string message);
 
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 Signal ReadSignalFile();
 Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false);
-Signal ParseBuySellSignal(string &parts[], bool shouldValidateTimestamp);
-Signal ParseActionSignal(string &parts[], bool shouldValidateTimestamp);
+Signal ParseBuySellSignal(string &parts[]);
+Signal ParseActionSignal(string &parts[]);
 void    UpdateExistingOrdersSL(Signal &signal);
 void    SendOrders(Signal &signal);
 void    ProcessModifySlSignal(Signal &signal);
@@ -127,7 +130,7 @@ void OnTimer()
     return;
   }
 
-  
+
 // Process dynamic trailing stop for existing positions
   ProcessDynamicTrailingStop();
 
@@ -250,7 +253,9 @@ Signal ReadSignalFile()
 }
 
 //+------------------------------------------------------------------+
-//|                                                                  |
+//|  ReadSignalLine: Parse a single signal line into Signal struct    |
+//|  ShouldValidateTimestamp: if true, will check signal age         |
+//|  when not backtesting                                           |
 //+------------------------------------------------------------------+
 Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
 {
@@ -301,7 +306,7 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
     }
 
     // Parse full trading signal
-    return ParseBuySellSignal(parts, shouldValidateTimestamp);
+    return ParseBuySellSignal(parts);
 
   } else if(signal.type == "BREAKEVEN" || signal.type == "CLOSE"  || signal.type == "CLOSE_HALF_BREAKEVEN" ||
             signal.type == "MODIFY") {
@@ -311,7 +316,7 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
       return signal;
     }
 
-    return ParseActionSignal(parts, shouldValidateTimestamp);
+    return ParseActionSignal(parts);
 
   }
 
@@ -321,7 +326,7 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
 //+------------------------------------------------------------------+
 //| ParseFullTradingSignal: Parse BUY/SELL trading signals          |
 //+------------------------------------------------------------------+
-Signal ParseBuySellSignal(string &parts[], bool shouldValidateTimestamp)
+Signal ParseBuySellSignal(string &parts[])
 {
   Signal signal;
 
@@ -427,7 +432,7 @@ Signal ParseBuySellSignal(string &parts[], bool shouldValidateTimestamp)
     return signal;
   }
 
-// 7) Channel Name (new field) - clean and truncate to 4 letters
+// 7) Channel Name
   if(ArraySize(parts) >= 8) {
     string rawChannelName = parts[7];
     if(StringLen(rawChannelName) == 0)
@@ -437,8 +442,7 @@ Signal ParseBuySellSignal(string &parts[], bool shouldValidateTimestamp)
     signal.channelName = "LEGC";
   }
 
-  if (shouldValidateTimestamp)
-    PrintLog(eaName + ": Parsed trading signal GID=" + IntegerToString(signal.groupId) + " from channel '" + signal.channelName + "'");
+  PrintLog(eaName + ": Parsed trading signal GID=" + IntegerToString(signal.groupId) + " from channel '" + signal.channelName + "'");
 
   signal.isValid = true;
   return signal;
@@ -447,7 +451,7 @@ Signal ParseBuySellSignal(string &parts[], bool shouldValidateTimestamp)
 //+------------------------------------------------------------------+
 //| ParseModifySignal: Parse MODIFY/CLOSE etc. SL signals                      |
 //+------------------------------------------------------------------+
-Signal ParseActionSignal(string &parts[], bool shouldValidateTimestamp)
+Signal ParseActionSignal(string &parts[])
 {
   Signal signal;
 
@@ -457,16 +461,16 @@ Signal ParseActionSignal(string &parts[], bool shouldValidateTimestamp)
   StringToUpper(signal.type);
 
   bool isModifySignal = signal.type == "MODIFY";
-  
+
   if (isModifySignal) {
     // Check if this is the new 7-part MODIFY format or old 5-part format
     int partCount = ArraySize(parts);
-    
+
     if (partCount >= 7) {
       // New format: TIMESTAMP|MODIFY|SYMBOL|ENTRY|TP1,TP2|SL|GID:xxx|CHANNEL
       signal.symbol = parts[2] + symbolPostfix;
       signal.entry = StrToDouble(parts[3]);
-      
+
       // Parse TP levels
       string tpsArr[];
       signal.tpCount = StringSplit(parts[4], ',', tpsArr);
@@ -474,26 +478,25 @@ Signal ParseActionSignal(string &parts[], bool shouldValidateTimestamp)
       for(int i=0; i<signal.tpCount; i++) {
         signal.tpLevels[i] = NormalizeDouble(StrToDouble(tpsArr[i]), MarketInfo(signal.symbol, MODE_DIGITS));
       }
-      
+
       // Parse SL
       signal.stopLoss = StrToDouble(parts[5]);
-      
+
       // Parse GID
       string gidPart = parts[6];
       if(StringFind(gidPart, "GID:") == 0) {
         signal.groupId = (int)StrToInteger(StringSubstr(gidPart, 4));
       }
-      
+
       // Parse channel name
       signal.channelName = CleanChannelName(parts[7]);
-      
-      if (shouldValidateTimestamp)
-        PrintLog(eaName + ": Parsed new format MODIFY signal GID=" + IntegerToString(signal.groupId) + 
-                 " Symbol=" + signal.symbol + 
-                 " NewSL=" + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) + 
-                 " TPCount=" + IntegerToString(signal.tpCount) + 
-                 " from channel '" + signal.channelName + "'");
-      
+
+      PrintLog(eaName + ": Parsed new format MODIFY signal GID=" + IntegerToString(signal.groupId) +
+               " Symbol=" + signal.symbol +
+               " NewSL=" + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
+               " TPCount=" + IntegerToString(signal.tpCount) +
+               " from channel '" + signal.channelName + "'");
+
     } else if (partCount >= 5) {
       // Old format: TIMESTAMP|MODIFY|NEW_SL|GID:xxx|CHANNEL
       string slPart = parts[2];
@@ -502,29 +505,28 @@ Signal ParseActionSignal(string &parts[], bool shouldValidateTimestamp)
         return signal;
       }
       signal.stopLoss = StrToDouble(slPart);
-      
+
       // Parse GID
       string gidPart = parts[3];
       if(StringFind(gidPart, "GID:") == 0) {
         signal.groupId = (int)StrToInteger(StringSubstr(gidPart, 4));
       }
-      
+
       // Parse channel name
       signal.channelName = CleanChannelName(parts[4]);
-      
-      if (shouldValidateTimestamp)
-        PrintLog(eaName + ": Parsed old format MODIFY signal GID=" + IntegerToString(signal.groupId) + 
-                 " NewSL=" + DoubleToString(signal.stopLoss, 5) + 
-                 " from channel '" + signal.channelName + "'");
+
+      PrintLog(eaName + ": Parsed old format MODIFY signal GID=" + IntegerToString(signal.groupId) +
+               " NewSL=" + DoubleToString(signal.stopLoss, 5) +
+               " from channel '" + signal.channelName + "'");
     } else {
       PrintLog(eaName + ": Invalid MODIFY signal format, expected at least 5 parts but got " + IntegerToString(partCount));
       return signal;
     }
-    
+
   } else {
     // BREAKEVEN/CLOSE signals - use original logic
     int shift = 0;
-    
+
     // Group ID
     string gidPart = parts[2 + shift];
     if(StringFind(gidPart, "GID:") != 0) {
@@ -628,10 +630,10 @@ void SendOrders(Signal &signal)
     return;
   }
 
-  // Check for warmup signal (entry=0, TP=0, SL=0)
-  bool isWarmupSignal = (signal.entry == 0.0 && signal.stopLoss == 0.0 && 
+// Check for warmup signal (entry=0, TP=0, SL=0)
+  bool isWarmupSignal = (signal.entry == 0.0 && signal.stopLoss == 0.0 &&
                          signal.tpCount >= 2 && signal.tpLevels[0] == 0.0 && signal.tpLevels[1] == 0.0);
-  
+
   if(isWarmupSignal) {
     PrintLog(eaName + ": WARMUP SIGNAL detected - Calculating TP/SL levels for GID=" + IntegerToString(signal.groupId));
     CalculateWarmupLevels(signal);
@@ -796,16 +798,16 @@ bool SetCurrentOrderStopLoss(Signal &signal)
   bool isModifySignal = signal.type == "MODIFY";
   string operation = isModifySignal ? "SL modification" : "SL breakeven";
   double newStopLoss = isModifySignal ? signal.stopLoss : OrderOpenPrice();
-  
+
   double currentSL = OrderStopLoss();
   double currentTP = OrderTakeProfit();
   int digits = MarketInfo(OrderSymbol(), MODE_DIGITS);
   double normalizedNewSL = NormalizeDouble(newStopLoss, digits);
-  
-  // For new format MODIFY with TP levels, also update TP if provided
+
+// For new format MODIFY with TP levels, also update TP if provided
   bool shouldUpdateTp = false;
   double newTp = currentTP; // Keep current TP by default
-  
+
   if (isModifySignal && signal.tpCount > 0) {
     // Extract TP level from order comment (format: GID|CHANNEL|TP_LEVEL)
     string commentParts[];
@@ -829,15 +831,15 @@ bool SetCurrentOrderStopLoss(Signal &signal)
     if (OrderModify(OrderTicket(), op, normalizedNewSL, newTp, 0, clrGold)) {
       string logMsg = "✅ " + operation + " success for ticket " + IntegerToString(OrderTicket()) +
                       " GID=" + IntegerToString(signal.groupId);
-      
+
       if (slChanged) {
         logMsg += " SL: " + DoubleToString(currentSL, digits) + " -> " + DoubleToString(normalizedNewSL, digits);
       }
-      
+
       if (tpChanged) {
         logMsg += " TP: " + DoubleToString(currentTP, digits) + " -> " + DoubleToString(newTp, digits);
       }
-      
+
       PrintLog(eaName + ": " + logMsg);
       return true;
     } else {
@@ -1139,9 +1141,6 @@ bool IsValidDouble(string s)
 //+------------------------------------------------------------------+
 string CleanChannelName(string channelName)
 {
-// This function matches the simplified Python clean_channel_name logic
-// for perfect compatibility between Python-generated and MT4-parsed comments
-
   string result = "";
   int length = StringLen(channelName);
 
@@ -1159,7 +1158,6 @@ string CleanChannelName(string channelName)
       alphaOnly += CharToStr(c - 32); // Convert to uppercase
   }
 
-// Simple truncation/padding logic to match Python exactly
   if(StringLen(alphaOnly) > 0) {
     if(StringLen(alphaOnly) <= 4) {
       result = alphaOnly;
@@ -1466,16 +1464,16 @@ void CalculateWarmupLevels(Signal &signal)
   RefreshRates();
   double currentAsk = MarketInfo(signal.symbol, MODE_ASK);
   double currentBid = MarketInfo(signal.symbol, MODE_BID);
-  
-  // Use current market price as entry
+
+// Use current market price as entry
   signal.entry = (signal.type == "BUY") ? currentAsk : currentBid;
-  
-  // Define warmup TP/SL differences (same as Python used before)
+
+// Define warmup TP/SL differences (same as Python used before)
   double tp1Diff = 4.83;  // Average TP1 difference from historical signals
-  double tp2Diff = 8.48;  // Average TP2 difference from historical signals  
+  double tp2Diff = 8.48;  // Average TP2 difference from historical signals
   double slDiff = 6.0;    // Average SL difference from historical signals
-  
-  // Calculate TP and SL based on signal type
+
+// Calculate TP and SL based on signal type
   if(signal.type == "BUY") {
     signal.tpLevels[0] = signal.entry + tp1Diff;
     signal.tpLevels[1] = signal.entry + tp2Diff;
@@ -1485,10 +1483,10 @@ void CalculateWarmupLevels(Signal &signal)
     signal.tpLevels[1] = signal.entry - tp2Diff;
     signal.stopLoss = signal.entry + slDiff;
   }
-  
-  // Set TP count for warmup signals
+
+// Set TP count for warmup signals
   signal.tpCount = 2;
-  
+
   int digits = MarketInfo(signal.symbol, MODE_DIGITS);
   PrintLog(eaName + ": Warmup levels calculated - Entry: " + DoubleToString(signal.entry, digits) +
            " TP1: " + DoubleToString(signal.tpLevels[0], digits) +
