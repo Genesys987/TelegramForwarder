@@ -16,6 +16,7 @@ extern double fallbackLotSize             = 0.02;  // Default lot size for FX or
 extern double accountRiskPercentage = 1.0; // Risk percentage per trade
 extern double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0.0 = entry, 1.0 = keep original SL
 extern double marginBufferPercentage             = 70.0;   // Amount of free margin to use maximum
+extern int warmupTimeoutSeconds = 120; // Time in seconds to keep warmup orders before auto-closing
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -27,7 +28,7 @@ static string gSignalFile               = "signals.txt";       // Incoming signa
 
 static int slippage = 20;  // maximum allowed slippage during order creation/modification
 
-int trailingScanPeriodSeconds = 3;
+int trailingScanPeriodSeconds = 2;
 
 struct Signal {
   long               timestamp;
@@ -64,6 +65,7 @@ struct Signal {
 string   eaName               = "TelegramSignalForwarder";
 int      signalFileHandle = -1;                  // File handle for reading signals in test mode
 string   storedTestSignal = "";
+int      warmupTickets[];
 
 //+------------------------------------------------------------------+
 //|--- Function Prototypes                                          |
@@ -90,7 +92,7 @@ bool SetCurrentOrderStopLoss(Signal &signal);
 void SaveSignalToFile(string signal, int groupId);
 
 // Utility functions
-bool    IsSignalTooOld(long signalTimestampMs);
+bool    IsSignalTooOld(long signalTimestampMs, int maxAgeSeconds);
 bool    FileExists(string filename);
 bool    IsValidDouble(string s);
 string  CleanChannelName(string channelName);
@@ -125,7 +127,7 @@ void OnDeinit()
 }
 
 //+------------------------------------------------------------------+
-//| Expert tick handler                                              |
+//| Timer handler (trailingScanPeriodSeconds)                      |
 //+------------------------------------------------------------------+
 void OnTimer()
 {
@@ -136,6 +138,8 @@ void OnTimer()
 
 // Process dynamic trailing stop for existing positions
   ProcessDynamicTrailingStop();
+
+  CleanupWarmupOrders();
 
 // Process new signal
   Signal signal = ReadSignalFile();
@@ -283,7 +287,7 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
   string timestampStr = parts[0];
   long signalTimestamp = StrToInteger(timestampStr);
   signal.timestamp = signalTimestamp;
-  if(shouldValidateTimestamp && IsSignalTooOld(signalTimestamp)) {
+  if(shouldValidateTimestamp && IsSignalTooOld(signalTimestamp, signalMaxAgeMinutes * 60)) {
     if(!IsTesting()) {
       PrintLog(eaName + ": Signal too old, skipping. Timestamp=" + IntegerToString(signalTimestamp));
     } else {
@@ -613,7 +617,7 @@ void SendOrders(Signal &signal)
 
   if(signal.isWarmup) {
     PrintLog(eaName + ": WARMUP SIGNAL detected - Calculating TP/SL levels for GID=" + IntegerToString(signal.groupId));
-    CalculateWarmupLevels(signal);
+    SetWarmupLevels(signal);
   }
 
   if(signal.entry == 0.0) {
@@ -714,6 +718,12 @@ void SendOrders(Signal &signal)
       PrintLog(eaName + ": Retrying with fallback SL=" + DoubleToString(fallbackSL, digits));
       ticket = OrderSend(signal.symbol, orderType, lotSize, price, slippage,
                          fallbackSL, signal.tpLevels[k], comment, magicNumber, 0 /* expiration */, cols[colorIndex]);
+    } 
+    
+    if(ticket > 0 && signal.isWarmup) {
+      PrintLog(eaName + ": Warmup order created, storing ticket=" + IntegerToString(ticket) + " for GID=" + IntegerToString(signal.groupId));
+      ArrayResize(warmupTickets, ArraySize(warmupTickets) + 1);
+      warmupTickets[ArraySize(warmupTickets) - 1] = ticket;
     }
 
     PrintLog(eaName + ": Order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket));
@@ -1048,7 +1058,7 @@ bool ParseOrderComment(string comment, int &groupId, string &channelName)
 //+------------------------------------------------------------------+
 //| IsSignalTooOld: validate if signal timestamp is too old         |
 //+------------------------------------------------------------------+
-bool IsSignalTooOld(long signalTimestamp)
+bool IsSignalTooOld(long signalTimestamp, int maxAgeSeconds)
 {
   if(signalTimestamp <= 0)
     return(true);
@@ -1061,19 +1071,18 @@ bool IsSignalTooOld(long signalTimestamp)
 
 // Calculate age in minutes
   int ageSeconds = (int)(utcTime - signalTime);
-  int ageMinutes = ageSeconds / 60;
 
-  if(IsTesting() && ageMinutes < 0) {
+  if(IsTesting() && ageSeconds < 0) {
     // In testing mode, allow negative age (future signals)
     return(true);
   }
 
-  bool isTooOld = ageMinutes > signalMaxAgeMinutes;
+  bool isTooOld = ageSeconds > maxAgeSeconds;
 
   if(debugMode || isTooOld)
     PrintLog(eaName + ": Signal age check - UTC now: " + TimeToString(utcTime) +
              ", Signal time: " + TimeToString(signalTime) +
-             ", Age: " + IntegerToString(ageMinutes) + " minutes");
+             ", Age: " + IntegerToString(ageSeconds / 60) + " minutes");
 
   return isTooOld;
 }
@@ -1434,9 +1443,9 @@ int GetMagic(string channelName)
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
-//| CalculateWarmupLevels: Calculate TP/SL for warmup signals       |
+//| SetWarmupLevels: Calculate TP/SL for warmup signals       |
 //+------------------------------------------------------------------+
-void CalculateWarmupLevels(Signal &signal)
+void SetWarmupLevels(Signal &signal)
 {
   RefreshRates();
   double currentAsk = MarketInfo(signal.symbol, MODE_ASK);
@@ -1538,3 +1547,36 @@ double GetPositionSize(Signal &signal)
   return positionSize;
 }
 //+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| CleanupWarmupOrders: Remove warmup tickets after the warmup timeout has elapsed     |
+//+------------------------------------------------------------------+
+void CleanupWarmupOrders()
+{
+  if(ArraySize(warmupTickets) == 0)
+    return;
+
+  int total = OrdersTotal();
+  int cleanedCount = 0;
+
+  for(int i=ArraySize(warmupTickets)-1; i>=0; i--) {
+    int ticket = warmupTickets[i];
+    bool selected = OrderSelect(ticket, SELECT_BY_TICKET);
+
+    if(!selected || IsSignalTooOld(OrderOpenTime(), warmupTimeoutSeconds)) {
+      // Order not found (e.g. stopped out) or too old, remove from warmup list
+      cleanedCount++;
+      // Shift remaining tickets down
+      for(int k=i; k<ArraySize(warmupTickets)-1; k++) {
+        warmupTickets[k] = warmupTickets[k+1];
+      }
+      ArrayResize(warmupTickets, ArraySize(warmupTickets)-1);
+      continue;
+    }
+
+  }
+
+   if(cleanedCount > 0) {
+      PrintLog(eaName + ": Cleaned up " + IntegerToString(cleanedCount) + " warmup orders after timeout/order close");
+   }
+}
