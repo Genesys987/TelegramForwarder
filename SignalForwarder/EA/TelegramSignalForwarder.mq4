@@ -40,6 +40,7 @@ struct Signal {
   int                groupId;
   string             channelName;
   bool               isValid;
+  bool               isWarmup;
 
                      Signal()
   {
@@ -53,6 +54,7 @@ struct Signal {
     groupId      = 0;
     channelName  = "";
     isValid      = false;
+    isWarmup     = false;
   }
 };
 
@@ -85,6 +87,7 @@ double  CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, strin
 bool    ParseOrderComment(string comment, int &groupId, string &channelName);
 bool CloseCurrentOrder(Signal &signal);
 bool SetCurrentOrderStopLoss(Signal &signal);
+void SaveSignalToFile(string signal, int groupId);
 
 // Utility functions
 bool    IsSignalTooOld(long signalTimestampMs);
@@ -445,6 +448,9 @@ Signal ParseBuySellSignal(string &parts[])
   PrintLog(eaName + ": Parsed trading signal GID=" + IntegerToString(signal.groupId) + " from channel '" + signal.channelName + "'");
 
   signal.isValid = true;
+
+  signal.isWarmup = (signal.entry == 0.0 && signal.stopLoss == 0.0 &&
+                     signal.tpCount >= 2 && signal.tpLevels[0] == 0.0 && signal.tpLevels[1] == 0.0);
   return signal;
 }
 
@@ -496,35 +502,10 @@ Signal ParseActionSignal(string &parts[])
                " NewSL=" + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
                " TPCount=" + IntegerToString(signal.tpCount) +
                " from channel '" + signal.channelName + "'");
-
-    } else if (partCount >= 5) {
-      // Old format: TIMESTAMP|MODIFY|NEW_SL|GID:xxx|CHANNEL
-      string slPart = parts[2];
-      if(!IsValidDouble(slPart)) {
-        PrintLog(eaName + ": Invalid new SL value '" + slPart + "', skipping");
-        return signal;
-      }
-      signal.stopLoss = StrToDouble(slPart);
-
-      // Parse GID
-      string gidPart = parts[3];
-      if(StringFind(gidPart, "GID:") == 0) {
-        signal.groupId = (int)StrToInteger(StringSubstr(gidPart, 4));
-      }
-
-      // Parse channel name
-      signal.channelName = CleanChannelName(parts[4]);
-
-      PrintLog(eaName + ": Parsed old format MODIFY signal GID=" + IntegerToString(signal.groupId) +
-               " NewSL=" + DoubleToString(signal.stopLoss, 5) +
-               " from channel '" + signal.channelName + "'");
-    } else {
-      PrintLog(eaName + ": Invalid MODIFY signal format, expected at least 5 parts but got " + IntegerToString(partCount));
-      return signal;
     }
-
   } else {
-    // BREAKEVEN/CLOSE signals - use original logic
+    // BREAKEVEN/CLOSE signals
+    // Example: TIMESTAMP|CLOSE|GID:xxx|CHANNEL
     int shift = 0;
 
     // Group ID
@@ -630,11 +611,7 @@ void SendOrders(Signal &signal)
     return;
   }
 
-// Check for warmup signal (entry=0, TP=0, SL=0)
-  bool isWarmupSignal = (signal.entry == 0.0 && signal.stopLoss == 0.0 &&
-                         signal.tpCount >= 2 && signal.tpLevels[0] == 0.0 && signal.tpLevels[1] == 0.0);
-
-  if(isWarmupSignal) {
+  if(signal.isWarmup) {
     PrintLog(eaName + ": WARMUP SIGNAL detected - Calculating TP/SL levels for GID=" + IntegerToString(signal.groupId));
     CalculateWarmupLevels(signal);
   }
@@ -1560,7 +1537,4 @@ double GetPositionSize(Signal &signal)
 
   return positionSize;
 }
-//+------------------------------------------------------------------+
-
-
 //+------------------------------------------------------------------+
