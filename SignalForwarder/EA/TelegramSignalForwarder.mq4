@@ -3,7 +3,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.4.2"
+#property version "2.5"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
