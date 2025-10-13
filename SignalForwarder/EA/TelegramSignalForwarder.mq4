@@ -71,9 +71,8 @@ int      warmupTickets[];
 //|--- Function Prototypes                                          |
 //+------------------------------------------------------------------+
 void    PrintLog(string message);
-
 Signal ReadSignalFile();
-Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false);
+Signal ReadSignalLine(string line, bool isStored);
 Signal ParseBuySellSignal(string &parts[]);
 Signal ParseActionSignal(string &parts[]);
 void    UpdateExistingOrdersSL(Signal &signal);
@@ -135,8 +134,6 @@ void OnTimer()
 
 // Process dynamic trailing stop for existing positions
   ProcessDynamicTrailingStop();
-
-  CleanupWarmupOrders();
 
 // Process new signal
   Signal signal = ReadSignalFile();
@@ -236,7 +233,7 @@ Signal ReadSignalFile()
       return signal;
     }
 
-    signal = ReadSignalLine(line, true);
+    signal = ReadSignalLine(line, false);
 
     bool isSymbolMatching = signal.symbol == Symbol();
     shouldKeepReading = IsTesting() && signal.isValid && !isSymbolMatching && !FileIsEnding(signalFileHandle);
@@ -257,11 +254,11 @@ Signal ReadSignalFile()
 }
 
 //+------------------------------------------------------------------+
-//|  ReadSignalLine: Parse a single signal line into Signal struct    |
-//|  ShouldValidateTimestamp: if true, will check signal age         |
-//|  when not backtesting                                           |
+//|  ReadSignalLine: Parse a single signal line into Signal struct   |
+//|  isStored: if false, will check signal age                       |
+//|  when not backtesting                                            |
 //+------------------------------------------------------------------+
-Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
+Signal ReadSignalLine(string line, bool isStored)
 {
   Signal signal;
 // Expect different formats based on signal type:
@@ -284,7 +281,7 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
   string timestampStr = parts[0];
   long signalTimestamp = StrToInteger(timestampStr);
   signal.timestamp = signalTimestamp;
-  if(shouldValidateTimestamp && IsSignalTooOld(signalTimestamp, signalMaxAgeMinutes * 60)) {
+  if(!isStored && IsSignalTooOld(signalTimestamp, signalMaxAgeMinutes * 60)) {
     if(!IsTesting()) {
       PrintLog(eaName + ": Signal too old, skipping. Timestamp=" + IntegerToString(signalTimestamp));
     } else {
@@ -310,7 +307,7 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
     }
 
     // Parse full trading signal
-    return ParseBuySellSignal(parts);
+    return ParseBuySellSignal(parts, isStored);
 
   } else if(signal.type == "BREAKEVEN" || signal.type == "CLOSE"  || signal.type == "CLOSE_HALF_BREAKEVEN" ||
             signal.type == "MODIFY") {
@@ -320,7 +317,7 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
       return signal;
     }
 
-    return ParseActionSignal(parts);
+    return ParseActionSignal(parts, isStored);
 
   }
 
@@ -330,7 +327,7 @@ Signal ReadSignalLine(string line, bool shouldValidateTimestamp = false)
 //+------------------------------------------------------------------+
 //| ParseFullTradingSignal: Parse BUY/SELL trading signals          |
 //+------------------------------------------------------------------+
-Signal ParseBuySellSignal(string &parts[])
+Signal ParseBuySellSignal(string &parts[], bool isStored)
 {
   Signal signal;
 
@@ -381,18 +378,18 @@ Signal ParseBuySellSignal(string &parts[])
 // Validate TP order and remove duplicates
   bool shouldBuy = signal.type == "BUY";
   for(int i=0; i<signal.tpCount; i++) {
-    if(i > 0) {
-      if(shouldBuy && signal.tpLevels[i] <= signal.tpLevels[i-1]) {
-        PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
-                 " should be higher than TP[" + IntegerToString(i-1) + "] " + DoubleToString(signal.tpLevels[i-1], MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
-      } else if(!shouldBuy && signal.tpLevels[i] >= signal.tpLevels[i-1]) {
-        PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
-                 " should be lower than TP[" + IntegerToString(i-1) + "] " + DoubleToString(signal.tpLevels[i-1], MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
-      }
-    }
-
     // Check TP direction relative to entry
     if (signal.entry != 0.0) {
+      if(i > 0) {
+        if(shouldBuy && signal.tpLevels[i] <= signal.tpLevels[i-1]) {
+          PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+                   " should be higher than TP[" + IntegerToString(i-1) + "] " + DoubleToString(signal.tpLevels[i-1], MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
+        } else if(!shouldBuy && signal.tpLevels[i] >= signal.tpLevels[i-1]) {
+          PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+                   " should be lower than TP[" + IntegerToString(i-1) + "] " + DoubleToString(signal.tpLevels[i-1], MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
+        }
+      }
+
       if(shouldBuy && signal.tpLevels[i] <= signal.entry) {
         PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
                  " should be higher than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
@@ -446,19 +443,22 @@ Signal ParseBuySellSignal(string &parts[])
     signal.channelName = "LEGC";
   }
 
-  PrintLog(eaName + ": Parsed trading signal GID=" + IntegerToString(signal.groupId) + " from channel '" + signal.channelName + "'");
+  signal.isWarmup = (signal.entry == 0.0 && signal.stopLoss == 0.0 &&
+                     signal.tpCount >= 2 && signal.tpLevels[0] == 0.0 && signal.tpLevels[1] == 0.0);
+
+  if(!isStored) {
+    PrintLog(eaName + ": Parsed trading signal GID=" + IntegerToString(signal.groupId) + " from channel '" + signal.channelName + "'");
+  }
 
   signal.isValid = true;
 
-  signal.isWarmup = (signal.entry == 0.0 && signal.stopLoss == 0.0 &&
-                     signal.tpCount >= 2 && signal.tpLevels[0] == 0.0 && signal.tpLevels[1] == 0.0);
   return signal;
 }
 
 //+------------------------------------------------------------------+
 //| ParseModifySignal: Parse MODIFY/CLOSE etc. SL signals                      |
 //+------------------------------------------------------------------+
-Signal ParseActionSignal(string &parts[])
+Signal ParseActionSignal(string &parts[], bool isStored)
 {
   Signal signal;
 
@@ -498,11 +498,12 @@ Signal ParseActionSignal(string &parts[])
       // Parse channel name
       signal.channelName = CleanChannelName(parts[7]);
 
-      PrintLog(eaName + ": Parsed new format MODIFY signal GID=" + IntegerToString(signal.groupId) +
-               " Symbol=" + signal.symbol +
-               " NewSL=" + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
-               " TPCount=" + IntegerToString(signal.tpCount) +
-               " from channel '" + signal.channelName + "'");
+      if (!isStored)
+        PrintLog(eaName + ": Parsed MODIFY signal GID=" + IntegerToString(signal.groupId) +
+                 " Symbol=" + signal.symbol +
+                 " NewSL=" + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
+                 " TPCount=" + IntegerToString(signal.tpCount) +
+                 " from channel '" + signal.channelName + "'");
     }
   } else {
     // BREAKEVEN/CLOSE signals
@@ -715,8 +716,8 @@ void SendOrders(Signal &signal)
       PrintLog(eaName + ": Retrying with fallback SL=" + DoubleToString(fallbackSL, digits));
       ticket = OrderSend(signal.symbol, orderType, lotSize, price, slippage,
                          fallbackSL, signal.tpLevels[k], comment, magicNumber, 0 /* expiration */, cols[colorIndex]);
-    } 
-    
+    }
+
     if(ticket > 0 && signal.isWarmup) {
       PrintLog(eaName + ": Warmup order created, storing ticket=" + IntegerToString(ticket) + " for GID=" + IntegerToString(signal.groupId));
       ArrayResize(warmupTickets, ArraySize(warmupTickets) + 1);
@@ -1200,6 +1201,15 @@ void ProcessDynamicTrailingStop()
         PrintLog(eaName + ": cannot find signal in file for GID " + IntegerToString(orderGid) + ", skipping TS update");
       continue;
     }
+    if(signal.isWarmup) {
+      bool isSignalTooOld = MathAbs(OrderOpenTime() - TimeCurrent()) > warmupTimeoutSeconds;
+      if (isSignalTooOld) {
+        PrintLog(eaName + ": Warmup order ticket " + IntegerToString(OrderTicket()) +
+                 " is too old, closing order");
+        CloseCurrentOrder(signal);
+      }
+      continue;
+    }
 
     if(signal.entry == 0.0)
       signal.entry = OrderOpenPrice(); // Use current open price if not set
@@ -1419,7 +1429,7 @@ Signal GetSignalFromFile(int groupId)
     PrintLog(eaName + ": GetSignalFromFile: Empty signal file for GID=" + IntegerToString(groupId));
     return signal;
   }
-  signal = ReadSignalLine(line, false);
+  signal = ReadSignalLine(line, true);
   return signal;
 }
 
@@ -1544,36 +1554,3 @@ double GetPositionSize(Signal &signal)
   return positionSize;
 }
 //+------------------------------------------------------------------+
-
-//+------------------------------------------------------------------+
-//| CleanupWarmupOrders: Remove warmup tickets after the warmup timeout has elapsed     |
-//+------------------------------------------------------------------+
-void CleanupWarmupOrders()
-{
-  if(ArraySize(warmupTickets) == 0)
-    return;
-
-  int total = OrdersTotal();
-  int cleanedCount = 0;
-
-  for(int i=ArraySize(warmupTickets)-1; i>=0; i--) {
-    int ticket = warmupTickets[i];
-    bool selected = OrderSelect(ticket, SELECT_BY_TICKET);
-
-    if(!selected || IsSignalTooOld(OrderOpenTime(), warmupTimeoutSeconds)) {
-      // Order not found (e.g. stopped out) or too old, remove from warmup list
-      cleanedCount++;
-      // Shift remaining tickets down
-      for(int k=i; k<ArraySize(warmupTickets)-1; k++) {
-        warmupTickets[k] = warmupTickets[k+1];
-      }
-      ArrayResize(warmupTickets, ArraySize(warmupTickets)-1);
-      continue;
-    }
-
-  }
-
-   if(cleanedCount > 0) {
-      PrintLog(eaName + ": Cleaned up " + IntegerToString(cleanedCount) + " warmup orders after timeout/order close");
-   }
-}
