@@ -8,6 +8,7 @@ import os
 from signal_parser import parse_signal, clean_channel_name, format_mt4_comment
 from queue_manager import add_signal_to_queue
 import time
+from signal_parser import SignalData
 
 class TestCoreLogic(unittest.TestCase):
     
@@ -36,16 +37,11 @@ class TestCoreLogic(unittest.TestCase):
             self.assertIsNotNone(parsed, f"Signal {i+1} failed to parse")
             
             # Verify required fields
-            self.assertIn("signal_type", parsed)
-            self.assertIn("symbol", parsed)
-            self.assertIn("entry", parsed)
-            self.assertIn("take_profits", parsed)
-            self.assertIn("stop_loss", parsed)
-            self.assertGreater(len(parsed["take_profits"]), 0)
+            self.assertTrue(parsed.is_valid(), f"Signal {i+1} is not valid")
             
-            print(f"  ✅ Parsed: {parsed['signal_type']} {parsed['symbol']} @ {parsed['entry']}")
-            print(f"  ✅ TPs: {len(parsed['take_profits'])} levels")
-            print(f"  ✅ SL: {parsed['stop_loss']}")
+            print(f"  ✅ Parsed: {parsed.signal_type} {parsed.symbol} @ {parsed.entry}")
+            print(f"  ✅ TPs: {len(parsed.take_profits)} levels")
+            print(f"  ✅ SL: {parsed.stop_loss}")
         
         print(f"\n✅ All {len(test_signals)} signals parsed successfully")
         
@@ -108,26 +104,26 @@ class TestCoreLogic(unittest.TestCase):
         self.assertIsNotNone(parsed)
         
         # Create signal data
-        signal_data = {
-            "timestamp_utc": int(time.time() * 1000),
-            "signal_type": parsed["signal_type"],
-            "symbol": parsed["symbol"],
-            "entry": parsed["entry"],
-            "take_profits": parsed["take_profits"],
-            "stop_loss": parsed["stop_loss"],
-            "group_id": 12345,
-            "channel_name": "TEST_CHANNEL"
-        }
+        signal_data = SignalData(
+            timestamp_utc=int(time.time() * 1000),
+            signal_type=parsed.signal_type,
+            symbol=parsed.symbol,
+            entry=parsed.entry,
+            take_profits=parsed.take_profits,
+            stop_loss=parsed.stop_loss,
+            group_id=12345,
+            channel_name="TEST_CHANNEL"
+        )
         
         # Add to queue
         success = add_signal_to_queue(signal_data)
         self.assertTrue(success, "Failed to add signal to queue")
         
         print(f"  ✅ Signal data created and added to queue successfully")
-        print(f"  ✅ GID: {signal_data['group_id']}")
-        print(f"  ✅ Channel: {signal_data['channel_name']}")
-        print(f"  ✅ TPs: {len(signal_data['take_profits'])}")
-        
+        print(f"  ✅ GID: {signal_data.group_id}")
+        print(f"  ✅ Channel: {signal_data.channel_name}")
+        print(f"  ✅ TPs: {len(signal_data.take_profits)}")
+
         print("✅ Signal data creation and queue addition works correctly")
         
     def test_extreme_cases(self):
@@ -141,36 +137,36 @@ class TestCoreLogic(unittest.TestCase):
         
         # Many TPs (should be handled)
         many_tps = [1.1000 + i * 0.0010 for i in range(25)]  # 25 TPs
-        signal_data = {
-            "timestamp_utc": int(time.time() * 1000),
-            "signal_type": "BUY",
-            "symbol": "EURUSD",
-            "entry": 1.1000,
-            "take_profits": many_tps,
-            "stop_loss": 1.0900,
-            "group_id": 1001,
-            "channel_name": "MANY_TPS"
-        }
+        signal_data = SignalData(
+            timestamp_utc=int(time.time() * 1000),
+            signal_type="BUY",
+            symbol="EURUSD",
+            entry=1.1000,
+            take_profits=many_tps,
+            stop_loss=1.0900,
+            group_id=1001,
+            channel_name="MANY_TPS"
+        )
         
         success = add_signal_to_queue(signal_data)
         self.assertTrue(success, "Failed to add signal with many TPs")
         print(f"  ✅ Many TPs handled: {len(many_tps)} TPs")
         
         # Single TP
-        single_tp_data = {
-            "timestamp_utc": int(time.time() * 1000),
-            "signal_type": "BUY",
-            "symbol": "EURUSD",
-            "entry": 1.1000,
-            "take_profits": [1.1100],
-            "stop_loss": 1.0900,
-            "group_id": 1002,
-            "channel_name": "SINGLE_TP"
-        }
+        single_tp_data = SignalData(
+            timestamp_utc=int(time.time() * 1000),
+            signal_type="BUY",
+            symbol="EURUSD",
+            entry=1.1000,
+            take_profits=[1.1100],
+            stop_loss=1.0900,
+            group_id=1002,
+            channel_name="SINGLE_TP"
+        )
         
         success = add_signal_to_queue(single_tp_data)
         self.assertTrue(success, "Failed to add signal with single TP")
-        print(f"  ✅ Single TP handled: {len(single_tp_data['take_profits'])} TP")
+        print(f"  ✅ Single TP handled: {len(single_tp_data.take_profits)} TP")
         
         print("✅ All extreme cases handled correctly")
         

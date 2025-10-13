@@ -72,12 +72,11 @@ MESSAGE_GID_MAP_FILE = os.path.join(_basedir, "message_gid_map.json")
 # ----------------------
 # Warmup Signal Settings
 # ----------------------
-WARMUP_SIGNAL_ENABLED = config.get("WARMUP_SIGNAL_ENABLED", "false").lower() == "true"
-WARMUP_SIGNAL_CHANNEL = config.get("WARMUP_SIGNAL_CHANNEL", "FXTM")
+WARMUP_SIGNAL_CHANNEL = config.get("WARMUP_SIGNAL_CHANNEL") or "FXTM"
 
 # ----------------------
 # Non-Reply SL Modification Settings
 # ----------------------
 # Channel name for non-reply SL modifications (configurable for testing)
 # Default: "FXTM" for production, can be set to "LocalDemo" for testing
-NON_REPLY_SL_CHANNEL_ID = config.get("NON_REPLY_SL_CHANNEL_ID", "FXTM")
+NON_REPLY_SL_CHANNEL_ID = config.get("NON_REPLY_SL_CHANNEL_ID") or "FXTM"

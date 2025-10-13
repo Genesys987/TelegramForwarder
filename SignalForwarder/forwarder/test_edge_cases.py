@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 from signal_parser import parse_signal, clean_channel_name, format_mt4_comment
 from queue_manager import add_signal_to_queue
+from signal_data import SignalData
 import os
 import tempfile
 
@@ -64,14 +65,14 @@ class TestEdgeCases(unittest.TestCase):
         signal_1_tp = "BUY EURUSD\nENTRY 1.1234\nTP 1.1250\nSL 1.1200".replace("\\n", "\n")
         result = parse_signal(signal_1_tp)
         self.assertIsNotNone(result)
-        self.assertEqual(len(result["take_profits"]), 1)
+        self.assertEqual(len(result.take_profits), 1)
         
         # Signal with many TPs (stress test)
         tp_levels = [f"1.{1250 + i}" for i in range(50)]  # 50 TP levels
         signal_many_tp = f"BUY EURUSD\nENTRY 1.1234\nTP {' '.join(tp_levels)}\nSL 1.1200".replace("\\n", "\n")
         result = parse_signal(signal_many_tp)
         if result:  # Parser might handle this or might not
-            self.assertGreater(len(result["take_profits"]), 0)
+            self.assertGreater(len(result.take_profits), 0)
     
     def test_duplicate_tp_levels(self):
         """Test signals with duplicate TP levels"""
@@ -79,7 +80,7 @@ class TestEdgeCases(unittest.TestCase):
         result = parse_signal(signal_duplicate)
         if result:
             # Should still parse but might have identical TP levels
-            self.assertEqual(len(result["take_profits"]), 3)
+            self.assertEqual(len(result.take_profits), 3)
     
     def test_invalid_tp_order(self):
         """Test signals with TP levels in wrong order"""
@@ -117,13 +118,18 @@ class TestEdgeCases(unittest.TestCase):
     def validate_signal_data(self, signal_data):
         """Local validation function for testing"""
         required_keys = ["signal_type", "symbol", "entry", "take_profits", "stop_loss"]
-        if not all(key in signal_data for key in required_keys):
+        # Accept both dict and SignalData for test compatibility
+        if hasattr(signal_data, "__dict__"):
+            d = signal_data.__dict__
+        else:
+            d = signal_data
+        if not all(key in d for key in required_keys):
             return False
         
-        if signal_data["signal_type"] not in ["BUY", "SELL"]:
+        if d["signal_type"] not in ["BUY", "SELL"]:
             return False
             
-        if not isinstance(signal_data["take_profits"], list) or len(signal_data["take_profits"]) == 0:
+        if not isinstance(d["take_profits"], list) or len(d["take_profits"]) == 0:
             return False
             
         return True
@@ -131,29 +137,31 @@ class TestEdgeCases(unittest.TestCase):
     def test_signal_validation_edge_cases(self):
         """Test signal validation with edge cases"""
         # Valid signal
-        valid_signal = {
-            "signal_type": "BUY",
-            "symbol": "EURUSD",
-            "entry": 1.1234,
-            "take_profits": [1.1250, 1.1270, 1.1300],
-            "stop_loss": 1.1200,
-            "timestamp": 1234567890
-        }
+        valid_signal = SignalData(
+            timestamp_utc=1234567890,
+            signal_type="BUY",
+            symbol="EURUSD",
+            entry=1.1234,
+            take_profits=[1.1250, 1.1270, 1.1300],
+            stop_loss=1.1200,
+            group_id=1,
+            channel_name="TEST"
+        )
         self.assertTrue(self.validate_signal_data(valid_signal))
         
         # Missing required fields
         for field in ["signal_type", "symbol", "entry", "take_profits", "stop_loss"]:
-            invalid_signal = valid_signal.copy()
+            invalid_signal = valid_signal.__dict__.copy()
             del invalid_signal[field]
             self.assertFalse(self.validate_signal_data(invalid_signal), f"Should be invalid without {field}")
         
         # Empty take_profits
-        invalid_signal = valid_signal.copy()
+        invalid_signal = valid_signal.__dict__.copy()
         invalid_signal["take_profits"] = []
         self.assertFalse(self.validate_signal_data(invalid_signal), "Should be invalid with empty take_profits")
         
         # Invalid signal type
-        invalid_signal = valid_signal.copy()
+        invalid_signal = valid_signal.__dict__.copy()
         invalid_signal["signal_type"] = "INVALID"
         self.assertFalse(self.validate_signal_data(invalid_signal), "Should be invalid with invalid signal_type")
     
@@ -161,16 +169,16 @@ class TestEdgeCases(unittest.TestCase):
         """Test signal queue addition with edge cases"""
         # Test with many TP levels
         many_tps = [1.1250 + i*0.001 for i in range(20)]  # 20 TP levels
-        signal_data = {
-            "timestamp_utc": 1234567890000,
-            "signal_type": "BUY",
-            "symbol": "EURUSD",
-            "entry": 1.1234,
-            "take_profits": many_tps,
-            "stop_loss": 1.1200,
-            "group_id": 1234,
-            "channel_name": "TEST"
-        }
+        signal_data = SignalData(
+            timestamp_utc=1234567890000,
+            signal_type="BUY",
+            symbol="EURUSD",
+            entry=1.1234,
+            take_profits=many_tps,
+            stop_loss=1.1200,
+            group_id=1234,
+            channel_name="TEST"
+        )
         
         try:
             result = add_signal_to_queue(signal_data)
@@ -184,23 +192,23 @@ class TestEdgeCases(unittest.TestCase):
         # This is a conceptual test - actual implementation would need threading
         # For now, just test multiple rapid signal generations
         
-        signal_data = {
-            "timestamp_utc": 1234567890000,
-            "signal_type": "BUY",
-            "symbol": "EURUSD",
-            "entry": 1.1234,
-            "take_profits": [1.1250, 1.1270, 1.1300],
-            "stop_loss": 1.1200,
-            "group_id": 1234,
-            "channel_name": "TEST"
-        }
+        signal_data = SignalData(
+            timestamp_utc=1234567890000,
+            signal_type="BUY",
+            symbol="EURUSD",
+            entry=1.1234,
+            take_profits=[1.1250, 1.1270, 1.1300],
+            stop_loss=1.1200,
+            group_id=1234,
+            channel_name="TEST"
+        )
         
         # Generate multiple signals rapidly
         for i in range(10):
             try:
-                test_signal = signal_data.copy()
-                test_signal["group_id"] = 1234 + i
-                test_signal["channel_name"] = f"CHAN{i}"
+                test_signal = SignalData(
+                    **{**signal_data.__dict__, "group_id": 1234 + i, "channel_name": f"CHAN{i}"}
+                )
                 result = add_signal_to_queue(test_signal)
                 self.assertIsNotNone(result)
             except Exception as e:

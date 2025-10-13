@@ -6,6 +6,7 @@ Test critical fixes for array bounds, TP validation, and channel name uniqueness
 import unittest
 from signal_parser import clean_channel_name, format_mt4_comment
 from queue_manager import add_signal_to_queue
+from signal_data import SignalData
 
 
 class TestCriticalFixes(unittest.TestCase):
@@ -14,16 +15,16 @@ class TestCriticalFixes(unittest.TestCase):
         """Test that large TP counts are handled safely"""
         # Test signal with many TP levels
         many_tps = [1.1250 + i*0.001 for i in range(25)]  # 25 TP levels
-        signal_data = {
-            "timestamp_utc": 1234567890000,
-            "signal_type": "BUY",
-            "symbol": "EURUSD",
-            "entry": 1.1234,
-            "take_profits": many_tps,
-            "stop_loss": 1.1200,
-            "group_id": 1234,
-            "channel_name": "TEST"
-        }
+        signal_data = SignalData(
+            timestamp_utc=1234567890000,
+            signal_type="BUY",
+            symbol="EURUSD",
+            entry=1.1234,
+            take_profits=many_tps,
+            stop_loss=1.1200,
+            group_id=1234,
+            channel_name="TEST"
+        )
         
         # Should not crash and handle gracefully
         result = add_signal_to_queue(signal_data)
@@ -86,37 +87,35 @@ class TestCriticalFixes(unittest.TestCase):
     def test_signal_validation_robustness(self):
         """Test signal validation handles edge cases"""
         # Valid base signal
-        base_signal = {
-            "timestamp_utc": 1234567890000,
-            "signal_type": "BUY",
-            "symbol": "EURUSD",
-            "entry": 1.1234,
-            "take_profits": [1.1250, 1.1270, 1.1300],
-            "stop_loss": 1.1200,
-            "group_id": 1234,
-            "channel_name": "TEST"
-        }
+        base_signal = SignalData(
+            timestamp_utc=1234567890000,
+            signal_type="BUY",
+            symbol="EURUSD",
+            entry=1.1234,
+            take_profits=[1.1250, 1.1270, 1.1300],
+            stop_loss=1.1200,
+            group_id=1234,
+            channel_name="TEST"
+        )
         
         # Test with many TPs
-        many_tp_signal = base_signal.copy()
-        many_tp_signal["take_profits"] = [1.1250 + i*0.001 for i in range(15)]
+        many_tp_signal = SignalData(
+            **{**base_signal.__dict__, "take_profits": [1.1250 + i*0.001 for i in range(15)]}
+        )
         result = add_signal_to_queue(many_tp_signal)
         self.assertIsNotNone(result)
         
         # Test with single TP
-        single_tp_signal = base_signal.copy()
-        single_tp_signal["take_profits"] = [1.1250]
+        single_tp_signal = SignalData(
+            **{**base_signal.__dict__, "take_profits": [1.1250]}
+        )
         result = add_signal_to_queue(single_tp_signal)
         self.assertIsNotNone(result)
         
         # Test with different symbols
-        btc_signal = base_signal.copy()
-        btc_signal.update({
-            "symbol": "BTCUSD",
-            "entry": 45000.0,
-            "take_profits": [45500.0, 46000.0, 46500.0],
-            "stop_loss": 44500.0
-        })
+        btc_signal = SignalData(
+            **{**base_signal.__dict__, "symbol": "BTCUSD", "entry": 45000.0, "take_profits": [45500.0, 46000.0, 46500.0], "stop_loss": 44500.0}
+        )
         result = add_signal_to_queue(btc_signal)
         self.assertIsNotNone(result)
         
@@ -124,4 +123,5 @@ class TestCriticalFixes(unittest.TestCase):
 
 
 if __name__ == '__main__':
+    unittest.main(verbosity=2)
     unittest.main(verbosity=2)

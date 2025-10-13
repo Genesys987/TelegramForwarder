@@ -9,6 +9,7 @@ import tempfile
 import os
 from signal_parser import parse_signal, clean_channel_name, format_mt4_comment
 from queue_manager import add_signal_to_queue
+from signal_data import SignalData
 
 
 class TestEndToEndWorkflow(unittest.TestCase):
@@ -31,22 +32,22 @@ Stop loss at 88600.00"""
         parsed_signal = parse_signal(signal_text)
         self.assertIsNotNone(parsed_signal, "Signal should parse successfully")
         
-        print(f"1. Signal parsed: {parsed_signal['signal_type']} {parsed_signal['symbol']}")
-        print(f"   Entry: {parsed_signal['entry']}")
-        print(f"   TPs: {parsed_signal['take_profits']}")
-        print(f"   SL: {parsed_signal['stop_loss']}")
+        print(f"1. Signal parsed: {parsed_signal.signal_type} {parsed_signal.symbol}")
+        print(f"   Entry: {parsed_signal.entry}")
+        print(f"   TPs: {parsed_signal.take_profits}")
+        print(f"   SL: {parsed_signal.stop_loss}")
         
         # Step 2: Create signal data for queue
-        signal_data = {
-            "timestamp_utc": 1234567890000,
-            "signal_type": parsed_signal["signal_type"],
-            "symbol": parsed_signal["symbol"],
-            "entry": parsed_signal["entry"],
-            "take_profits": parsed_signal["take_profits"],
-            "stop_loss": parsed_signal["stop_loss"],
-            "group_id": 5678,
-            "channel_name": "PREMIUM_TRADING_SIGNALS"
-        }
+        signal_data = SignalData(
+            timestamp_utc=1234567890000,
+            signal_type=parsed_signal.signal_type,
+            symbol=parsed_signal.symbol,
+            entry=parsed_signal.entry,
+            take_profits=parsed_signal.take_profits,
+            stop_loss=parsed_signal.stop_loss,
+            group_id=5678,
+            channel_name="PREMIUM_TRADING_SIGNALS"
+        )
         
         # Step 3: Add to queue (tests Python formatting)
         result = add_signal_to_queue(signal_data)
@@ -54,8 +55,8 @@ Stop loss at 88600.00"""
         print("2. Signal added to queue successfully")
         
         # Step 4: Test MT4 comment generation and parsing
-        channel_clean = clean_channel_name(signal_data["channel_name"])
-        comment = format_mt4_comment(signal_data["group_id"], channel_clean, signal_data["stop_loss"])
+        channel_clean = clean_channel_name(signal_data.channel_name)
+        comment = format_mt4_comment(signal_data.group_id, channel_clean, signal_data.stop_loss)
         print(f"3. MT4 Comment generated: '{comment}' ({len(comment)} chars)")
         
         # Step 5: Verify comment parsing (simulate MT4 logic)
@@ -66,9 +67,9 @@ Stop loss at 88600.00"""
         parsed_channel = parts[1]
         parsed_sl = float(parts[2])
         
-        self.assertEqual(parsed_gid, signal_data["group_id"])
+        self.assertEqual(parsed_gid, signal_data.group_id)
         self.assertEqual(len(parsed_channel), 4)
-        self.assertAlmostEqual(parsed_sl, signal_data["stop_loss"], places=2)
+        self.assertAlmostEqual(parsed_sl, signal_data.stop_loss, places=2)
         
         print(f"4. Comment parsed: GID={parsed_gid}, Channel='{parsed_channel}', SL={parsed_sl}")
         
@@ -88,10 +89,10 @@ Stop loss at 88600.00"""
                         self.assertGreaterEqual(len(queue_parts), 8, "Queue format should have at least 8 parts")
                         
                         # Verify each part matches expected format
-                        self.assertEqual(queue_parts[1], parsed_signal["signal_type"])
-                        self.assertEqual(queue_parts[2], parsed_signal["symbol"])
-                        self.assertEqual(float(queue_parts[3]), parsed_signal["entry"])
-                        self.assertEqual(float(queue_parts[5]), parsed_signal["stop_loss"])
+                        self.assertEqual(queue_parts[1], parsed_signal.signal_type)
+                        self.assertEqual(queue_parts[2], parsed_signal.symbol)
+                        self.assertEqual(float(queue_parts[3]), parsed_signal.entry)
+                        self.assertEqual(float(queue_parts[5]), parsed_signal.stop_loss)
                         self.assertTrue(queue_parts[6].startswith("GID:"))
                         self.assertEqual(len(queue_parts[7]), 4)  # Channel name
         
@@ -125,27 +126,27 @@ Stop loss at 88600.00"""
                 # Parse signal
                 parsed = parse_signal(signal_text)
                 self.assertIsNotNone(parsed, f"Signal {i} should parse")
-                self.assertEqual(parsed["symbol"], expected_symbol, f"Signal {i} symbol mismatch")
-                self.assertEqual(parsed["signal_type"], expected_type, f"Signal {i} type mismatch")
+                self.assertEqual(parsed.symbol, expected_symbol, f"Signal {i} symbol mismatch")
+                self.assertEqual(parsed.signal_type, expected_type, f"Signal {i} type mismatch")
                 
                 # Create signal data
-                signal_data = {
-                    "timestamp_utc": 1234567890000 + i,
-                    "signal_type": parsed["signal_type"],
-                    "symbol": parsed["symbol"],
-                    "entry": parsed["entry"],
-                    "take_profits": parsed["take_profits"],
-                    "stop_loss": parsed["stop_loss"],
-                    "group_id": 1000 + i,
-                    "channel_name": f"CHANNEL_{i}"
-                }
+                signal_data = SignalData(
+                    timestamp_utc=1234567890000 + i,
+                    signal_type=parsed.signal_type,
+                    symbol=parsed.symbol,
+                    entry=parsed.entry,
+                    take_profits=parsed.take_profits,
+                    stop_loss=parsed.stop_loss,
+                    group_id=1000 + i,
+                    channel_name=f"CHANNEL_{i}"
+                )
                 
                 # Test queue addition
                 result = add_signal_to_queue(signal_data)
                 self.assertTrue(result, f"Signal {i} should be added to queue")
                 
                 # Test comment generation
-                comment = format_mt4_comment(signal_data["group_id"], signal_data["channel_name"], signal_data["stop_loss"])
+                comment = format_mt4_comment(signal_data.group_id, signal_data.channel_name, signal_data.stop_loss)
                 self.assertLessEqual(len(comment), 31, f"Signal {i} comment too long: {comment}")
                 
                 print(f"  Signal {i}: {expected_type} {expected_symbol} -> Comment: '{comment}' ✅")
@@ -165,32 +166,32 @@ Stop loss at 88600.00"""
         print("1. Invalid signal correctly rejected ✅")
         
         # Test 2: Empty channel name
-        signal_data = {
-            "timestamp_utc": 1234567890000,
-            "signal_type": "BUY",
-            "symbol": "EURUSD",
-            "entry": 1.1234,
-            "take_profits": [1.1250, 1.1270, 1.1300],
-            "stop_loss": 1.1200,
-            "group_id": 9999,
-            "channel_name": ""
-        }
+        signal_data = SignalData(
+            timestamp_utc=1234567890000,
+            signal_type="BUY",
+            symbol="EURUSD",
+            entry=1.1234,
+            take_profits=[1.1250, 1.1270, 1.1300],
+            stop_loss=1.1200,
+            group_id=9999,
+            channel_name=""
+        )
         
         result = add_signal_to_queue(signal_data)
         self.assertTrue(result, "Signal with empty channel should still work")
         print("2. Empty channel name handled correctly ✅")
         
         # Test 3: Very long GID and SL
-        signal_data["group_id"] = 999999999
-        signal_data["stop_loss"] = 123456.789012345
-        signal_data["channel_name"] = "TEST"
+        signal_data.group_id = 999999999
+        signal_data.stop_loss = 123456.789012345
+        signal_data.channel_name = "TEST"
         
-        comment = format_mt4_comment(signal_data["group_id"], signal_data["channel_name"], signal_data["stop_loss"])
+        comment = format_mt4_comment(signal_data.group_id, signal_data.channel_name, signal_data.stop_loss)
         self.assertLessEqual(len(comment), 31, f"Long values comment should fit: {comment}")
         print(f"3. Long values handled: '{comment}' ({len(comment)} chars) ✅")
         
         # Test 4: Single TP level
-        signal_data["take_profits"] = [1.1250]
+        signal_data.take_profits = [1.1250]
         result = add_signal_to_queue(signal_data)
         self.assertTrue(result, "Single TP should work")
         print("4. Single TP level handled correctly ✅")

@@ -109,15 +109,15 @@ class TestSignalParser(unittest.TestCase):
             with self.subTest(signal=i):
                 result = parse_signal(signal_text)
                 self.assertIsNotNone(result, f"Signal {i} should parse successfully")
-                self.assertEqual(result["signal_type"], expected_type)
-                self.assertEqual(result["symbol"], expected_symbol)
-                self.assertEqual(result["entry"], expected_entry)
-                self.assertIsNotNone(result["take_profits"])
-                self.assertIsNotNone(result["stop_loss"])
-                self.assertGreater(len(result["take_profits"]), 0)
-                self.assertEqual(result["take_profits"], expected_tps)
-                self.assertEqual(result["stop_loss"], expected_sl)
-        
+                self.assertEqual(result.signal_type, expected_type)
+                self.assertEqual(result.symbol, expected_symbol)
+                self.assertEqual(result.entry, expected_entry)
+                self.assertIsNotNone(result.take_profits)
+                self.assertIsNotNone(result.stop_loss)
+                self.assertGreater(len(result.take_profits), 0)
+                self.assertEqual(result.take_profits, expected_tps)
+                self.assertEqual(result.stop_loss, expected_sl)
+
         print("✅ All 22 user-provided signal formats passed!")
 
 

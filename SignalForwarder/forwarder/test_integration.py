@@ -11,6 +11,7 @@ from signal_parser import parse_signal, clean_channel_name, format_mt4_comment
 from queue_manager import add_signal_to_queue, process_signal_queue
 from config import MT4_QUEUE_FILE_PATHS, MT4_SIGNAL_FILE_PATHS
 import time
+from signal_data import SignalData
 
 class TestFinalComprehensive(unittest.TestCase):
     
@@ -98,20 +99,20 @@ SL 1.1345""",
             # 1. Parse signal
             parsed = parse_signal(test_case["text"])
             self.assertIsNotNone(parsed, f"Signal {i+1} failed to parse")
-            self.assertEqual(parsed["signal_type"], test_case["expected_type"])
-            self.assertEqual(parsed["symbol"], test_case["expected_symbol"])
+            self.assertEqual(parsed.signal_type, test_case["expected_type"])
+            self.assertEqual(parsed.symbol, test_case["expected_symbol"])
             
             # 2. Create signal data for queue
-            signal_data = {
-                "timestamp_utc": int(time.time() * 1000) + i,  # Unique timestamps
-                "signal_type": parsed["signal_type"],
-                "symbol": parsed["symbol"],
-                "entry": parsed["entry"],
-                "take_profits": parsed["take_profits"],
-                "stop_loss": parsed["stop_loss"],
-                "group_id": 1000 + i,
-                "channel_name": test_case["channel"]
-            }
+            signal_data = SignalData(
+                timestamp_utc=int(time.time() * 1000) + i,  # Unique timestamps
+                signal_type=parsed.signal_type,
+                symbol=parsed.symbol,
+                entry=parsed.entry,
+                take_profits=parsed.take_profits,
+                stop_loss=parsed.stop_loss,
+                group_id=1000 + i,
+                channel_name=test_case["channel"]
+            )
             
             # 3. Add to queue
             success = add_signal_to_queue(signal_data)
@@ -122,7 +123,7 @@ SL 1.1345""",
             self.assertEqual(len(clean_channel), 4, f"Channel name not 4 chars: {clean_channel}")
             
             # 5. Test MT4 comment generation
-            comment = format_mt4_comment(signal_data["group_id"], clean_channel, signal_data["stop_loss"])
+            comment = format_mt4_comment(signal_data.group_id, clean_channel, signal_data.stop_loss)
             self.assertLessEqual(len(comment), 31, f"Comment too long: {comment}")
             
             # 6. Test comment parsing (simulate MT4 logic)
@@ -132,19 +133,19 @@ SL 1.1345""",
             parsed_channel = parts[1]
             parsed_sl = float(parts[2])
             
-            self.assertEqual(parsed_gid, signal_data["group_id"])
+            self.assertEqual(parsed_gid, signal_data.group_id)
             self.assertEqual(parsed_channel, clean_channel)
-            self.assertAlmostEqual(parsed_sl, signal_data["stop_loss"], places=4)
+            self.assertAlmostEqual(parsed_sl, signal_data.stop_loss, places=4)
             
             processed_signals.append({
                 "signal_data": signal_data,
                 "clean_channel": clean_channel,
                 "comment": comment,
-                "tp_count": len(parsed["take_profits"])
+                "tp_count": len(parsed.take_profits)
             })
             
-            print(f"  ✅ Parsed: {parsed['signal_type']} {parsed['symbol']} @ {parsed['entry']}")
-            print(f"  ✅ TPs: {len(parsed['take_profits'])} levels")
+            print(f"  ✅ Parsed: {parsed.signal_type} {parsed.symbol} @ {parsed.entry}")
+            print(f"  ✅ TPs: {len(parsed.take_profits)} levels")
             print(f"  ✅ Channel: '{test_case['channel']}' -> '{clean_channel}'")
             print(f"  ✅ Comment: '{comment}' ({len(comment)} chars)")
         
