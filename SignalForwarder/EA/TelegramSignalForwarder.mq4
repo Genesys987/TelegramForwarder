@@ -3,7 +3,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.5"
+#property version "2.5.1"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -559,7 +559,7 @@ void UpdateExistingOrdersSL(Signal &signal)
       PrintLog(eaName + ": Failed to select order at index " + IntegerToString(i) + " - error=" + IntegerToString(GetLastError()));
       continue;
     }
-    if(OrderSymbol() != symbol || OrderType() != targetOrderType) {
+    if(OrderSymbol() != signal.symbol || OrderType() != targetOrderType) {
       if(debugMode)
         PrintLog(eaName + ": Ignoring order at index " + IntegerToString(i) + " - symbol/type mismatch");
       continue;
