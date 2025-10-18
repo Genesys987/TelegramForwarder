@@ -600,7 +600,7 @@ void UpdateExistingOrdersSL(Signal &signal)
     }
   }
 
-  PrintLog(eaName + ": Completed SL update for existing orders from channel '" + signal.channelName + "'");
+  PrintLog(eaName + ": Completed UpdateExistingOrdersSL check for existing orders from channel '" + signal.channelName + "'");
 }
 
 //+------------------------------------------------------------------+
