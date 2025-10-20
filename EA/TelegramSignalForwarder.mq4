@@ -30,6 +30,10 @@ static int slippage = 20;  // maximum allowed slippage during order creation/mod
 
 int trailingScanPeriodSeconds = 2;
 
+/*
+ * Represents a signal coming from the forwarder.
+ * Stored in signals.txt and also in Group ID text files.
+ */
 struct Signal {
   long               timestamp;
   string             type;
@@ -59,6 +63,24 @@ struct Signal {
   }
 };
 
+/*
+ * Represents information stored in order comments.
+ */
+struct OrderCommentInfo {
+  int                groupId;
+  string             channelName;
+  int                tpLevel;
+  bool               isValid;
+
+                     OrderCommentInfo()
+  {
+    groupId      = 0;
+    channelName  = "";
+    tpLevel      = 0;
+    isValid      = false;
+  }
+};
+
 //+------------------------------------------------------------------+
 //|--- Global State Variables                                       |
 //+------------------------------------------------------------------+
@@ -82,7 +104,7 @@ void    ProcessCloseSignal(Signal &signal);
 void    ProcessCloseHalfBreakevenSignal(Signal &signal);
 void    ProcessDynamicTrailingStop();
 double  CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string channelName);
-bool    ParseOrderComment(string comment, int &groupId, string &channelName);
+OrderCommentInfo    ParseOrderComment();
 bool CloseCurrentOrder(Signal &signal);
 bool SetCurrentOrderStopLoss(Signal &signal);
 void SaveSignalToFile(string signal, int groupId);
@@ -153,10 +175,9 @@ void OnTimer()
     bool hasExistingOrders = false;
     for(int i=0; i<OrdersTotal(); i++) {
       if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
-        int orderGid;
-        string orderChannel;
-        if(ParseOrderComment(OrderComment(), orderGid, orderChannel)) {
-          if(orderGid == signal.groupId && orderChannel == signal.channelName) {
+        OrderCommentInfo info = ParseOrderComment();
+        if(info.isValid) {
+          if(info.groupId == signal.groupId && info.channelName == signal.channelName) {
             hasExistingOrders = true;
             break;
           }
@@ -575,18 +596,17 @@ void UpdateExistingOrdersSL(Signal &signal)
     }
 
     // Parse the order's comment to get channel information
-    int orderGid;
-    string orderChannelName;
-    if(!ParseOrderComment(OrderComment(), orderGid /* unused */, orderChannelName)) {
+    OrderCommentInfo info = ParseOrderComment();
+    if(!info.isValid) {
       PrintLog(": Failed to parse order comment for ticket " + IntegerToString(OrderTicket()) + ": " + OrderComment());
       continue;
     }
 
     // Only update SL if the order is from the same channel
-    if(orderChannelName != signal.channelName) {
+    if(info.channelName != signal.channelName) {
       if(debugMode)
         PrintLog(": Ignoring order ticket " + IntegerToString(OrderTicket()) +
-                 " - different channel (order='" + orderChannelName + "', signal='" + signal.channelName + "')");
+                 " - different channel (order='" + info.channelName + "', signal='" + signal.channelName + "')");
       continue;
     }
 
@@ -762,13 +782,12 @@ void ProcessModifySlSignal(Signal &signal)
     }
 
     // Parse order comment to check GID match
-    int orderGid;
-    string orderChannel;
-    if(!ParseOrderComment(OrderComment(), orderGid, orderChannel)) {
+    OrderCommentInfo info = ParseOrderComment();
+    if(!info.isValid) {
       continue;
     }
 
-    if(orderGid != signal.groupId || orderChannel != signal.channelName) {
+    if(info.groupId != signal.groupId || info.channelName != signal.channelName) {
       continue;
     }
 
@@ -879,13 +898,12 @@ void ProcessCloseSignal(Signal &signal)
     }
 
     // Parse order comment to check GID match
-    int orderGid;
-    string orderChannel;
-    if(!ParseOrderComment(OrderComment(), orderGid, orderChannel)) {
+    OrderCommentInfo info = ParseOrderComment();
+    if(!info.isValid) {
       continue;
     }
 
-    if(orderGid != signal.groupId || orderChannel != signal.channelName) {
+    if(info.groupId != signal.groupId || info.channelName != signal.channelName) {
       continue;
     }
 
@@ -960,13 +978,12 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
     }
 
     // Parse order comment to check GID match
-    int orderGid;
-    string orderChannel;
-    if(!ParseOrderComment(OrderComment(), orderGid, orderChannel)) {
+    OrderCommentInfo info = ParseOrderComment();
+    if(!info.isValid) {
       continue;
     }
 
-    if(orderGid != signal.groupId || orderChannel != signal.channelName) {
+    if(info.groupId != signal.groupId || info.channelName != signal.channelName) {
       continue;
     }
 
@@ -1032,34 +1049,38 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
 //+------------------------------------------------------------------+
 //| ParseOrderGidChannel: Extract GID and channel name from order comment |
 //+------------------------------------------------------------------+
-bool ParseOrderComment(string comment, int &groupId, string &channelName)
+OrderCommentInfo ParseOrderComment()
 {
 // 1234|ABCD|1.2550,1.2600 (GID|CHANNEL|TP1,TP2,...)
-
+  string comment = OrderComment();
+  OrderCommentInfo info;
   string parts[];
   int partCount = StringSplit(comment, '|', parts);
   if(partCount < 2) {
     PrintLog(": Invalid comment format, expected at least 2 parts but got " + IntegerToString(partCount));
-    return(false);
+    info.isValid = false;
+    return(info);
   }
 
 // Extract GID (first part)
-  groupId = StrToInteger(parts[0]);
-  if(groupId <= 0) {
+  info.groupId = StrToInteger(parts[0]);
+  if(info.groupId <= 0) {
     if(debugMode)
       PrintLog(": Invalid GID in comment: " + comment);
-    return(false);
+    info.isValid = false;
+    return(info);
   }
 
 // Extract channel name (second part, should be 4 letters)
-  channelName = parts[1];
-  if(StringLen(channelName) != 4) {
+  info.channelName = parts[1];
+  if(StringLen(info.channelName) != 4) {
     if(debugMode)
       PrintLog(": Invalid channel name length in new comment: " + comment);
-    channelName = "UNKN"; // Fallback
+    info.channelName = "UNKN"; // Fallback
   }
 
-  return(true);
+  info.isValid = true;
+  return(info);
 }
 
 //+------------------------------------------------------------------+
@@ -1191,23 +1212,23 @@ string FormatMT4Comment(int groupId, string channelName, int tpLevel)
 void ProcessDynamicTrailingStop()
 {
 
+// Iterate through all open orders
   for(int o = 0; o < OrdersTotal(); o++) {
     if(!OrderSelect(o, SELECT_BY_POS, MODE_TRADES))
       continue;
 
     // Parse order comment to get GID and channel name
-    int orderGid;
-    string orderChannelName;
-    if(!ParseOrderComment(OrderComment(), orderGid, orderChannelName)) {
+    OrderCommentInfo info = ParseOrderComment();
+    if(!info.isValid) {
       if(debugMode)
         PrintLog(": Failed to parse order comment for ticket " + IntegerToString(OrderTicket()) + ": " + OrderComment());
       continue;
     }
 
-    Signal signal = GetSignalFromFile(orderGid);
+    Signal signal = GetSignalFromFile(info.groupId);
     if(!signal.isValid) {
       if(debugMode)
-        PrintLog(": cannot find signal in file for GID " + IntegerToString(orderGid) + ", skipping TS update");
+        PrintLog(": cannot find signal in file for GID " + IntegerToString(info.groupId) + ", skipping TS update");
       continue;
     }
     if(signal.isWarmup) {
@@ -1226,16 +1247,18 @@ void ProcessDynamicTrailingStop()
     double tpLevels[10];
 
     int tpHitLevel = 0;
+    double closePrice = OrderClosePrice();
+    int orderType = OrderType();
     for(int i = 0; i < signal.tpCount; i++) {
-      if((OrderType() == OP_BUY && OrderClosePrice() >= signal.tpLevels[i]) ||
-          (OrderType() == OP_SELL && OrderClosePrice() <= signal.tpLevels[i])) {
+      if((orderType == OP_BUY && closePrice >= signal.tpLevels[i]) ||
+          (orderType == OP_SELL && closePrice <= signal.tpLevels[i])) {
         tpHitLevel = i + 1; // TP levels are 1-based
       }
     }
     if(tpHitLevel <= 0)
       continue; // No TPs hit yet, skip TS for this order
     double currentSL = OrderStopLoss();
-    double newSL = CalculateNewSL(tpHitLevel, currentSL, signal, orderChannelName);
+    double newSL = CalculateNewSL(tpHitLevel, currentSL, signal, info.channelName);
     if(MathAbs(currentSL - newSL) > SL_MODIFY_THRESHOLD) {
       bool modified = OrderModify(OrderTicket(), OrderOpenPrice(), newSL,
                                   OrderTakeProfit(), 0, clrOrange);
