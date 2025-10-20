@@ -144,6 +144,22 @@ void OnDeinit()
     PrintLog(": Deinitialized");
 }
 
+datetime lastTime = 0;
+
+/*
+ * Only used for EA testing - Timer won't run in test mode
+ */
+void OnTick()
+{
+  if (!IsTesting()) return;
+  datetime currentTime = TimeCurrent();
+
+  if (currentTime - lastTime >= trailingScanPeriodSeconds) {
+    lastTime = currentTime;
+    OnTimer();
+  }
+}
+
 //+------------------------------------------------------------------+
 //| Timer handler (trailingScanPeriodSeconds)                      |
 //+------------------------------------------------------------------+
