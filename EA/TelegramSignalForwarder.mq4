@@ -3,7 +3,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.5.2"
+#property version "2.6.0"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -1211,6 +1211,22 @@ string FormatMT4Comment(int groupId, string channelName, int tpLevel)
 //+------------------------------------------------------------------+
 void ProcessDynamicTrailingStop()
 {
+  OrderCommentInfo lastOrderInfos[5];
+  int totalOrders = OrdersTotal();
+
+// look back on the last 5 closed orders to check for momentary TP hits
+  int ordersProcessed = 0;
+
+  for (int i = totalOrders - 1; i >= 0 && ordersProcessed < 5; i--) {
+    if (OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) {
+      if (OrderType() == OP_BUY || OrderType() == OP_SELL) {
+        lastOrderInfos[ordersProcessed] = ParseOrderComment();
+
+        if(lastOrderInfos[ordersProcessed].isValid)
+          ordersProcessed++;
+      }
+    }
+  }
 
 // Iterate through all open orders
   for(int o = 0; o < OrdersTotal(); o++) {
@@ -1246,15 +1262,27 @@ void ProcessDynamicTrailingStop()
 
     double tpLevels[10];
 
-    int tpHitLevel = 0;
+    // get TP hit level based on current price
+    int priceTpHitLevel = 0;
     double closePrice = OrderClosePrice();
     int orderType = OrderType();
     for(int i = 0; i < signal.tpCount; i++) {
       if((orderType == OP_BUY && closePrice >= signal.tpLevels[i]) ||
           (orderType == OP_SELL && closePrice <= signal.tpLevels[i])) {
-        tpHitLevel = i + 1; // TP levels are 1-based
+        priceTpHitLevel = i + 1; // TP levels are 1-based
       }
     }
+
+    // get TP hit level based on last closed orders
+    // (e.g. if current price has already reversed)
+    int lastClosedTpHitLevel = 0;
+    for(int i = 0; i < 5; i++) {
+      if(lastOrderInfos[i].groupId != signal.groupId) continue;
+      lastClosedTpHitLevel = MathMax(lastClosedTpHitLevel, lastOrderInfos[i].tpLevel);
+    }
+
+    int tpHitLevel = MathMax(priceTpHitLevel, lastClosedTpHitLevel);
+
     if(tpHitLevel <= 0)
       continue; // No TPs hit yet, skip TS for this order
     double currentSL = OrderStopLoss();
