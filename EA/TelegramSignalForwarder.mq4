@@ -233,7 +233,7 @@ Signal ReadSignalFile()
       return signal;
     }
 
-    signal = ReadSignalLine(line, false);
+    signal = ReadSignalLine(line, /* isStored */ false);
 
     bool isSymbolMatching = signal.symbol == Symbol();
     shouldKeepReading = IsTesting() && signal.isValid && !isSymbolMatching && !FileIsEnding(signalFileHandle);
@@ -256,7 +256,7 @@ Signal ReadSignalFile()
 //+------------------------------------------------------------------+
 //|  ReadSignalLine: Parse a single signal line into Signal struct   |
 //|  isStored: if false, will check signal age                       |
-//|  when not backtesting                                            |
+//|  (stored: test file or stored signal files)                      |
 //+------------------------------------------------------------------+
 Signal ReadSignalLine(string line, bool isStored)
 {
@@ -290,10 +290,11 @@ Signal ReadSignalLine(string line, bool isStored)
     return signal;
   }
 
+  bool isLive = !isStored;
 // 1) Signal type
   signal.type = parts[1];
   StringToUpper(signal.type);
-  if(signal.type != "BUY" && signal.type != "SELL" && signal.type != "BREAKEVEN" && signal.type != "CLOSE" && signal.type != "MODIFY" && signal.type != "CLOSE_HALF_BREAKEVEN") {
+  if(signal.type != "BUY" && signal.type != "SELL" && signal.type != "BREAKEVEN" && signal.type != "CLOSE" && signal.type != "MODIFY" && signal.type != "CLOSE_HALF_BREAKEVEN" && !isStored) {
     PrintLog(": Invalid signal type '" + signal.type + "', expected BUY, SELL, BREAKEVEN, CLOSE, MODIFY, or CLOSE_HALF_BREAKEVEN");
     return signal;
   }
@@ -301,7 +302,7 @@ Signal ReadSignalLine(string line, bool isStored)
 // Handle different signal types with different parsing logic
   if(signal.type == "BUY" || signal.type == "SELL") {
     // Full trading signal format: TIMESTAMP|TYPE|SYMBOL|ENTRY|TP1,TP2,...|SL|GID:xxx|CHANNEL
-    if(partCount < 8) {
+    if(partCount < 8 && isLive) {
       PrintLog(": Invalid BUY/SELL signal format, expected 8 parts but got " + IntegerToString(partCount));
       return signal;
     }
@@ -313,7 +314,8 @@ Signal ReadSignalLine(string line, bool isStored)
             signal.type == "MODIFY") {
     // Action signal format: TIMESTAMP|TYPE|GID:xxx|CHANNEL
     if(partCount < 4) {
-      PrintLog(": Invalid " + signal.type + " signal format, expected 4 parts but got " + IntegerToString(partCount));
+      if (isLive)
+        PrintLog(": Invalid " + signal.type + " signal format, expected 4 parts but got " + IntegerToString(partCount));
       return signal;
     }
 
@@ -330,6 +332,7 @@ Signal ReadSignalLine(string line, bool isStored)
 Signal ParseBuySellSignal(string &parts[], bool isStored)
 {
   Signal signal;
+  bool isLive = !isStored;
 
 // Set basic info
   signal.timestamp = StrToInteger(parts[0]);
@@ -339,13 +342,15 @@ Signal ParseBuySellSignal(string &parts[], bool isStored)
 // 2) Symbol validation
   signal.symbol = parts[2] + symbolPostfix;
   if(MarketInfo(signal.symbol, MODE_TIME) == 0) {
-    PrintLog(": Invalid symbol '" + signal.symbol + "', skipping");
+    if (!isLive)
+      PrintLog(": Invalid symbol '" + signal.symbol + "', skipping");
     return signal;
   }
 
 // 3) Entry price
   if(!IsValidDouble(parts[3])) {
-    PrintLog(": Invalid entry price '" + parts[3] + "', skipping");
+    if (!isLive)
+      PrintLog(": Invalid entry price '" + parts[3] + "', skipping");
     return signal;
   }
   signal.entry = NormalizeDouble(StrToDouble(parts[3]), MarketInfo(signal.symbol, MODE_DIGITS));
@@ -354,13 +359,15 @@ Signal ParseBuySellSignal(string &parts[], bool isStored)
   string tpsArr[];
   signal.tpCount = StringSplit(parts[4], ',', tpsArr);
   if(signal.tpCount < 1) {
-    PrintLog(": Invalid TP levels '" + parts[4] + "', skipping");
+    if (isLive)
+      PrintLog(": Invalid TP levels '" + parts[4] + "', skipping");
     return signal;
   }
 
 // Enforce maximum TP count limit (array size is 6)
   if(signal.tpCount > 6) {
-    PrintLog(": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum 6, truncating");
+    if (isLive)
+      PrintLog(": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum 6, truncating");
     signal.tpCount = 6;
   }
 
@@ -369,7 +376,8 @@ Signal ParseBuySellSignal(string &parts[], bool isStored)
 // Parse all TP levels
   for(int i=0; i<signal.tpCount; i++) {
     if(!IsValidDouble(tpsArr[i])) {
-      PrintLog(": Invalid TP level[" + IntegerToString(i) + "] '" + tpsArr[i] + "', skipping");
+      if (isLive)
+        PrintLog(": Invalid TP level[" + IntegerToString(i) + "] '" + tpsArr[i] + "', skipping");
       return signal;
     }
     signal.tpLevels[i] = NormalizeDouble(StrToDouble(tpsArr[i]), MarketInfo(signal.symbol, MODE_DIGITS));
@@ -381,19 +389,19 @@ Signal ParseBuySellSignal(string &parts[], bool isStored)
     // Check TP direction relative to entry
     if (signal.entry != 0.0) {
       if(i > 0) {
-        if(shouldBuy && signal.tpLevels[i] <= signal.tpLevels[i-1]) {
+        if(shouldBuy && signal.tpLevels[i] <= signal.tpLevels[i-1] && isLive) {
           PrintLog(": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
                    " should be higher than TP[" + IntegerToString(i-1) + "] " + DoubleToString(signal.tpLevels[i-1], MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
-        } else if(!shouldBuy && signal.tpLevels[i] >= signal.tpLevels[i-1]) {
+        } else if(!shouldBuy && signal.tpLevels[i] >= signal.tpLevels[i-1] && !isStored) {
           PrintLog(": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
                    " should be lower than TP[" + IntegerToString(i-1) + "] " + DoubleToString(signal.tpLevels[i-1], MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
         }
       }
 
-      if(shouldBuy && signal.tpLevels[i] <= signal.entry) {
+      if(shouldBuy && signal.tpLevels[i] <= signal.entry && isLive) {
         PrintLog(": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
                  " should be higher than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
-      } else if(!shouldBuy && signal.tpLevels[i] >= signal.entry) {
+      } else if(!shouldBuy && signal.tpLevels[i] >= signal.entry && isLive) {
         PrintLog(": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
                  " should be lower than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
       }
@@ -404,17 +412,18 @@ Signal ParseBuySellSignal(string &parts[], bool isStored)
   string rawSL = parts[5];
 
   if(!IsValidDouble(rawSL)) {
-    PrintLog(": Invalid stop loss '" + rawSL + "', skipping");
+    if (!isStored)
+      PrintLog(": Invalid stop loss '" + rawSL + "', skipping");
     return signal;
   }
 
   signal.stopLoss = NormalizeDouble(StrToDouble(rawSL), MarketInfo(signal.symbol, MODE_DIGITS));
 // Validate SL position relative to entry price (if not market entry)
   if(signal.entry != 0.0) {
-    if(shouldBuy && signal.stopLoss >= signal.entry) {
+    if(shouldBuy && signal.stopLoss >= signal.entry && !isStored) {
       PrintLog(": Warning: SL " + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
                " should be below entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
-    } else if(!shouldBuy && signal.stopLoss <= signal.entry) {
+    } else if(!shouldBuy && signal.stopLoss <= signal.entry && !isStored) {
       PrintLog(": Warning: SL " + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
                " should be above entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
     }
@@ -1429,7 +1438,7 @@ Signal GetSignalFromFile(int groupId)
     PrintLog(": GetSignalFromFile: Empty signal file for GID=" + IntegerToString(groupId));
     return signal;
   }
-  signal = ReadSignalLine(line, true);
+  signal = ReadSignalLine(line, /* isStored */ true);
   return signal;
 }
 
