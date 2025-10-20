@@ -3,7 +3,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.5.1"
+#property version "2.5.2"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -107,7 +107,7 @@ void OnInit()
     eaName = customName;
 
   if(debugMode)
-    PrintLog(eaName + ": Initialized");
+    PrintLog(": Initialized");
 
 // Use event timer for events
   EventSetTimer(trailingScanPeriodSeconds);
@@ -119,7 +119,7 @@ void OnInit()
 void OnDeinit()
 {
   if(debugMode)
-    PrintLog(eaName + ": Deinitialized");
+    PrintLog(": Deinitialized");
 }
 
 //+------------------------------------------------------------------+
@@ -147,7 +147,7 @@ void OnTimer()
   if(signal.type == "BUY" || signal.type == "SELL") {
     // Process trading signals
     if(debugMode)
-      PrintLog(eaName + ": Processing " + signal.type + " signal from channel '" + signal.channelName + "' - GID=" + IntegerToString(signal.groupId) + " with " + IntegerToString(signal.tpCount) + " TP levels");
+      PrintLog(": Processing " + signal.type + " signal from channel '" + signal.channelName + "' - GID=" + IntegerToString(signal.groupId) + " with " + IntegerToString(signal.tpCount) + " TP levels");
 
     // Check if orders with this GID already exist
     bool hasExistingOrders = false;
@@ -168,10 +168,10 @@ void OnTimer()
 
     if(hasExistingOrders) {
       if(debugMode)
-        PrintLog(eaName + ": Orders with GID=" + IntegerToString(signal.groupId) + " already exist, only updating SL");
+        PrintLog(": Orders with GID=" + IntegerToString(signal.groupId) + " already exist, only updating SL");
     } else {
       if(debugMode)
-        PrintLog(eaName + ": No existing orders found, creating new orders");
+        PrintLog(": No existing orders found, creating new orders");
       SendOrders(signal);
     }
 
@@ -200,15 +200,15 @@ Signal ReadSignalFile()
         if(!FileExists(gSignalFile))
           return signal;
         signalFileHandle = FileOpen(gSignalFile, FILE_READ|FILE_SHARE_READ | FILE_TXT | FILE_ANSI);
-        PrintLog(eaName + ": Opening signal file " + gSignalFile);
+        PrintLog(": Opening signal file " + gSignalFile);
         if(signalFileHandle == INVALID_HANDLE) {
-          PrintLog(eaName + ": Failed to open signal file");
+          PrintLog(": Failed to open signal file");
           return signal;
         }
       }
 
       if(signalFileHandle == INVALID_HANDLE) {
-        PrintLog(eaName + ": Failed to open temp file for reading");
+        PrintLog(": Failed to open temp file for reading");
         return signal;
       }
       // in test mode, we keep the file open to read multiple signals
@@ -218,7 +218,7 @@ Signal ReadSignalFile()
       }
       line = FileReadString(signalFileHandle);
       if(debugMode) {
-        PrintLog(eaName + ": Read signal line: [" + line + "]");
+        PrintLog(": Read signal line: [" + line + "]");
       }
       if(!IsTesting()) {
         FileClose(signalFileHandle);
@@ -229,7 +229,7 @@ Signal ReadSignalFile()
       line = storedTestSignal;
     }
     if(StringLen(line) == 0) {
-      PrintLog(eaName + ": Empty signal line, skipping");
+      PrintLog(": Empty signal line, skipping");
       return signal;
     }
 
@@ -239,13 +239,13 @@ Signal ReadSignalFile()
     shouldKeepReading = IsTesting() && signal.isValid && !isSymbolMatching && !FileIsEnding(signalFileHandle);
     if(shouldKeepReading) {
       storedTestSignal = "";
-      PrintLog(eaName + ": Continuing to read next signal line for testing - current symbol: " + Symbol() +
+      PrintLog(": Continuing to read next signal line for testing - current symbol: " + Symbol() +
                ", signal symbol: " + signal.symbol);
     }
   } while(shouldKeepReading);
 
   if(signal.isValid) {
-    PrintLog(eaName + ": Found valid signal: " + line);
+    PrintLog(": Found valid signal: " + line);
     storedTestSignal = "";
     SaveSignalToFile(line, signal.groupId);
   }
@@ -269,7 +269,7 @@ Signal ReadSignalLine(string line, bool isStored)
   int partCount = StringSplit(line, '|', parts);
 
   if(partCount < 4) {
-    PrintLog(eaName + ": Invalid signal format, expected at least 4 parts but got " + IntegerToString(partCount));
+    PrintLog(": Invalid signal format, expected at least 4 parts but got " + IntegerToString(partCount));
     return signal;
   }
 
@@ -283,7 +283,7 @@ Signal ReadSignalLine(string line, bool isStored)
   signal.timestamp = signalTimestamp;
   if(!isStored && IsSignalTooOld(signalTimestamp, signalMaxAgeMinutes * 60)) {
     if(!IsTesting()) {
-      PrintLog(eaName + ": Signal too old, skipping. Timestamp=" + IntegerToString(signalTimestamp));
+      PrintLog(": Signal too old, skipping. Timestamp=" + IntegerToString(signalTimestamp));
     } else {
       storedTestSignal = line;
     }
@@ -294,7 +294,7 @@ Signal ReadSignalLine(string line, bool isStored)
   signal.type = parts[1];
   StringToUpper(signal.type);
   if(signal.type != "BUY" && signal.type != "SELL" && signal.type != "BREAKEVEN" && signal.type != "CLOSE" && signal.type != "MODIFY" && signal.type != "CLOSE_HALF_BREAKEVEN") {
-    PrintLog(eaName + ": Invalid signal type '" + signal.type + "', expected BUY, SELL, BREAKEVEN, CLOSE, MODIFY, or CLOSE_HALF_BREAKEVEN");
+    PrintLog(": Invalid signal type '" + signal.type + "', expected BUY, SELL, BREAKEVEN, CLOSE, MODIFY, or CLOSE_HALF_BREAKEVEN");
     return signal;
   }
 
@@ -302,7 +302,7 @@ Signal ReadSignalLine(string line, bool isStored)
   if(signal.type == "BUY" || signal.type == "SELL") {
     // Full trading signal format: TIMESTAMP|TYPE|SYMBOL|ENTRY|TP1,TP2,...|SL|GID:xxx|CHANNEL
     if(partCount < 8) {
-      PrintLog(eaName + ": Invalid BUY/SELL signal format, expected 8 parts but got " + IntegerToString(partCount));
+      PrintLog(": Invalid BUY/SELL signal format, expected 8 parts but got " + IntegerToString(partCount));
       return signal;
     }
 
@@ -313,7 +313,7 @@ Signal ReadSignalLine(string line, bool isStored)
             signal.type == "MODIFY") {
     // Action signal format: TIMESTAMP|TYPE|GID:xxx|CHANNEL
     if(partCount < 4) {
-      PrintLog(eaName + ": Invalid " + signal.type + " signal format, expected 4 parts but got " + IntegerToString(partCount));
+      PrintLog(": Invalid " + signal.type + " signal format, expected 4 parts but got " + IntegerToString(partCount));
       return signal;
     }
 
@@ -339,13 +339,13 @@ Signal ParseBuySellSignal(string &parts[], bool isStored)
 // 2) Symbol validation
   signal.symbol = parts[2] + symbolPostfix;
   if(MarketInfo(signal.symbol, MODE_TIME) == 0) {
-    PrintLog(eaName + ": Invalid symbol '" + signal.symbol + "', skipping");
+    PrintLog(": Invalid symbol '" + signal.symbol + "', skipping");
     return signal;
   }
 
 // 3) Entry price
   if(!IsValidDouble(parts[3])) {
-    PrintLog(eaName + ": Invalid entry price '" + parts[3] + "', skipping");
+    PrintLog(": Invalid entry price '" + parts[3] + "', skipping");
     return signal;
   }
   signal.entry = NormalizeDouble(StrToDouble(parts[3]), MarketInfo(signal.symbol, MODE_DIGITS));
@@ -354,13 +354,13 @@ Signal ParseBuySellSignal(string &parts[], bool isStored)
   string tpsArr[];
   signal.tpCount = StringSplit(parts[4], ',', tpsArr);
   if(signal.tpCount < 1) {
-    PrintLog(eaName + ": Invalid TP levels '" + parts[4] + "', skipping");
+    PrintLog(": Invalid TP levels '" + parts[4] + "', skipping");
     return signal;
   }
 
 // Enforce maximum TP count limit (array size is 6)
   if(signal.tpCount > 6) {
-    PrintLog(eaName + ": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum 6, truncating");
+    PrintLog(": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum 6, truncating");
     signal.tpCount = 6;
   }
 
@@ -369,7 +369,7 @@ Signal ParseBuySellSignal(string &parts[], bool isStored)
 // Parse all TP levels
   for(int i=0; i<signal.tpCount; i++) {
     if(!IsValidDouble(tpsArr[i])) {
-      PrintLog(eaName + ": Invalid TP level[" + IntegerToString(i) + "] '" + tpsArr[i] + "', skipping");
+      PrintLog(": Invalid TP level[" + IntegerToString(i) + "] '" + tpsArr[i] + "', skipping");
       return signal;
     }
     signal.tpLevels[i] = NormalizeDouble(StrToDouble(tpsArr[i]), MarketInfo(signal.symbol, MODE_DIGITS));
@@ -382,19 +382,19 @@ Signal ParseBuySellSignal(string &parts[], bool isStored)
     if (signal.entry != 0.0) {
       if(i > 0) {
         if(shouldBuy && signal.tpLevels[i] <= signal.tpLevels[i-1]) {
-          PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+          PrintLog(": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
                    " should be higher than TP[" + IntegerToString(i-1) + "] " + DoubleToString(signal.tpLevels[i-1], MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
         } else if(!shouldBuy && signal.tpLevels[i] >= signal.tpLevels[i-1]) {
-          PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+          PrintLog(": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
                    " should be lower than TP[" + IntegerToString(i-1) + "] " + DoubleToString(signal.tpLevels[i-1], MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
         }
       }
 
       if(shouldBuy && signal.tpLevels[i] <= signal.entry) {
-        PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+        PrintLog(": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
                  " should be higher than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
       } else if(!shouldBuy && signal.tpLevels[i] >= signal.entry) {
-        PrintLog(eaName + ": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
+        PrintLog(": Warning: TP[" + IntegerToString(i) + "] " + DoubleToString(signal.tpLevels[i], MarketInfo(signal.symbol, MODE_DIGITS)) +
                  " should be lower than entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
       }
     }
@@ -404,7 +404,7 @@ Signal ParseBuySellSignal(string &parts[], bool isStored)
   string rawSL = parts[5];
 
   if(!IsValidDouble(rawSL)) {
-    PrintLog(eaName + ": Invalid stop loss '" + rawSL + "', skipping");
+    PrintLog(": Invalid stop loss '" + rawSL + "', skipping");
     return signal;
   }
 
@@ -412,10 +412,10 @@ Signal ParseBuySellSignal(string &parts[], bool isStored)
 // Validate SL position relative to entry price (if not market entry)
   if(signal.entry != 0.0) {
     if(shouldBuy && signal.stopLoss >= signal.entry) {
-      PrintLog(eaName + ": Warning: SL " + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
+      PrintLog(": Warning: SL " + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
                " should be below entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
     } else if(!shouldBuy && signal.stopLoss <= signal.entry) {
-      PrintLog(eaName + ": Warning: SL " + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
+      PrintLog(": Warning: SL " + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
                " should be above entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
     }
   }
@@ -423,13 +423,13 @@ Signal ParseBuySellSignal(string &parts[], bool isStored)
 // 6) Group ID
   string gidPart = parts[6];
   if(StringFind(gidPart, "GID:") != 0) {
-    PrintLog(eaName + ": Invalid group ID format '" + gidPart + "', skipping");
+    PrintLog(": Invalid group ID format '" + gidPart + "', skipping");
     return signal;
   }
 
   signal.groupId = (int)StrToInteger(StringSubstr(gidPart, 4));
   if(signal.groupId <= 0) {
-    PrintLog(eaName + ": Invalid group ID '" + IntegerToString(signal.groupId) + "', skipping");
+    PrintLog(": Invalid group ID '" + IntegerToString(signal.groupId) + "', skipping");
     return signal;
   }
 
@@ -447,7 +447,7 @@ Signal ParseBuySellSignal(string &parts[], bool isStored)
                      signal.tpCount >= 2 && signal.tpLevels[0] == 0.0 && signal.tpLevels[1] == 0.0);
 
   if(!isStored) {
-    PrintLog(eaName + ": Parsed trading signal GID=" + IntegerToString(signal.groupId) + " from channel '" + signal.channelName + "'");
+    PrintLog(": Parsed trading signal GID=" + IntegerToString(signal.groupId) + " from channel '" + signal.channelName + "'");
   }
 
   signal.isValid = true;
@@ -499,7 +499,7 @@ Signal ParseActionSignal(string &parts[], bool isStored)
       signal.channelName = CleanChannelName(parts[7]);
 
       if (!isStored)
-        PrintLog(eaName + ": Parsed MODIFY signal GID=" + IntegerToString(signal.groupId) +
+        PrintLog(": Parsed MODIFY signal GID=" + IntegerToString(signal.groupId) +
                  " Symbol=" + signal.symbol +
                  " NewSL=" + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
                  " TPCount=" + IntegerToString(signal.tpCount) +
@@ -513,13 +513,13 @@ Signal ParseActionSignal(string &parts[], bool isStored)
     // Group ID
     string gidPart = parts[2 + shift];
     if(StringFind(gidPart, "GID:") != 0) {
-      PrintLog(eaName + ": Invalid group ID format '" + gidPart + "', skipping");
+      PrintLog(": Invalid group ID format '" + gidPart + "', skipping");
       return signal;
     }
 
     signal.groupId = (int)StrToInteger(StringSubstr(gidPart, 4));
     if(signal.groupId <= 0) {
-      PrintLog(eaName + ": Invalid group ID '" + IntegerToString(signal.groupId) + "', skipping");
+      PrintLog(": Invalid group ID '" + IntegerToString(signal.groupId) + "', skipping");
       return signal;
     }
 
@@ -547,7 +547,7 @@ void UpdateExistingOrdersSL(Signal &signal)
   string symbol = signal.symbol;
   StringToUpper(symbol);
   if(StringFind(symbol, "XAUUSD") >= 0 || StringFind(symbol, "GOLD") >= 0) {
-    PrintLog(eaName + ": Skipping UpdateExistingOrdersSL for Gold symbol: " + symbol +
+    PrintLog(": Skipping UpdateExistingOrdersSL for Gold symbol: " + symbol +
              " - avoiding interference with independent trades");
     return;
   }
@@ -556,12 +556,12 @@ void UpdateExistingOrdersSL(Signal &signal)
 
   for(int i=0; i<OrdersTotal(); i++) {
     if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
-      PrintLog(eaName + ": Failed to select order at index " + IntegerToString(i) + " - error=" + IntegerToString(GetLastError()));
+      PrintLog(": Failed to select order at index " + IntegerToString(i) + " - error=" + IntegerToString(GetLastError()));
       continue;
     }
     if(OrderSymbol() != signal.symbol || OrderType() != targetOrderType) {
       if(debugMode)
-        PrintLog(eaName + ": Ignoring order at index " + IntegerToString(i) + " - symbol/type mismatch");
+        PrintLog(": Ignoring order at index " + IntegerToString(i) + " - symbol/type mismatch");
       continue;
     }
 
@@ -569,14 +569,14 @@ void UpdateExistingOrdersSL(Signal &signal)
     int orderGid;
     string orderChannelName;
     if(!ParseOrderComment(OrderComment(), orderGid /* unused */, orderChannelName)) {
-      PrintLog(eaName + ": Failed to parse order comment for ticket " + IntegerToString(OrderTicket()) + ": " + OrderComment());
+      PrintLog(": Failed to parse order comment for ticket " + IntegerToString(OrderTicket()) + ": " + OrderComment());
       continue;
     }
 
     // Only update SL if the order is from the same channel
     if(orderChannelName != signal.channelName) {
       if(debugMode)
-        PrintLog(eaName + ": Ignoring order ticket " + IntegerToString(OrderTicket()) +
+        PrintLog(": Ignoring order ticket " + IntegerToString(OrderTicket()) +
                  " - different channel (order='" + orderChannelName + "', signal='" + signal.channelName + "')");
       continue;
     }
@@ -587,20 +587,20 @@ void UpdateExistingOrdersSL(Signal &signal)
       double tp    = OrderTakeProfit();
       bool ok = OrderModify(OrderTicket(), openP, signal.stopLoss, tp, 0, clrBlue);
       if(ok)
-        PrintLog(eaName + ": Updated SL for ticket=" + IntegerToString(OrderTicket()) +
+        PrintLog(": Updated SL for ticket=" + IntegerToString(OrderTicket()) +
                  " from channel '" + signal.channelName + "' (" + DoubleToString(currSL, MarketInfo(symbol, MODE_DIGITS)) +
                  " -> " + DoubleToString(signal.stopLoss, MarketInfo(symbol, MODE_DIGITS)) + ")");
       else
-        PrintLog(eaName + ": SL update failed ticket=" + IntegerToString(OrderTicket()) +
+        PrintLog(": SL update failed ticket=" + IntegerToString(OrderTicket()) +
                  " err=" + IntegerToString(GetLastError()));
     } else {
-      PrintLog(eaName + ": SL change too small for ticket " + IntegerToString(OrderTicket()) +
+      PrintLog(": SL change too small for ticket " + IntegerToString(OrderTicket()) +
                " - current=" + DoubleToString(currSL, MarketInfo(symbol, MODE_DIGITS)) +
                " new=" + DoubleToString(signal.stopLoss, MarketInfo(symbol, MODE_DIGITS)));
     }
   }
 
-  PrintLog(eaName + ": Completed UpdateExistingOrdersSL check for existing orders from channel '" + signal.channelName + "'");
+  PrintLog(": Completed UpdateExistingOrdersSL check for existing orders from channel '" + signal.channelName + "'");
 }
 
 //+------------------------------------------------------------------+
@@ -614,7 +614,7 @@ void SendOrders(Signal &signal)
   }
 
   if(signal.isWarmup) {
-    PrintLog(eaName + ": WARMUP SIGNAL detected - Calculating TP/SL levels for GID=" + IntegerToString(signal.groupId));
+    PrintLog(": WARMUP SIGNAL detected - Calculating TP/SL levels for GID=" + IntegerToString(signal.groupId));
     SetWarmupLevels(signal);
   }
 
@@ -626,7 +626,7 @@ void SendOrders(Signal &signal)
 
     signal.entry = (signal.type == "BUY") ? currentAsk : currentBid;
 
-    PrintLog(eaName + ": IMMEDIATE ENTRY detected - Using market price: " +
+    PrintLog(": IMMEDIATE ENTRY detected - Using market price: " +
              DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) +
              " for GID=" + IntegerToString(signal.groupId));
   }
@@ -646,7 +646,7 @@ void SendOrders(Signal &signal)
   price = NormalizeDouble(price, digits);
 
   if(shouldBuy ? price > tp1 : price < tp1) {
-    PrintLog(eaName + ": Entry price " + DoubleToString(price, digits) +
+    PrintLog(": Entry price " + DoubleToString(price, digits) +
              " is beyond TP1 " + DoubleToString(tp1, digits) +
              " for GID=" + IntegerToString(signal.groupId) +
              ", skipping order creation");
@@ -677,7 +677,7 @@ void SendOrders(Signal &signal)
     signal.tpLevels[j] = NormalizeDouble(signal.tpLevels[j], digits);
   }
 
-  PrintLog(eaName + ": Sending orders for GID=" + IntegerToString(signal.groupId) +
+  PrintLog(": Sending orders for GID=" + IntegerToString(signal.groupId) +
            " from channel '" + signal.channelName + "'" +
            " Using SL=" + DoubleToString(rawSL, digits) +
            " TP Count=" + IntegerToString(signal.tpCount));
@@ -695,7 +695,7 @@ void SendOrders(Signal &signal)
     price = (shouldBuy) ? ask : bid;
     string comment = FormatMT4Comment(signal.groupId, signal.channelName, k + 1);
     int magicNumber = GetMagic(signal.channelName);
-    PrintLog(eaName + ": Order[" + IntegerToString(k) + "] parameters: " +
+    PrintLog(": Order[" + IntegerToString(k) + "] parameters: " +
              "Symbol=" + signal.symbol +
              " Type=" + IntegerToString(orderType) +
              " Lots=" + DoubleToString(lotSize, 2) +
@@ -710,21 +710,21 @@ void SendOrders(Signal &signal)
                            rawSL, signal.tpLevels[k], comment, magicNumber, 0 /* expiration */, cols[colorIndex]);
 
     if(ticket < 0) {
-      PrintLog(eaName + ": Error creating order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket) + " error=" + IntegerToString(GetLastError()));
+      PrintLog(": Error creating order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket) + " error=" + IntegerToString(GetLastError()));
       Sleep(1000);
       RefreshRates();
-      PrintLog(eaName + ": Retrying with fallback SL=" + DoubleToString(fallbackSL, digits));
+      PrintLog(": Retrying with fallback SL=" + DoubleToString(fallbackSL, digits));
       ticket = OrderSend(signal.symbol, orderType, lotSize, price, slippage,
                          fallbackSL, signal.tpLevels[k], comment, magicNumber, 0 /* expiration */, cols[colorIndex]);
     }
 
     if(ticket > 0 && signal.isWarmup) {
-      PrintLog(eaName + ": Warmup order created, storing ticket=" + IntegerToString(ticket) + " for GID=" + IntegerToString(signal.groupId));
+      PrintLog(": Warmup order created, storing ticket=" + IntegerToString(ticket) + " for GID=" + IntegerToString(signal.groupId));
       ArrayResize(warmupTickets, ArraySize(warmupTickets) + 1);
       warmupTickets[ArraySize(warmupTickets) - 1] = ticket;
     }
 
-    PrintLog(eaName + ": Order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket));
+    PrintLog(": Order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket));
   }
 }
 
@@ -734,14 +734,14 @@ void SendOrders(Signal &signal)
 void ProcessModifySlSignal(Signal &signal)
 {
   if(signal.groupId <= 0) {
-    PrintLog(eaName + ": Invalid GID in signal: " + IntegerToString(signal.groupId));
+    PrintLog(": Invalid GID in signal: " + IntegerToString(signal.groupId));
     return;
   }
 
 // if not modify, then breakeven
   bool isModifySignal = signal.type == "MODIFY";
   string operation = isModifySignal ? "SL modification" : "SL breakeven";
-  PrintLog(eaName + ": Processing " + operation + " - GID=" + IntegerToString(signal.groupId) +
+  PrintLog(": Processing " + operation + " - GID=" + IntegerToString(signal.groupId) +
            " NewSL=" + DoubleToString(signal.stopLoss, 5));
 
   int updatedCount = 0;
@@ -769,9 +769,9 @@ void ProcessModifySlSignal(Signal &signal)
   }
 
   if(updatedCount == 0) {
-    PrintLog(eaName + ": ⚠️ No orders found with GID=" + IntegerToString(signal.groupId) + " for " + operation);
+    PrintLog(": ⚠️ No orders found with GID=" + IntegerToString(signal.groupId) + " for " + operation);
   } else {
-    PrintLog(eaName + ": ✅ " + operation + " for " + IntegerToString(updatedCount) + " orders with GID=" + IntegerToString(signal.groupId));
+    PrintLog(": ✅ " + operation + " for " + IntegerToString(updatedCount) + " orders with GID=" + IntegerToString(signal.groupId));
   }
 }
 
@@ -825,23 +825,23 @@ bool SetCurrentOrderStopLoss(Signal &signal)
         logMsg += " TP: " + DoubleToString(currentTP, digits) + " -> " + DoubleToString(newTp, digits);
       }
 
-      PrintLog(eaName + ": " + logMsg);
+      PrintLog(": " + logMsg);
       return true;
     } else {
       int error = GetLastError();
-      PrintLog(eaName + ": ❌ " + operation + " failed for ticket " + IntegerToString(OrderTicket()) +
+      PrintLog(": ❌ " + operation + " failed for ticket " + IntegerToString(OrderTicket()) +
                " GID=" + IntegerToString(signal.groupId) +
                " error=" + IntegerToString(error));
 
       if (error == 130 && !isModifySignal) {
-        PrintLog(eaName + ": Error 130 detected - breakeven too close, closing order instead");
+        PrintLog(": Error 130 detected - breakeven too close, closing order instead");
         return CloseCurrentOrder(signal);
       } else {
         return false;
       }
     }
   } else {
-    PrintLog(eaName + ": No significant changes for ticket " + IntegerToString(OrderTicket()) +
+    PrintLog(": No significant changes for ticket " + IntegerToString(OrderTicket()) +
              " - SL=" + DoubleToString(normalizedNewSL, digits) +
              " TP=" + DoubleToString(newTp, digits));
     return false;
@@ -854,11 +854,11 @@ bool SetCurrentOrderStopLoss(Signal &signal)
 void ProcessCloseSignal(Signal &signal)
 {
   if(signal.groupId <= 0) {
-    PrintLog(eaName + ": Invalid GID in CLOSE signal: " + IntegerToString(signal.groupId));
+    PrintLog(": Invalid GID in CLOSE signal: " + IntegerToString(signal.groupId));
     return;
   }
 
-  PrintLog(eaName + ": Processing close all orders - GID=" + IntegerToString(signal.groupId));
+  PrintLog(": Processing close all orders - GID=" + IntegerToString(signal.groupId));
 
   int closedCount = 0;
   int total = OrdersTotal();
@@ -886,9 +886,9 @@ void ProcessCloseSignal(Signal &signal)
   }
 
   if(closedCount == 0) {
-    PrintLog(eaName + ": ⚠️ No orders found with GID=" + IntegerToString(signal.groupId) + " to close");
+    PrintLog(": ⚠️ No orders found with GID=" + IntegerToString(signal.groupId) + " to close");
   } else {
-    PrintLog(eaName + ": ✅ Closed " + IntegerToString(closedCount) + " orders with GID=" + IntegerToString(signal.groupId));
+    PrintLog(": ✅ Closed " + IntegerToString(closedCount) + " orders with GID=" + IntegerToString(signal.groupId));
   }
 }
 
@@ -914,13 +914,13 @@ bool CloseCurrentOrder(Signal &signal)
   }
 
   if(OrderClose(ticket, lots, closePrice, slippage, clrRed)) {
-    PrintLog(eaName + ": ✅ Closed order ticket " + IntegerToString(ticket) +
+    PrintLog(": ✅ Closed order ticket " + IntegerToString(ticket) +
              " GID=" + IntegerToString(signal.groupId) +
              " Symbol=" + symbol +
              " Lots=" + DoubleToString(lots, 2));
     return true;
   } else {
-    PrintLog(eaName + ": ❌ Failed to close order ticket " + IntegerToString(ticket) +
+    PrintLog(": ❌ Failed to close order ticket " + IntegerToString(ticket) +
              " GID=" + IntegerToString(signal.groupId) +
              " error=" + IntegerToString(GetLastError()));
     return false;
@@ -933,11 +933,11 @@ bool CloseCurrentOrder(Signal &signal)
 void ProcessCloseHalfBreakevenSignal(Signal &signal)
 {
   if(signal.groupId <= 0) {
-    PrintLog(eaName + ": Invalid GID in CLOSE_HALF_BREAKEVEN signal: " + IntegerToString(signal.groupId));
+    PrintLog(": Invalid GID in CLOSE_HALF_BREAKEVEN signal: " + IntegerToString(signal.groupId));
     return;
   }
 
-  PrintLog(eaName + ": Processing close half + breakeven rest - GID=" + IntegerToString(signal.groupId));
+  PrintLog(": Processing close half + breakeven rest - GID=" + IntegerToString(signal.groupId));
 
 // First collect all matching orders
   int matchingTickets[];
@@ -971,13 +971,13 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
   }
 
   if(matchingCount == 0) {
-    PrintLog(eaName + ": ⚠️ No orders found with GID=" + IntegerToString(signal.groupId) + " for close+breakeven");
+    PrintLog(": ⚠️ No orders found with GID=" + IntegerToString(signal.groupId) + " for close+breakeven");
     return;
   }
 
 // NEW LOGIC: If only 1 order, do nothing - let it run
   if(matchingCount == 1) {
-    PrintLog(eaName + ": ⚠️ Only 1 order found with GID=" + IntegerToString(signal.groupId) + " - letting it run (no action taken)");
+    PrintLog(": ⚠️ Only 1 order found with GID=" + IntegerToString(signal.groupId) + " - letting it run (no action taken)");
     return;
   }
 
@@ -987,7 +987,7 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
   int ordersToClose = (matchingCount + 1) / 2;  // This gives us ceil(count/2)
   int ordersToBreakeven = matchingCount - ordersToClose;
 
-  PrintLog(eaName + ": Found " + IntegerToString(matchingCount) + " orders - closing " +
+  PrintLog(": Found " + IntegerToString(matchingCount) + " orders - closing " +
            IntegerToString(ordersToClose) + ", breakeven " + IntegerToString(ordersToBreakeven));
 
   int closedCount = 0;
@@ -1016,7 +1016,7 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
 
   }
 
-  PrintLog(eaName + ": ✅ Close+Breakeven completed - Closed: " + IntegerToString(closedCount) +
+  PrintLog(": ✅ Close+Breakeven completed - Closed: " + IntegerToString(closedCount) +
            ", Breakeven: " + IntegerToString(breakevenCount) + " for GID=" + IntegerToString(signal.groupId));
 }
 
@@ -1030,7 +1030,7 @@ bool ParseOrderComment(string comment, int &groupId, string &channelName)
   string parts[];
   int partCount = StringSplit(comment, '|', parts);
   if(partCount < 2) {
-    PrintLog(eaName + ": Invalid comment format, expected at least 2 parts but got " + IntegerToString(partCount));
+    PrintLog(": Invalid comment format, expected at least 2 parts but got " + IntegerToString(partCount));
     return(false);
   }
 
@@ -1038,7 +1038,7 @@ bool ParseOrderComment(string comment, int &groupId, string &channelName)
   groupId = StrToInteger(parts[0]);
   if(groupId <= 0) {
     if(debugMode)
-      PrintLog(eaName + ": Invalid GID in comment: " + comment);
+      PrintLog(": Invalid GID in comment: " + comment);
     return(false);
   }
 
@@ -1046,7 +1046,7 @@ bool ParseOrderComment(string comment, int &groupId, string &channelName)
   channelName = parts[1];
   if(StringLen(channelName) != 4) {
     if(debugMode)
-      PrintLog(eaName + ": Invalid channel name length in new comment: " + comment);
+      PrintLog(": Invalid channel name length in new comment: " + comment);
     channelName = "UNKN"; // Fallback
   }
 
@@ -1078,7 +1078,7 @@ bool IsSignalTooOld(long signalTimestamp, int maxAgeSeconds)
   bool isTooOld = ageSeconds > maxAgeSeconds;
 
   if(debugMode || isTooOld)
-    PrintLog(eaName + ": Signal age check - UTC now: " + TimeToString(utcTime) +
+    PrintLog(": Signal age check - UTC now: " + TimeToString(utcTime) +
              ", Signal time: " + TimeToString(signalTime) +
              ", Age: " + IntegerToString(ageSeconds / 60) + " minutes");
 
@@ -1191,20 +1191,20 @@ void ProcessDynamicTrailingStop()
     string orderChannelName;
     if(!ParseOrderComment(OrderComment(), orderGid, orderChannelName)) {
       if(debugMode)
-        PrintLog(eaName + ": Failed to parse order comment for ticket " + IntegerToString(OrderTicket()) + ": " + OrderComment());
+        PrintLog(": Failed to parse order comment for ticket " + IntegerToString(OrderTicket()) + ": " + OrderComment());
       continue;
     }
 
     Signal signal = GetSignalFromFile(orderGid);
     if(!signal.isValid) {
       if(debugMode)
-        PrintLog(eaName + ": cannot find signal in file for GID " + IntegerToString(orderGid) + ", skipping TS update");
+        PrintLog(": cannot find signal in file for GID " + IntegerToString(orderGid) + ", skipping TS update");
       continue;
     }
     if(signal.isWarmup) {
       bool isSignalTooOld = MathAbs(OrderOpenTime() - TimeCurrent()) > warmupTimeoutSeconds;
       if (isSignalTooOld) {
-        PrintLog(eaName + ": Warmup order ticket " + IntegerToString(OrderTicket()) +
+        PrintLog(": Warmup order ticket " + IntegerToString(OrderTicket()) +
                  " is too old, closing order");
         CloseCurrentOrder(signal);
       }
@@ -1231,11 +1231,11 @@ void ProcessDynamicTrailingStop()
       bool modified = OrderModify(OrderTicket(), OrderOpenPrice(), newSL,
                                   OrderTakeProfit(), 0, clrOrange);
       if(modified) {
-        PrintLog(eaName + ": Trailing SL updated for ticket:" + IntegerToString(OrderTicket()) +
+        PrintLog(": Trailing SL updated for ticket:" + IntegerToString(OrderTicket()) +
                  " from " + DoubleToString(currentSL, MarketInfo(OrderSymbol(), MODE_DIGITS)) +
                  " to " + DoubleToString(newSL, MarketInfo(OrderSymbol(), MODE_DIGITS)));
       } else {
-        PrintLog(eaName + ": Failed to update trailing SL for ticket:" + IntegerToString(OrderTicket()) +
+        PrintLog(": Failed to update trailing SL for ticket:" + IntegerToString(OrderTicket()) +
                  " Error:" + IntegerToString(GetLastError()));
       }
     }
@@ -1264,14 +1264,14 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
   if(channelName == "FXPL" && (StringFind(symbolUpper, "BTCUSD") >= 0 || StringFind(symbolUpper, "BTC") >= 0)) {
     dynamicStopLossMultiplier = 0.5;
     if(debugMode)
-      PrintLog(eaName + ": Using FXPL+BTCUSD rule: multiplier=0.5");
+      PrintLog(": Using FXPL+BTCUSD rule: multiplier=0.5");
   }
 // THEA + XAUUSD: use 0.2 multiplier and stop trailing after TP2
   else if(channelName == "THEA" && (StringFind(symbolUpper, "XAUUSD") >= 0 || StringFind(symbolUpper, "GOLD") >= 0)) {
     dynamicStopLossMultiplier = 0.2;
     stopTrailingAfterTP2 = true;
     if(debugMode)
-      PrintLog(eaName + ": Using THEA+XAUUSD rule: multiplier=0.2, stop after TP2");
+      PrintLog(": Using THEA+XAUUSD rule: multiplier=0.2, stop after TP2");
   }
 
 // THEA special rule: if TP2+ hit and symbol is XAUUSD, move to breakeven and stop trailing
@@ -1289,12 +1289,12 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
 
     if(shouldMoveToBreakeven) {
       if(debugMode)
-        PrintLog(eaName + ": THEA+XAUUSD TP2+ hit - moving to breakeven and stopping trailing: " +
+        PrintLog(": THEA+XAUUSD TP2+ hit - moving to breakeven and stopping trailing: " +
                  DoubleToString(normalizedBreakeven, digits));
       return normalizedBreakeven;
     } else {
       if(debugMode)
-        PrintLog(eaName + ": THEA+XAUUSD TP2+ hit - breakeven would be worse, keeping current SL");
+        PrintLog(": THEA+XAUUSD TP2+ hit - breakeven would be worse, keeping current SL");
       return currentStop;
     }
   }
@@ -1309,7 +1309,7 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
     newSL = isBuy ? OrderOpenPrice() - diff : OrderOpenPrice() + diff;
   } else {
     if (signal.tpCount < tpHitLevel) {
-      PrintLog(eaName + ": Invalid TP hit level " + IntegerToString(tpHitLevel) +
+      PrintLog(": Invalid TP hit level " + IntegerToString(tpHitLevel) +
                " for GID=" + IntegerToString(signal.groupId) +
                ", using original SL");
       return currentStop;
@@ -1322,7 +1322,7 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
     // For BUY: new SL should be higher than current SL (more favorable)
     if(newSL < currentStop) {
       if(debugMode)
-        PrintLog(eaName + ": BUY - New SL " + DoubleToString(newSL, digits) +
+        PrintLog(": BUY - New SL " + DoubleToString(newSL, digits) +
                  " would be worse than original " + DoubleToString(currentStop, digits) + ", keeping original");
       return currentStop;
     }
@@ -1330,14 +1330,14 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
     // For SELL: new SL should be lower than current SL (more favorable)
     if(newSL > currentStop) {
       if(debugMode)
-        PrintLog(eaName + ": SELL - New SL " + DoubleToString(newSL, digits) +
+        PrintLog(": SELL - New SL " + DoubleToString(newSL, digits) +
                  " would be worse than original " + DoubleToString(currentStop, digits) + ", keeping original");
       return currentStop;
     }
   }
 
   if(debugMode)
-    PrintLog(eaName + ": SL calculation successful - Channel:" + channelName +
+    PrintLog(": SL calculation successful - Channel:" + channelName +
              " Symbol:" + symbolUpper + " Level:" + IntegerToString(tpHitLevel) +
              " Multiplier:" + DoubleToString(dynamicStopLossMultiplier, 2) +
              " Original:" + DoubleToString(currentStop, digits) +
@@ -1415,18 +1415,18 @@ Signal GetSignalFromFile(int groupId)
   string filename = dir + "/" + IntegerToString(groupId) + ".txt";
   if(!FileExists(filename)) {
     if(debugMode)
-      PrintLog(eaName + ": GetSignalFromFile: File not found for GID=" + IntegerToString(groupId));
+      PrintLog(": GetSignalFromFile: File not found for GID=" + IntegerToString(groupId));
     return signal;
   }
   int handle = FileOpen(filename, FILE_READ|FILE_SHARE_READ|FILE_TXT|FILE_ANSI);
   if(handle == INVALID_HANDLE) {
-    PrintLog(eaName + ": GetSignalFromFile: Failed to open file: " + filename);
+    PrintLog(": GetSignalFromFile: Failed to open file: " + filename);
     return signal;
   }
   string line = FileReadString(handle);
   FileClose(handle);
   if(StringLen(line) == 0) {
-    PrintLog(eaName + ": GetSignalFromFile: Empty signal file for GID=" + IntegerToString(groupId));
+    PrintLog(": GetSignalFromFile: Empty signal file for GID=" + IntegerToString(groupId));
     return signal;
   }
   signal = ReadSignalLine(line, true);
@@ -1481,7 +1481,7 @@ void SetWarmupLevels(Signal &signal)
   signal.tpCount = 2;
 
   int digits = MarketInfo(signal.symbol, MODE_DIGITS);
-  PrintLog(eaName + ": Warmup levels calculated - Entry: " + DoubleToString(signal.entry, digits) +
+  PrintLog(": Warmup levels calculated - Entry: " + DoubleToString(signal.entry, digits) +
            " TP1: " + DoubleToString(signal.tpLevels[0], digits) +
            " TP2: " + DoubleToString(signal.tpLevels[1], digits) +
            " SL: " + DoubleToString(signal.stopLoss, digits));
@@ -1493,7 +1493,7 @@ void SetWarmupLevels(Signal &signal)
 double GetPositionSize(Signal &signal)
 {
   if(!signal.isValid || signal.tpCount <= 0) {
-    PrintLog(eaName + ": Invalid signal for position sizing");
+    PrintLog(": Invalid signal for position sizing");
     return fallbackLotSize;
   }
 
@@ -1526,7 +1526,7 @@ double GetPositionSize(Signal &signal)
   while(positionSize >= minLot) {
     double freeMarginRemaining = AccountFreeMarginCheck(symbol, orderType, positionSize);
     if (debugMode) {
-      PrintLog(eaName + ": Checking margin for " + symbol + ", lot size " + DoubleToString(positionSize, 2) + " - Free remains: " + DoubleToString(freeMarginRemaining, 2) + ", Needed free: " + DoubleToString(minimumRemainingMargin, 2));
+      PrintLog(": Checking margin for " + symbol + ", lot size " + DoubleToString(positionSize, 2) + " - Free remains: " + DoubleToString(freeMarginRemaining, 2) + ", Needed free: " + DoubleToString(minimumRemainingMargin, 2));
     }
     if(freeMarginRemaining >= 0 && freeMarginRemaining >= minimumRemainingMargin && GetLastError() == 0)
       break;
@@ -1535,7 +1535,7 @@ double GetPositionSize(Signal &signal)
   }
 
   if(positionSize != originalPositionSize)
-    PrintLog(eaName + ": Adjusted position size for " + symbol + " from " + DoubleToString(originalPositionSize, 2) + " to " + DoubleToString(positionSize, 2));
+    PrintLog(": Adjusted position size for " + symbol + " from " + DoubleToString(originalPositionSize, 2) + " to " + DoubleToString(positionSize, 2));
 
 // Divide across TP levels
   positionSize = positionSize / signal.tpCount;
@@ -1544,7 +1544,7 @@ double GetPositionSize(Signal &signal)
 // Ensure lot size is within allowed range
   positionSize = MathMax(minLot, MathMin(maxLot, positionSize));
 
-  PrintLog(eaName + ": Position sizing: " + symbol +
+  PrintLog(": Position sizing: " + symbol +
            " RiskAmount=" + DoubleToString(riskAmount, 2) +
            " RiskPerLot=" + DoubleToString(riskValuePerLot, 4) +
            " TotalLots=" + DoubleToString(totalLots, 2) +
