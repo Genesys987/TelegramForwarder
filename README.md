@@ -16,5 +16,5 @@ pipenv install
 # run app
 pipenv run python main.py
 # run unit tests
-pipenv run python -m unittest
+pipenv run python -m unittest discover -s test
 ```
