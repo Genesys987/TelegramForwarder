@@ -3,7 +3,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.6.0"
+#property version "2.6.1"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -401,11 +401,11 @@ Signal ParseBuySellSignal(string &parts[], bool isStored)
     return signal;
   }
 
-// Enforce maximum TP count limit (array size is 6)
-  if(signal.tpCount > 6) {
+// Enforce maximum TP count limit (array size is 10)
+  if(signal.tpCount > 10) {
     if (isLive)
-      PrintLog(": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum 6, truncating");
-    signal.tpCount = 6;
+      PrintLog(": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum 10, truncating");
+    signal.tpCount = 10;
   }
 
 // Resize array to hold all TPs (up to maximum)
@@ -1072,7 +1072,7 @@ OrderCommentInfo ParseOrderComment()
   OrderCommentInfo info;
   string parts[];
   int partCount = StringSplit(comment, '|', parts);
-  if(partCount < 2) {
+  if(partCount < 3) {
     PrintLog(": Invalid comment format, expected at least 2 parts but got " + IntegerToString(partCount));
     info.isValid = false;
     return(info);
@@ -1094,6 +1094,9 @@ OrderCommentInfo ParseOrderComment()
       PrintLog(": Invalid channel name length in new comment: " + comment);
     info.channelName = "UNKN"; // Fallback
   }
+
+// may have [sl] or [tp] postfix in closed order comment
+  info.tpLevel = StrToInteger(StringSubstr(parts[2], 0, 1));
 
   info.isValid = true;
   return(info);
@@ -1228,7 +1231,7 @@ string FormatMT4Comment(int groupId, string channelName, int tpLevel)
 void ProcessDynamicTrailingStop()
 {
   OrderCommentInfo lastOrderInfos[5];
-  int totalOrders = OrdersTotal();
+  int totalOrders = OrdersHistoryTotal();
 
 // look back on the last 5 closed orders to check for momentary TP hits
   int ordersProcessed = 0;
