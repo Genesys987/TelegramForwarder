@@ -77,11 +77,8 @@ def parse_entry_price(entry_text, signal_type):
         else:
             split = entry_text.split('-')
     else:
-        # Single price
-        try:
-            return float(entry_text)
-        except ValueError:
-            return entry_text
+        # No price range detected, return 0 for immediate entry
+        return 0
     
     try:
         # Convert to floats for proper comparison
