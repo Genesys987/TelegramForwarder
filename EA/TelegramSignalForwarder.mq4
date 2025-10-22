@@ -3,7 +3,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.6.1"
+#property version "2.7.0"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -598,14 +598,14 @@ void UpdateExistingOrdersSL(Signal &signal)
     return;
   }
 
-  int targetOrderType = (signal.type == "BUY") ? OP_BUY : OP_SELL;
+  bool isBuy = signal.type == "BUY";
 
   for(int i=0; i<OrdersTotal(); i++) {
     if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
       PrintLog(": Failed to select order at index " + IntegerToString(i) + " - error=" + IntegerToString(GetLastError()));
       continue;
     }
-    if(OrderSymbol() != signal.symbol || OrderType() != targetOrderType) {
+    if(OrderSymbol() != signal.symbol || OrderType() != isBuy ? OP_BUY : OP_SELL || OrderType() != isBuy ? OP_BUYLIMIT : OP_SELLLIMIT) {
       if(debugMode)
         PrintLog(": Ignoring order at index " + IntegerToString(i) + " - symbol/type mismatch");
       continue;
@@ -663,7 +663,8 @@ void SendOrders(Signal &signal)
     SetWarmupLevels(signal);
   }
 
-  if(signal.entry == 0.0) {
+  bool isLimitOrder = signal.entry != 0.0;
+  if(!isLimitOrder) {
     // using market entry
     RefreshRates();
     double currentAsk = MarketInfo(signal.symbol, MODE_ASK);
@@ -687,7 +688,6 @@ void SendOrders(Signal &signal)
   double tp1 = signal.tpLevels[0];
 
   double price = shouldBuy ? ask : bid;
-  int orderType = (shouldBuy) ? OP_BUY : OP_SELL;
   price = NormalizeDouble(price, digits);
 
   if(shouldBuy ? price > tp1 : price < tp1) {
@@ -737,9 +737,13 @@ void SendOrders(Signal &signal)
     RefreshRates();
     ask = MarketInfo(signal.symbol, MODE_ASK);
     bid = MarketInfo(signal.symbol, MODE_BID);
-    price = (shouldBuy) ? ask : bid;
+    price = isLimitOrder ? signal.entry : (shouldBuy ? ask : bid);
+    bool canEnterImmediately = shouldBuy ? (ask <= signal.entry) : (signal.entry <= bid);
+    int orderType = shouldBuy ? (canEnterImmediately ? OP_BUY : OP_BUYLIMIT) : (canEnterImmediately ? OP_SELL : OP_SELLLIMIT);
     string comment = FormatMT4Comment(signal.groupId, signal.channelName, k + 1);
     int magicNumber = GetMagic(signal.channelName);
+    int EXPIRATION_MINUTES = 15;
+    datetime expiration = canEnterImmediately ? 0 : (TimeCurrent() + EXPIRATION_MINUTES * 60);
     PrintLog(": Order[" + IntegerToString(k) + "] parameters: " +
              "Symbol=" + signal.symbol +
              " Type=" + IntegerToString(orderType) +
@@ -747,12 +751,14 @@ void SendOrders(Signal &signal)
              " Price=" + DoubleToString(price, digits) +
              " SL=" + DoubleToString(rawSL, digits) +
              " TP=" + DoubleToString(signal.tpLevels[k], digits) +
+             " Expiration=" + TimeToString(expiration, TIME_DATE | TIME_SECONDS) +
              " Comment=" + comment +
              " Magic=" + magicNumber);
 
     int colorIndex = k % 6;
+
     int ticket = OrderSend(signal.symbol, orderType, lotSize, price, slippage,
-                           rawSL, signal.tpLevels[k], comment, magicNumber, 0 /* expiration */, cols[colorIndex]);
+                           rawSL, signal.tpLevels[k], comment, magicNumber, expiration, cols[colorIndex]);
 
     if(ticket < 0) {
       PrintLog(": Error creating order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket) + " error=" + IntegerToString(GetLastError()));
@@ -760,7 +766,7 @@ void SendOrders(Signal &signal)
       RefreshRates();
       PrintLog(": Retrying with fallback SL=" + DoubleToString(fallbackSL, digits));
       ticket = OrderSend(signal.symbol, orderType, lotSize, price, slippage,
-                         fallbackSL, signal.tpLevels[k], comment, magicNumber, 0 /* expiration */, cols[colorIndex]);
+                         fallbackSL, signal.tpLevels[k], comment, magicNumber, expiration, cols[colorIndex]);
     }
 
     if(ticket > 0 && signal.isWarmup) {
@@ -929,9 +935,9 @@ void ProcessCloseSignal(Signal &signal)
   }
 
   if(closedCount == 0) {
-    PrintLog(": ⚠️ No orders found with GID=" + IntegerToString(signal.groupId) + " to close");
+    PrintLog(": No orders found with GID=" + IntegerToString(signal.groupId) + " to close");
   } else {
-    PrintLog(": ✅ Closed " + IntegerToString(closedCount) + " orders with GID=" + IntegerToString(signal.groupId));
+    PrintLog(": Closed " + IntegerToString(closedCount) + " orders with GID=" + IntegerToString(signal.groupId));
   }
 }
 
@@ -952,11 +958,12 @@ bool CloseCurrentOrder(Signal &signal)
     closePrice = MarketInfo(symbol, MODE_BID);
   } else if(orderType == OP_SELL) {
     closePrice = MarketInfo(symbol, MODE_ASK);
-  } else {
-    return false; // Skip pending orders for now
   }
 
-  if(OrderClose(ticket, lots, closePrice, slippage, clrRed)) {
+  bool isPendingOrder = orderType == OP_BUYLIMIT || orderType == OP_SELLLIMIT;
+  if(isPendingOrder ?
+      OrderDelete(ticket) :
+      OrderClose(ticket, lots, closePrice, slippage, clrRed)) {
     PrintLog(": ✅ Closed order ticket " + IntegerToString(ticket) +
              " GID=" + IntegerToString(signal.groupId) +
              " Symbol=" + symbol +
@@ -1003,13 +1010,9 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
       continue;
     }
 
-    // Only include market orders (BUY/SELL)
-    int orderType = OrderType();
-    if(orderType == OP_BUY || orderType == OP_SELL) {
-      ArrayResize(matchingTickets, matchingCount + 1);
-      matchingTickets[matchingCount] = OrderTicket();
-      matchingCount++;
-    }
+    ArrayResize(matchingTickets, matchingCount + 1);
+    matchingTickets[matchingCount] = OrderTicket();
+    matchingCount++;
   }
 
   if(matchingCount == 0) {
@@ -1051,8 +1054,10 @@ void ProcessCloseHalfBreakevenSignal(Signal &signal)
     if(!OrderSelect(matchingTickets[i], SELECT_BY_TICKET)) {
       continue;
     }
-
-    if (SetCurrentOrderStopLoss(signal)) {
+    bool isPendingOrder = OrderType() == OP_BUYLIMIT || OrderType() == OP_SELLLIMIT;
+    if (isPendingOrder && CloseCurrentOrder(signal)) {
+      breakevenCount++;
+    } else if (SetCurrentOrderStopLoss(signal)) {
       breakevenCount++;
     }
 
