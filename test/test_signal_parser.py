@@ -6,23 +6,23 @@ Simple test suite for the signal parser - tests all 22 user-provided signal form
 import unittest
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from signal_parser import parse_signal
 
 
 class TestSignalParser(unittest.TestCase):
     
-    def test_all_22_user_signals(self):
-        """Test all 22 signal formats provided by the user"""
+    def test_all_25_user_signals(self):
+        """Test all 25 signal formats provided by the user"""
         
         signals = [
             # Signal 1: Standard BUY format
             ("BUY BTCUSD\nENTRY 89300.00\nTake profit 1 at 89500.00\nTake profit 2 at 89800.00\nTake profit 3 at 90300.00\nStop loss at 88600.00",
-             "BUY", "BTCUSD", 89300.0, [89500.0, 89800.0, 90300.0], 88600.0),
+             "BUY", "BTCUSD", 89300.0, [89500.0, 89800.0, 90300.0], 88600.0, False),
             
             # Signal 2: GOLD FROM range format
             ("GOLD BUY FROM 3362/3360\n\nTP 3364\nTP 3366\nTP 3368\nTP 3370\nTP 3372\nSL 3350\n\nUSE RISK MANAGEMENT",
-             "BUY", "XAUUSD", 3360.0, [3364.0, 3366.0, 3368.0, 3370.0, 3372.0], 3350.0),
+             "BUY", "XAUUSD", "3362/3360", [3364.0, 3366.0, 3368.0, 3370.0, 3372.0], 3350.0, False),
             
             # Signal 3: Emoji alert format
             ("SIGNAL ALERT\n\nSELL XAUUSD 3290.5\n\n🤑TP1: 3289.0\n🤑TP2: 3287.5\n🤑TP3: 3281.4\n🔴SL: 3298.8 (830 pips)",
@@ -50,7 +50,7 @@ class TestSignalParser(unittest.TestCase):
             
             # Signal 9: Range entry with slashed TPs format
             ("GOLD SELL 3334/3337\n\n3332/3330/3328/3325\n\n        SL 3345",
-             "SELL", "XAUUSD", 3337.0, [3332.0, 3330.0, 3328.0, 3325.0], 3345.0),
+             "SELL", "XAUUSD", "3334/3337", [3332.0, 3330.0, 3328.0, 3325.0], 3345.0, False),
             
             # Signal 10: NOW signal with multiple TPs (no range = immediate)
             ("GOLD SELL NOW\n\nTP 3307\nTP 3305\nTP 3303\nTP 3300\nTP 3298\n\nSL 3322",
@@ -58,23 +58,23 @@ class TestSignalParser(unittest.TestCase):
             
             # Signal 11: Slash-separated TPs format (NEW TEST CASE)
             ("GOLD BUY 3330/3327\n\nTP 3332/3334/3336/3338/3340\n\nSL 3317\n\nUSE RISK MANAGEMENT",
-             "BUY", "XAUUSD", 3327.0, [3332.0, 3334.0, 3336.0, 3338.0, 3340.0], 3317.0),
+             "BUY", "XAUUSD", "3330/3327", [3332.0, 3334.0, 3336.0, 3338.0, 3340.0], 3317.0, False),
             
             # Signal 12: NEW - @ range format
             ("Sell Gold @3339-3344\n\nSl :3346\n\nTp1 :3337\nTp2 :3335\n\nEnter Slowly-Layer with proper money management\n\nDo not rush your entries",
-             "SELL", "XAUUSD", 3344.0, [3337.0, 3335.0], 3346.0),
+             "SELL", "XAUUSD", "3339-3344", [3337.0, 3335.0], 3346.0, False),
             
             # Signal 13: NEW - dash range format
             ("Gold Sell 3341-3346\n\nSl :3348\n\nTp1 :3339\nTp2 :3336\n\nEnter Slowly-Layer with proper money management\n\nDo not rush your entries",
-             "SELL", "XAUUSD", 3346.0, [3339.0, 3336.0], 3348.0),
+             "SELL", "XAUUSD", "3341-3346", [3339.0, 3336.0], 3348.0, False),
             
             # Signal 14: NEW - I'M SELLING with parentheses range (NOW with range should use range as entry)
             ("I'M SELLING XAUUSD NOW (3337 - 3340)\n\n💰TP1: 3334\n💰TP2: 3331\n\n🛑 STOP LOSS: 3343",
-             "SELL", "XAUUSD", 3340.0, [3334.0, 3331.0], 3343.0),
+             "SELL", "XAUUSD", "3337 - 3340", [3334.0, 3331.0], 3343.0, False),
             
             # Signal 15: NEW - Colon entry format with "open" TP
             ("Gold buy : 3340.5 -3338\n\nSl 3335\n\nTp 1 : 3346\nTp 2 : open",
-             "BUY", "XAUUSD", 3338.0, [3346.0, 3350.0], 3335.0),
+             "BUY", "XAUUSD", "3340.5 - 3338", [3346.0, 3350.0], 3335.0, False),
             
             # Signal 16: NEW - T.P format with numbered take profits
             ("BTCUSD SELL 115000\nT.P1 1146000\nT.P2 1145000\nT.P3 1144000\nT.P4 1143000\nS.L   1159000",
@@ -82,31 +82,50 @@ class TestSignalParser(unittest.TestCase):
              
             # Signal 17: NEW - Multi-line GOLD/XAUUSD with entry range and slash-separated TPs
             ("XAUUSD / GOLD SELL\n 3367/3370\n\n3365/3363/3360/3357/3355\n\n\n             SL 3385",
-             "SELL", "XAUUSD", 3370.0, [3365.0, 3363.0, 3360.0, 3357.0, 3355.0], 3385.0),
+             "SELL", "XAUUSD", "3367/3370", [3365.0, 3363.0, 3360.0, 3357.0, 3355.0], 3385.0, False),
              
             # Signal 18: NEW - I'M SELLING with range and emoji TPs/SL (NOW with range should use range as entry)
             ("I'M SELLING XAUUSD NOW (3330 - 3333)\n\n💰TP1: 3327\n💰TP2: 3324\n\n🛑 STOP LOSS: 3336",
-             "SELL", "XAUUSD", 3333.0, [3327.0, 3324.0], 3336.0),
+             "SELL", "XAUUSD", "3330 - 3333", [3327.0, 3324.0], 3336.0, False),
              
             # Signal 19: NEW - Gold buy with range entry and only "open" TP (should be entry + 6)
             ("Gold buy : 3397-3394\n\nSl 3391\nTp open",
-             "BUY", "XAUUSD", 3394.0, [3400.0], 3391.0),
+             "BUY", "XAUUSD", "3397-3394", [3403.0], 3391.0, False),
              
             # Signal 20: NEW - Typographic apostrophe in I'M BUYING NOW format
             ("I'M BUYING XAUUSD NOW (3473.5 - 3470.5)\n\n💰TP1: 3476.5\n💰TP2: 3479.5\n\n🛑 STOP LOSS: 3467.5",
-             "BUY", "XAUUSD", 3470.5, [3476.5, 3479.5], 3467.5),
+             "BUY", "XAUUSD", "3473.5 - 3470.5", [3476.5, 3479.5], 3467.5, False),
              
             # Signal 21: NEW - Unicode apostrophe in I'M BUYING NOW format (user-provided example)
             ("I'M BUYING XAUUSD NOW (3572.5 - 3569.5)\n\n💰TP1: 3575.5\n💰TP2: 3578.5\n\n🛑 STOP LOSS: 3566.5",
-             "BUY", "XAUUSD", 3569.5, [3575.5, 3578.5], 3566.5),
+             "BUY", "XAUUSD", "3572.5 - 3569.5", [3575.5, 3578.5], 3566.5, False),
              
             # Signal 22: NEW - Space in slash-separated TPs (flexible spacing handling)
             ("GOLD BUY 3578/3575\n\n3580/3582/3585/3587/3590/ 3595 \n\n\n            SL 3565",
-             "BUY", "XAUUSD", 3575.0, [3580.0, 3582.0, 3585.0, 3587.0, 3590.0, 3595.0], 3565.0),
+             "BUY", "XAUUSD", "3578/3575", [3580.0, 3582.0, 3585.0, 3587.0, 3590.0, 3595.0], 3565.0, False),
+             
+            # Signal 23: NEW - Shortened price format (4207/04 where 04 = 4204)
+            ("GOLD BUY 4207/04\n\nTP 4210\nTP 4213\nTP 4216\nTP 4219\nTP 4222\nTP Open\n\nSL 4199",
+             "BUY", "XAUUSD", "4207/4204", [4210.0, 4213.0, 4216.0, 4219.0, 4222.0, 4226.0], 4199.0, False),
+             
+            # Signal 24: NEW - @ range format with spaces (Gold Sell @ 4231 - 4235)
+            ("Gold Sell @ 4231 - 4235\n\nSl: 4238\n\nTP1: 4228",
+             "SELL", "XAUUSD", "4231 - 4235", [4228.0], 4238.0, False),
+             
+            # Signal 25: NEW - TP open only signal (SELL with is_open=True, TP=0)
+            ("Sell gold price @ 4355-4358\n\nSl 4361\nTp open",
+             "SELL", "XAUUSD", "4355-4358", [0], 4361.0, True),
         ]
         
-        for i, (signal_text, expected_type, expected_symbol, expected_entry, expected_tps, expected_sl) in enumerate(signals, 1):
+        for i, signal_data in enumerate(signals, 1):
             with self.subTest(signal=i):
+                # Handle both old format (6 params) and new format (7 params)
+                if len(signal_data) == 6:
+                    signal_text, expected_type, expected_symbol, expected_entry, expected_tps, expected_sl = signal_data
+                    expected_is_open = False
+                else:
+                    signal_text, expected_type, expected_symbol, expected_entry, expected_tps, expected_sl, expected_is_open = signal_data
+                
                 result = parse_signal(signal_text)
                 self.assertIsNotNone(result, f"Signal {i} should parse successfully")
                 self.assertEqual(result.signal_type, expected_type)
@@ -114,11 +133,13 @@ class TestSignalParser(unittest.TestCase):
                 self.assertEqual(result.entry, expected_entry)
                 self.assertIsNotNone(result.take_profits)
                 self.assertIsNotNone(result.stop_loss)
-                self.assertGreater(len(result.take_profits), 0)
+                if not expected_is_open:  # Only check TP count for non-open signals
+                    self.assertGreater(len(result.take_profits), 0)
                 self.assertEqual(result.take_profits, expected_tps)
                 self.assertEqual(result.stop_loss, expected_sl)
+                self.assertEqual(result.is_open, expected_is_open)
 
-        print("✅ All 22 user-provided signal formats passed!")
+        print("✅ All 25 user-provided signal formats passed!")
 
 
 if __name__ == '__main__':
