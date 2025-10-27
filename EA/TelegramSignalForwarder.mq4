@@ -3,7 +3,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.7.0"
+#property version "2.8.0"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -690,12 +690,20 @@ void SendOrders(Signal &signal)
   double price = shouldBuy ? ask : bid;
   price = NormalizeDouble(price, digits);
 
-  if(shouldBuy ? price > tp1 : price < tp1) {
-    PrintLog(": Entry price " + DoubleToString(price, digits) +
-             " is beyond TP1 " + DoubleToString(tp1, digits) +
-             " for GID=" + IntegerToString(signal.groupId) +
-             ", skipping order creation");
-    return;
+  bool isPriceBeyondTp1 = shouldBuy ? price > tp1 : price < tp1;
+  if(isPriceBeyondTp1) {
+    if(isLimitOrder) {
+      PrintLog(": Entry price for range order " + DoubleToString(price, digits) +
+               " is beyond TP1 " + DoubleToString(tp1, digits) +
+               " for GID=" + IntegerToString(signal.groupId) +
+               ", creating limit order");
+    } else {
+      PrintLog(": Entry price for immediate order " + DoubleToString(price, digits) +
+               " is beyond TP1 " + DoubleToString(tp1, digits) +
+               " for GID=" + IntegerToString(signal.groupId) +
+               ", skipping order creation");
+      return;
+    }
   }
 
 // Always use the original stop loss from signal
