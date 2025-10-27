@@ -891,7 +891,7 @@ bool SetCurrentOrderStopLoss(Signal &signal)
                " GID=" + IntegerToString(signal.groupId) +
                " error=" + IntegerToString(error));
 
-      if (error == 130 && !isModifySignal) {
+      if (error == ERR_INVALID_STOPS && !isModifySignal) {
         PrintLog(": Error 130 detected - breakeven too close, closing order instead");
         return CloseCurrentOrder(signal);
       } else {
@@ -1322,12 +1322,23 @@ void ProcessDynamicTrailingStop()
     if(MathAbs(currentSL - newSL) > SL_MODIFY_THRESHOLD) {
       bool modified = OrderModify(OrderTicket(), OrderOpenPrice(), newSL,
                                   OrderTakeProfit(), 0, clrOrange);
+      int digits = MarketInfo(OrderSymbol(), MODE_DIGITS);
       if(modified) {
         PrintLog(": Trailing SL updated for ticket:" + IntegerToString(OrderTicket()) +
-                 " from " + DoubleToString(currentSL, MarketInfo(OrderSymbol(), MODE_DIGITS)) +
-                 " to " + DoubleToString(newSL, MarketInfo(OrderSymbol(), MODE_DIGITS)));
+                 " from " + DoubleToString(currentSL, digits) +
+                 " to " + DoubleToString(newSL, digits));
+      } else if (GetLastError() == ERR_INVALID_STOPS) {
+        PrintLog(": Failed to update trailing SL for ticket:" + IntegerToString(OrderTicket()) +
+                 " from " + DoubleToString(currentSL, digits) +
+                 " to " + DoubleToString(newSL, digits) +
+                 " at price " + DoubleToString(OrderClosePrice(), digits) +
+                 " Error:" + IntegerToString(GetLastError()) + " - closing order");
+        CloseCurrentOrder(signal);
       } else {
         PrintLog(": Failed to update trailing SL for ticket:" + IntegerToString(OrderTicket()) +
+                 " from " + DoubleToString(currentSL, digits) +
+                 " to " + DoubleToString(newSL, digits) +
+                 " at price " + DoubleToString(OrderClosePrice(), digits) +
                  " Error:" + IntegerToString(GetLastError()));
       }
     }
