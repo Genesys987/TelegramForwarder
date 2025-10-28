@@ -65,8 +65,8 @@ SESSION_NAME = "userbot_session"
 client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 
 # --- Fő Feldolgozó Függvények ---
-sl_clause="(sl|stoploss|stop loss)"
-stoploss_regexp=fr"{sl_clause}?.*(level|change|move|moving|adjust|set|update).*{sl_clause}"
+sl_clause="(sl|stoploss|stop loss)?"
+stoploss_regexp=fr"{sl_clause}.*(level|change|move|moving|adjust|set|update).*{sl_clause}"
 
 def populate_signal_metadata(signal_data, message_date, channel_name, is_warmup=False):
     """
@@ -246,8 +246,6 @@ async def run_userbot():
             logger.info(f"   Válasz. Eredeti ID: {reply_to_msg_id}")
             reply_original_message = await message.get_reply_message()
             if reply_original_message:
-                original_message_text = reply_original_message.text
-
                 # Extract common variables for reply commands
                 retrieved_group_id = message_id_to_group_id.get(reply_to_msg_id)
                 clean_channel = clean_channel_name(chat_title)

@@ -590,9 +590,13 @@ void UpdateExistingOrdersSL(Signal &signal)
     return;
   }
 
+// Keep original symbol for MarketInfo lookups (case-sensitive)
   string symbol = signal.symbol;
-  StringToUpper(symbol);
-  if(StringFind(symbol, "XAUUSD") >= 0 || StringFind(symbol, "GOLD") >= 0) {
+// Use an uppercase copy only for string comparisons (e.g. symbol name contains "XAUUSD")
+  string symbolUpper = symbol;
+  StringToUpper(symbolUpper);
+
+  if(StringFind(symbolUpper, "XAUUSD") >= 0 || StringFind(symbolUpper, "GOLD") >= 0) {
     PrintLog(": Skipping UpdateExistingOrdersSL for Gold symbol: " + symbol +
              " - avoiding interference with independent trades");
     return;
@@ -600,12 +604,21 @@ void UpdateExistingOrdersSL(Signal &signal)
 
   bool isBuy = signal.type == "BUY";
 
+// Read digits for the real broker symbol once and reuse it
+  int digits = MarketInfo(symbol, MODE_DIGITS);
+
+// Determine expected order types clearly
+  int expectedMarketType = isBuy ? OP_BUY : OP_SELL;
+  int expectedLimitType  = isBuy ? OP_BUYLIMIT : OP_SELLLIMIT;
+
   for(int i=0; i<OrdersTotal(); i++) {
     if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
       PrintLog(": Failed to select order at index " + IntegerToString(i) + " - error=" + IntegerToString(GetLastError()));
       continue;
     }
-    if(OrderSymbol() != signal.symbol || OrderType() != isBuy ? OP_BUY : OP_SELL || OrderType() != isBuy ? OP_BUYLIMIT : OP_SELLLIMIT) {
+
+    // Symbol or type mismatch -> skip
+    if(OrderSymbol() != signal.symbol || (OrderType() != expectedMarketType && OrderType() != expectedLimitType)) {
       if(debugMode)
         PrintLog(": Ignoring order at index " + IntegerToString(i) + " - symbol/type mismatch");
       continue;
@@ -633,15 +646,15 @@ void UpdateExistingOrdersSL(Signal &signal)
       bool ok = OrderModify(OrderTicket(), openP, signal.stopLoss, tp, 0, clrBlue);
       if(ok)
         PrintLog(": Updated SL for ticket=" + IntegerToString(OrderTicket()) +
-                 " from channel '" + signal.channelName + "' (" + DoubleToString(currSL, MarketInfo(symbol, MODE_DIGITS)) +
-                 " -> " + DoubleToString(signal.stopLoss, MarketInfo(symbol, MODE_DIGITS)) + ")");
+                 " from channel '" + signal.channelName + "' (" + DoubleToString(currSL, digits) +
+                 " -> " + DoubleToString(signal.stopLoss, digits) + ")");
       else
         PrintLog(": SL update failed ticket=" + IntegerToString(OrderTicket()) +
                  " err=" + IntegerToString(GetLastError()));
     } else {
       PrintLog(": SL change too small for ticket " + IntegerToString(OrderTicket()) +
-               " - current=" + DoubleToString(currSL, MarketInfo(symbol, MODE_DIGITS)) +
-               " new=" + DoubleToString(signal.stopLoss, MarketInfo(symbol, MODE_DIGITS)));
+               " - current=" + DoubleToString(currSL, digits) +
+               " new=" + DoubleToString(signal.stopLoss, digits));
     }
   }
 
@@ -663,8 +676,8 @@ void SendOrders(Signal &signal)
     SetWarmupLevels(signal);
   }
 
-  // if the signal entry is 0, we always enter with market order
-  // otherwise, if there's an entry price, we treat it as an entry limit
+// if the signal entry is 0, we always enter with market order
+// otherwise, if there's an entry price, we treat it as an entry limit
   bool isRangeOrder = signal.entry != 0.0;
   if(!isRangeOrder) {
     // using market entry
