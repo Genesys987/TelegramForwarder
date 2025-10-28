@@ -2,22 +2,10 @@ import re
 from signal_data import SignalData
 
 # Dictionary of common symbol mappings
-symbol_mappings = {"GOLD": "XAUUSD"}
-
-# Ready message patterns for warmup signals
-READY_MESSAGE_PATTERNS = [
-    r"I'?m\s+buying\s+now",
-    r"I'?m\s+selling\s+now",
-    r"Let'?s\s+scalping\s+sell\s+gold\s+slowly\s+mid\s+risk",
-    r"ready\s+sell",
-    r"Mid\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly",
-    r"Ready\s+Buy",
-    r"Double\s+sell\s+ready",
-    r"HIGH\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly",
-    r"GOLD\s+SELL\s+READY",
-    r"ANOTHER\s+GOLD\s+BUY\s+READY",
-]
-
+symbol_mappings = {
+  "GOLD": "XAUUSD",
+  "GODL": "XAUUSD",
+}
 
 def clean_channel_name(channel_name: str) -> str:
     """
@@ -129,8 +117,7 @@ def parse_single_line_signal(text) -> SignalData | None:
         raw_symbol = pipe_match.group(1).upper()
         signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
         signal.signal_type = pipe_match.group(2).upper()
-        if not is_immediate:  # Only set entry if not immediate
-            signal.entry = parse_entry_price(pipe_match.group(3), signal.signal_type)
+        signal.entry = parse_entry_price(pipe_match.group(3), signal.signal_type)
 
     # Pattern 2: Enhanced regex patterns for NOW signals and regular signals
     if not signal.signal_type:
@@ -192,43 +179,39 @@ def parse_single_line_signal(text) -> SignalData | None:
                     raw_symbol = match.group(1).upper()
                     signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                     signal.signal_type = match.group(2).upper()
-                    if not is_immediate:
-                        signal.entry = parse_entry_price(
-                            match.group(3), signal.signal_type
-                        )
+                    signal.entry = parse_entry_price(
+                        match.group(3), signal.signal_type
+                    )
                 elif "@" in pattern:
                     # @ format: SYMBOL BUY/SELL @price-range
                     raw_symbol = match.group(1).upper()
                     signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                     signal.signal_type = match.group(2).upper()
-                    if not is_immediate:
-                        signal.entry = parse_entry_price(
-                            match.group(3), signal.signal_type
-                        )
+                    signal.entry = parse_entry_price(
+                        match.group(3), signal.signal_type
+                    )
                 elif pattern == r"([\w\.\/\-]+)\s+(BUY|SELL)\s+([\d\-@]+)":
                     # SYMBOL BUY/SELL price-range format: Gold Sell 3341-3346
                     raw_symbol = match.group(1).upper()
                     signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                     signal.signal_type = match.group(2).upper()
-                    if not is_immediate:
-                        signal.entry = parse_entry_price(
-                            match.group(3), signal.signal_type
-                        )
+                    signal.entry = parse_entry_price(
+                        match.group(3), signal.signal_type
+                    )
                 elif pattern == r"([\w\.\/\-]+)\s+(BUY|SELL)\s+([\d\/\.]+)":
                     # SYMBOL BUY/SELL price format: XAUUSD BUY 3417
                     raw_symbol = match.group(1).upper()
                     signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                     signal.signal_type = match.group(2).upper()
-                    if not is_immediate:
-                        signal.entry = parse_entry_price(
-                            match.group(3), signal.signal_type
-                        )
+                    signal.entry = parse_entry_price(
+                        match.group(3), signal.signal_type
+                    )
                 else:
                     # Regular format: BUY/SELL SYMBOL price
                     signal.signal_type = match.group(1).upper()
                     raw_symbol = match.group(2).upper()
                     signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
-                    if len(match.groups()) >= 3 and not is_immediate:
+                    if len(match.groups()) >= 3:
                         signal.entry = parse_entry_price(
                             match.group(3), signal.signal_type
                         )
