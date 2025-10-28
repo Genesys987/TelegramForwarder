@@ -3,7 +3,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.8.1"
+#property version "2.8.2"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -663,8 +663,10 @@ void SendOrders(Signal &signal)
     SetWarmupLevels(signal);
   }
 
-  bool isLimitOrder = signal.entry != 0.0;
-  if(!isLimitOrder) {
+  // if the signal entry is 0, we always enter with market order
+  // otherwise, if there's an entry price, we treat it as an entry limit
+  bool isRangeOrder = signal.entry != 0.0;
+  if(!isRangeOrder) {
     // using market entry
     RefreshRates();
     double currentAsk = MarketInfo(signal.symbol, MODE_ASK);
@@ -692,7 +694,7 @@ void SendOrders(Signal &signal)
 
   bool isPriceBeyondTp1 = shouldBuy ? price > tp1 : price < tp1;
   if(isPriceBeyondTp1) {
-    if(isLimitOrder) {
+    if(isRangeOrder) {
       PrintLog(": Entry price for range order " + DoubleToString(price, digits) +
                " is beyond TP1 " + DoubleToString(tp1, digits) +
                " for GID=" + IntegerToString(signal.groupId) +
@@ -745,13 +747,13 @@ void SendOrders(Signal &signal)
     RefreshRates();
     ask = MarketInfo(signal.symbol, MODE_ASK);
     bid = MarketInfo(signal.symbol, MODE_BID);
-    price = isLimitOrder ? signal.entry : (shouldBuy ? ask : bid);
-    bool canEnterImmediately = shouldBuy ? (ask <= signal.entry) : (signal.entry <= bid);
-    int orderType = shouldBuy ? (canEnterImmediately ? OP_BUY : OP_BUYLIMIT) : (canEnterImmediately ? OP_SELL : OP_SELLLIMIT);
+    bool shouldUseLimitOrder = isRangeOrder && (shouldBuy ? (signal.entry <= bid) : (ask <= signal.entry));
+    price = shouldUseLimitOrder ? signal.entry : (shouldBuy ? ask : bid);
+    int orderType = shouldBuy ? (shouldUseLimitOrder ? OP_BUYLIMIT : OP_BUY) : (shouldUseLimitOrder ? OP_SELLLIMIT : OP_SELL);
     string comment = FormatMT4Comment(signal.groupId, signal.channelName, k + 1);
     int magicNumber = GetMagic(signal.channelName);
     int EXPIRATION_MINUTES = 15;
-    datetime expiration = canEnterImmediately ? 0 : (TimeCurrent() + EXPIRATION_MINUTES * 60);
+    datetime expiration = shouldUseLimitOrder ? (TimeCurrent() + EXPIRATION_MINUTES * 60) : 0;
     PrintLog(": Order[" + IntegerToString(k) + "] parameters: " +
              "Symbol=" + signal.symbol +
              " Type=" + IntegerToString(orderType) +
