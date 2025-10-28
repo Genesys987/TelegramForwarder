@@ -1,11 +1,11 @@
-from typing import List, Optional, Union
+from typing import List, Optional
 
 class SignalData:
     def __init__(
         self,
         signal_type: Optional[str] = None,
         symbol: Optional[str] = None,
-        entry: Optional[Union[float, str]] = None,
+        entry: Optional[float] = None,
         take_profits: Optional[List[float]] = None,
         stop_loss: Optional[float] = None,
         channel_name: Optional[str] = None,
@@ -13,8 +13,7 @@ class SignalData:
         timestamp_utc: Optional[int] = None,
         group_id: Optional[int] = None,
         original_channel: Optional[str] = None,
-        is_modify: bool = False,
-        is_open: bool = False
+        is_modify: bool = False
     ):
         self.signal_type = signal_type
         self.symbol = symbol
@@ -27,7 +26,6 @@ class SignalData:
         self.group_id = group_id
         self.original_channel = original_channel
         self.is_modify = is_modify
-        self.is_open = is_open
 
     def to_dict(self):
         return {
@@ -37,25 +35,10 @@ class SignalData:
             "take_profits": self.take_profits,
             "stop_loss": self.stop_loss,
             "channel_name": self.channel_name,
-            "is_warmup": self.is_warmup,
-            "is_open": self.is_open
+            "is_warmup": self.is_warmup
         }
 
     def is_valid(self) -> bool:
-        # For OPEN signals (is_open=True), allow TP=0 and no take_profits requirement
-        if self.is_open:
-            return (
-                bool(self.signal_type) and
-                bool(self.symbol) and
-                self.entry is not None and
-                self.stop_loss is not None and
-                self.take_profits is not None and
-                isinstance(self.take_profits, list) and
-                len(self.take_profits) == 1 and
-                self.take_profits[0] == 0
-            )
-        
-        # For regular BUY/SELL signals
         return (
             bool(self.signal_type) and
             bool(self.symbol) and
