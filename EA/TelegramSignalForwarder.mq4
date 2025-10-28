@@ -1641,8 +1641,9 @@ double GetPositionSize(Signal &signal)
 // e.g. if we want to use up 70% maximum, we need 100%-70% = 30% remaining
   double minimumRemainingMargin = AccountFreeMargin() * (1 - marginBufferPercentage / 100.0);
   int orderType = (signal.type == "BUY") ? OP_BUY : OP_SELL;
+  double freeMarginRemaining;
   while(positionSize >= minLot) {
-    double freeMarginRemaining = AccountFreeMarginCheck(symbol, orderType, positionSize);
+    freeMarginRemaining = AccountFreeMarginCheck(symbol, orderType, positionSize);
     if (debugMode) {
       PrintLog(": Checking margin for " + symbol + ", lot size " + DoubleToString(positionSize, 2) + " - Free remains: " + DoubleToString(freeMarginRemaining, 2) + ", Needed free: " + DoubleToString(minimumRemainingMargin, 2));
     }
@@ -1663,6 +1664,8 @@ double GetPositionSize(Signal &signal)
   positionSize = MathMax(minLot, MathMin(maxLot, positionSize));
 
   PrintLog(": Position sizing: " + symbol +
+           " FreeMargin= " + DoubleToString(AccountFreeMargin(), 2) +
+           " FreeMarginRemaining= " + DoubleToString(freeMarginRemaining, 2) +
            " RiskAmount=" + DoubleToString(riskAmount, 2) +
            " RiskPerLot=" + DoubleToString(riskValuePerLot, 4) +
            " TotalLots=" + DoubleToString(totalLots, 2) +
