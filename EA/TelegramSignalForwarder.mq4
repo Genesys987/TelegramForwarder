@@ -3,7 +3,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.8.0"
+#property version "2.8.1"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -379,14 +379,14 @@ Signal ParseBuySellSignal(string &parts[], bool isStored)
 // 2) Symbol validation
   signal.symbol = parts[2] + symbolPostfix;
   if(MarketInfo(signal.symbol, MODE_TIME) == 0) {
-    if (!isLive)
+    if (isLive)
       PrintLog(": Invalid symbol '" + signal.symbol + "', skipping");
     return signal;
   }
 
 // 3) Entry price
   if(!IsValidDouble(parts[3])) {
-    if (!isLive)
+    if (isLive)
       PrintLog(": Invalid entry price '" + parts[3] + "', skipping");
     return signal;
   }
