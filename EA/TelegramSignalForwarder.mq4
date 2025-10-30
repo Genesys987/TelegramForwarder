@@ -3,7 +3,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.8.2"
+#property version "2.8.3"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -101,7 +101,6 @@ void    UpdateExistingOrdersSL(Signal &signal);
 void    SendOrders(Signal &signal);
 void    ProcessModifySlSignal(Signal &signal);
 void    ProcessCloseSignal(Signal &signal);
-void    ProcessCloseHalfBreakevenSignal(Signal &signal);
 void    ProcessDynamicTrailingStop();
 double  CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string channelName);
 OrderCommentInfo    ParseOrderComment();
@@ -216,8 +215,6 @@ void OnTimer()
     ProcessModifySlSignal(signal);
   } else if(signal.type == "CLOSE") {
     ProcessCloseSignal(signal);
-  } else if(signal.type == "CLOSE_HALF_BREAKEVEN") {
-    ProcessCloseHalfBreakevenSignal(signal);
   }
 
   return;
@@ -331,8 +328,8 @@ Signal ReadSignalLine(string line, bool isStored)
 // 1) Signal type
   signal.type = parts[1];
   StringToUpper(signal.type);
-  if(signal.type != "BUY" && signal.type != "SELL" && signal.type != "BREAKEVEN" && signal.type != "CLOSE" && signal.type != "MODIFY" && signal.type != "CLOSE_HALF_BREAKEVEN" && !isStored) {
-    PrintLog(": Invalid signal type '" + signal.type + "', expected BUY, SELL, BREAKEVEN, CLOSE, MODIFY, or CLOSE_HALF_BREAKEVEN");
+  if(signal.type != "BUY" && signal.type != "SELL" && signal.type != "BREAKEVEN" && signal.type != "CLOSE" && signal.type != "MODIFY" && !isStored) {
+    PrintLog(": Invalid signal type '" + signal.type + "', expected BUY, SELL, BREAKEVEN, CLOSE, MODIFY");
     return signal;
   }
 
@@ -347,8 +344,7 @@ Signal ReadSignalLine(string line, bool isStored)
     // Parse full trading signal
     return ParseBuySellSignal(parts, isStored);
 
-  } else if(signal.type == "BREAKEVEN" || signal.type == "CLOSE"  || signal.type == "CLOSE_HALF_BREAKEVEN" ||
-            signal.type == "MODIFY") {
+  } else if(signal.type == "BREAKEVEN" || signal.type == "CLOSE" || signal.type == "MODIFY") {
     // Action signal format: TIMESTAMP|TYPE|GID:xxx|CHANNEL
     if(partCount < 4) {
       if (isLive)
@@ -998,96 +994,6 @@ bool CloseCurrentOrder(Signal &signal)
              " error=" + IntegerToString(GetLastError()));
     return false;
   }
-}
-
-//+------------------------------------------------------------------+
-//| ProcessCloseHalfBreakevenSignal: Close half orders, breakeven rest |
-//+------------------------------------------------------------------+
-void ProcessCloseHalfBreakevenSignal(Signal &signal)
-{
-  if(signal.groupId <= 0) {
-    PrintLog(": Invalid GID in CLOSE_HALF_BREAKEVEN signal: " + IntegerToString(signal.groupId));
-    return;
-  }
-
-  PrintLog(": Processing close half + breakeven rest - GID=" + IntegerToString(signal.groupId));
-
-// First collect all matching orders
-  int matchingTickets[];
-  int matchingCount = 0;
-  int total = OrdersTotal();
-
-// Close orders in reverse order to avoid index issues
-  for(int i=total-1; i>=0; i--) {
-    if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
-      continue;
-    }
-
-    // Parse order comment to check GID match
-    OrderCommentInfo info = ParseOrderComment();
-    if(!info.isValid) {
-      continue;
-    }
-
-    if(info.groupId != signal.groupId || info.channelName != signal.channelName) {
-      continue;
-    }
-
-    ArrayResize(matchingTickets, matchingCount + 1);
-    matchingTickets[matchingCount] = OrderTicket();
-    matchingCount++;
-  }
-
-  if(matchingCount == 0) {
-    PrintLog(": ⚠️ No orders found with GID=" + IntegerToString(signal.groupId) + " for close+breakeven");
-    return;
-  }
-
-// NEW LOGIC: If only 1 order, do nothing - let it run
-  if(matchingCount == 1) {
-    PrintLog(": ⚠️ Only 1 order found with GID=" + IntegerToString(signal.groupId) + " - letting it run (no action taken)");
-    return;
-  }
-
-// Calculate how many to close vs breakeven (only for 2+ orders)
-// If odd number: close more than half (e.g., 3 orders: close 2, breakeven 1)
-// If even number: close exactly half (e.g., 4 orders: close 2, breakeven 2)
-  int ordersToClose = (matchingCount + 1) / 2;  // This gives us ceil(count/2)
-  int ordersToBreakeven = matchingCount - ordersToClose;
-
-  PrintLog(": Found " + IntegerToString(matchingCount) + " orders - closing " +
-           IntegerToString(ordersToClose) + ", breakeven " + IntegerToString(ordersToBreakeven));
-
-  int closedCount = 0;
-  int breakevenCount = 0;
-
-// Close first half of orders
-  for(int i=0; i<ordersToClose && i<matchingCount; i++) {
-    if(!OrderSelect(matchingTickets[i], SELECT_BY_TICKET)) {
-      continue;
-    }
-
-    if (CloseCurrentOrder(signal)) {
-      closedCount++;
-    }
-  }
-
-// Move remaining orders to breakeven
-  for(int i=ordersToClose; i<matchingCount; i++) {
-    if(!OrderSelect(matchingTickets[i], SELECT_BY_TICKET)) {
-      continue;
-    }
-    bool isPendingOrder = OrderType() == OP_BUYLIMIT || OrderType() == OP_SELLLIMIT;
-    if (isPendingOrder && CloseCurrentOrder(signal)) {
-      breakevenCount++;
-    } else if (SetCurrentOrderStopLoss(signal)) {
-      breakevenCount++;
-    }
-
-  }
-
-  PrintLog(": ✅ Close+Breakeven completed - Closed: " + IntegerToString(closedCount) +
-           ", Breakeven: " + IntegerToString(breakevenCount) + " for GID=" + IntegerToString(signal.groupId));
 }
 
 //+------------------------------------------------------------------+

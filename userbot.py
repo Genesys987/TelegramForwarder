@@ -255,18 +255,15 @@ async def run_userbot():
                 # MODIFY (SL adjust)
                 if re.search(stoploss_regexp, message_text, re.IGNORECASE):
                     signal_type = SignalType.MODIFY
-                # CLOSE_HALF_BREAKEVEN
-                elif re.search(r'close.*(profit|half|all).*breakeven', message_text, re.IGNORECASE) or \
-                     re.search(r'close.*half.*hold', message_text, re.IGNORECASE) or \
-                     re.search(r'close.*entries.*breakeven', message_text, re.IGNORECASE) or \
-                     re.search(r'secure.*(entry|entries|first|profit)', message_text, re.IGNORECASE):
-                    # signal_type = SignalType.CLOSE_HALF_BREAKEVEN
-                    signal_type = SignalType.CLOSE
                 # BREAKEVEN
                 elif re.search(r'(breakeven|break\s*even|set\s+breakeven)', message_text, re.IGNORECASE):
                     signal_type = SignalType.BREAKEVEN
                 # CLOSE
-                elif re.search(r'(close|exit|entries\s+are\s+closed)', message_text, re.IGNORECASE):
+                elif re.search(r'close.*(profit|half|all).*breakeven', message_text, re.IGNORECASE) or \
+                     re.search(r'close.*half.*hold', message_text, re.IGNORECASE) or \
+                     re.search(r'close.*entries.*breakeven', message_text, re.IGNORECASE) or \
+                     re.search(r'secure.*(entry|entries|first|profit)', message_text, re.IGNORECASE) or \
+                     re.search(r'(close|exit|entries\s+are\s+closed)', message_text, re.IGNORECASE):
                     signal_type = SignalType.CLOSE
 
                 if signal_type:
