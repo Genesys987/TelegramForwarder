@@ -66,7 +66,7 @@ client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 
 # --- Fő Feldolgozó Függvények ---
 sl_clause="(sl|stoploss|stop loss)?"
-stoploss_regexp=fr"{sl_clause}.*(level|change|move|moving|adjust|set|update).*{sl_clause}"
+stoploss_regexp=fr"{sl_clause}.*(level|change|move|moving|adjust|set|update).*{sl_clause}.*\d+"
 
 def populate_signal_metadata(signal_data, message_date, channel_name, is_warmup=False):
     """
@@ -260,7 +260,8 @@ async def run_userbot():
                      re.search(r'close.*half.*hold', message_text, re.IGNORECASE) or \
                      re.search(r'close.*entries.*breakeven', message_text, re.IGNORECASE) or \
                      re.search(r'secure.*(entry|entries|first|profit)', message_text, re.IGNORECASE):
-                    signal_type = SignalType.CLOSE_HALF_BREAKEVEN
+                    # signal_type = SignalType.CLOSE_HALF_BREAKEVEN
+                    signal_type = SignalType.CLOSE
                 # BREAKEVEN
                 elif re.search(r'(breakeven|break\s*even|set\s+breakeven)', message_text, re.IGNORECASE):
                     signal_type = SignalType.BREAKEVEN
