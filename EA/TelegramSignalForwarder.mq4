@@ -3,7 +3,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.8.2"
+#property version "2.8.3"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -516,11 +516,10 @@ Signal ParseActionSignal(string &parts[], bool isStored)
   bool isModifySignal = signal.type == "MODIFY";
 
   if (isModifySignal) {
-    // Check if this is the new 7-part MODIFY format or old 5-part format
     int partCount = ArraySize(parts);
 
-    if (partCount >= 7) {
-      // New format: TIMESTAMP|MODIFY|SYMBOL|ENTRY|TP1,TP2|SL|GID:xxx|CHANNEL
+    if (partCount == 8) {
+      // Warmup finalization format (also sets TP): TIMESTAMP|MODIFY|SYMBOL|ENTRY|TP1,TP2|SL|GID:xxx|CHANNEL
       signal.symbol = parts[2] + symbolPostfix;
       signal.entry = StrToDouble(parts[3]);
 
@@ -550,6 +549,30 @@ Signal ParseActionSignal(string &parts[], bool isStored)
                  " NewSL=" + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
                  " TPCount=" + IntegerToString(signal.tpCount) +
                  " from channel '" + signal.channelName + "'");
+    } else if (partCount == 5) {
+      // Regular SL modification format: TIMESTAMP|MODIFY|NEW_SL|GID:xxx|CHANNEL
+      string slPart = parts[2];
+      if(!IsValidDouble(slPart)) {
+        PrintLog(eaName + ": Invalid new SL value '" + slPart + "', skipping");
+        return signal;
+      }
+      signal.stopLoss = StrToDouble(slPart);
+
+      // Parse GID
+      string gidPart = parts[3];
+      if(StringFind(gidPart, "GID:") == 0) {
+        signal.groupId = (int)StrToInteger(StringSubstr(gidPart, 4));
+      }
+
+      // Parse channel name
+      signal.channelName = CleanChannelName(parts[4]);
+
+      PrintLog(eaName + ": Parsed old format MODIFY signal GID=" + IntegerToString(signal.groupId) +
+               " NewSL=" + DoubleToString(signal.stopLoss, 5) +
+               " from channel '" + signal.channelName + "'");
+    } else {
+      PrintLog(eaName + ": Invalid MODIFY signal format, expected 5 or 8 parts but got " + IntegerToString(partCount));
+      return signal;
     }
   } else {
     // BREAKEVEN/CLOSE signals
