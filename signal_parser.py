@@ -41,9 +41,39 @@ def clean_channel_name(channel_name: str) -> str:
     return result[:4]
 
 
+def expand_abbreviated_price(price_text):
+    """
+    Expand abbreviated price format like '4207/04' to '4207/4204'
+    
+    Args:
+        price_text: Text that may contain abbreviated prices
+        
+    Returns:
+        Expanded price text or original if no abbreviation found
+    """
+    if "/" not in price_text:
+        return price_text
+    
+    parts = price_text.split("/")
+    if len(parts) != 2:
+        return price_text
+    
+    first_price = parts[0].strip()
+    second_price = parts[1].strip()
+    
+    # Check if second price is abbreviated (2 digits)
+    if len(second_price) == 2 and second_price.isdigit() and len(first_price) >= 3:
+        # Expand by taking first digits from first price + abbreviated part
+        base_digits = first_price[:-2]  # All but last 2 digits
+        expanded_second = base_digits + second_price
+        return f"{first_price}/{expanded_second}"
+    
+    return price_text
+
+
 def parse_entry_price(entry_text, signal_type):
     """
-    Parse entry price from text, handling range formats like '3334/3337', '3339-3344', '@3339-3344'
+    Parse entry price from text, handling range formats like '3334/3337', '3339-3344', '@3339-3344', '4207/04'
 
     Args:
         entry_text: The entry price text to parse
@@ -54,6 +84,9 @@ def parse_entry_price(entry_text, signal_type):
     """
     # Clean up the entry text - remove @ symbol and extra spaces
     entry_text = entry_text.strip().lstrip("@").strip()
+    
+    # Expand abbreviated prices like 4207/04 -> 4207/4204
+    entry_text = expand_abbreviated_price(entry_text)
 
     # Handle different range separators (including space-separated like "3340.5 -3338")
     if "/" in entry_text:
@@ -65,8 +98,12 @@ def parse_entry_price(entry_text, signal_type):
         else:
             split = entry_text.split("-")
     else:
-        # No price range detected, return 0 for immediate entry
-        return 0
+        # No price range detected, try to parse as single numeric value
+        try:
+            return float(entry_text.strip())
+        except ValueError:
+            print(f"Warning: Invalid entry price format: {entry_text}")
+            return entry_text
 
     try:
         # Convert to floats for proper comparison
@@ -340,15 +377,39 @@ def parse_signal(text: str) -> SignalData | None:
                 signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
 
-            # Format 1.5: "Sell Gold @3339-3344" or similar @ formats
+            # Format 1.5: "Sell Gold @3339-3344" or similar @ formats including space variations
             match_symbol_at = re.match(
-                r"^(BUY|SELL)\s+([\w\.\/\-]+)\s+@([\d\-]+)", line, re.IGNORECASE
+                r"^(BUY|SELL)\s+([\w\.\/\-]+)\s+@\s*([\d\-\s]+)", line, re.IGNORECASE
             )
             if match_symbol_at:
                 signal.signal_type = match_symbol_at.group(1).upper()
                 raw_symbol = match_symbol_at.group(2).upper()
                 signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
-                entry_text = match_symbol_at.group(3)
+                entry_text = match_symbol_at.group(3).strip()
+                signal.entry = parse_entry_price(entry_text, signal.signal_type)
+                continue
+
+            # Format 1.6: "Gold Sell @ 4231 - 4235" - symbol first, then action, then @ range
+            match_symbol_sell_at = re.match(
+                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+@\s*([\d\-\s]+)", line, re.IGNORECASE
+            )
+            if match_symbol_sell_at:
+                raw_symbol = match_symbol_sell_at.group(1).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_symbol_sell_at.group(2).upper()
+                entry_text = match_symbol_sell_at.group(3).strip()
+                signal.entry = parse_entry_price(entry_text, signal.signal_type)
+                continue
+
+            # Format 1.7: "Sell gold price @ 4355-4358" - action, symbol, price, @ range
+            match_sell_symbol_price_at = re.match(
+                r"^(BUY|SELL)\s+([\w\.\/\-]+)\s+price\s+@\s*([\d\-\s]+)", line, re.IGNORECASE
+            )
+            if match_sell_symbol_price_at:
+                signal.signal_type = match_sell_symbol_price_at.group(1).upper()
+                raw_symbol = match_sell_symbol_price_at.group(2).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                entry_text = match_sell_symbol_price_at.group(3).strip()
                 signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
 
@@ -367,7 +428,7 @@ def parse_signal(text: str) -> SignalData | None:
                     signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
 
-            # Format 3: "SYMBOL SIGNAL_TYPE" or "SYMBOL SIGNAL_TYPE entry_range" (e.g., "GOLD SELL 3334/3337", "Gold Sell 3341-3346")
+            # Format 3: "SYMBOL SIGNAL_TYPE" or "SYMBOL SIGNAL_TYPE entry_range" (e.g., "GOLD SELL 3334/3337", "Gold Sell 3341-3346", "GOLD BUY 4207/04")
             # Note: Exclude colon format which is handled separately
             match_symbol_type_alt = re.match(
                 r"^([\w\.\/\-]+)\s+(BUY|SELL)(?!\s*:)\s*([\d\/\.\-@]*)",
@@ -378,7 +439,7 @@ def parse_signal(text: str) -> SignalData | None:
                 raw_symbol = match_symbol_type_alt.group(1).upper()
                 signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                 signal.signal_type = match_symbol_type_alt.group(2).upper()
-                # Capture the entry price if present (including range formats)
+                # Capture the entry price if present (including abbreviated range formats like 4207/04)
                 entry_text = match_symbol_type_alt.group(3).strip()
                 if entry_text:
                     signal.entry = parse_entry_price(entry_text, signal.signal_type)
@@ -466,7 +527,7 @@ def parse_signal(text: str) -> SignalData | None:
                 continue
 
         # Entry Price parsing
-        if not signal.entry:
+        if signal.entry is None:
             # Look for ENTRY keyword with optional colon
             m = re.search(r"ENTRY\s*:?\s*(?:at\s+)?([\d\/\.\-@]+)", line, re.IGNORECASE)
             if m:
@@ -599,50 +660,59 @@ def parse_signal(text: str) -> SignalData | None:
 
     # Sort take profits and add to signal
     if take_profits:
-        # Process "open" TP values - calculate them based on previous TP and signal type
-        processed_tps = []
-        for i, tp in enumerate(take_profits):
-            if tp == "open":
-                # Calculate "open" TP based on the previous TP (if exists) or entry price
-                if i > 0 and isinstance(processed_tps[i - 1], (int, float)):
-                    # Case 1: Previous TP exists - use prev_tp ± 4
-                    prev_tp = processed_tps[i - 1]
-                    if signal.signal_type == "BUY":
-                        # For BUY: open TP should be higher (prev_tp + 4)
-                        calculated_tp = prev_tp + 4
-                    else:
-                        # For SELL: open TP should be lower (prev_tp - 4)
-                        calculated_tp = prev_tp - 4
-                    processed_tps.append(calculated_tp)
-                elif signal.entry is not None and signal.entry != 0:
-                    # Case 2: No previous TP but have entry - use entry ± 6
-                    entry_price = signal.entry
-                    if signal.signal_type == "BUY":
-                        # For BUY: open TP should be higher (entry + 6)
-                        calculated_tp = entry_price + 6
-                    else:
-                        # For SELL: open TP should be lower (entry - 6)
-                        calculated_tp = entry_price - 6
-                    processed_tps.append(calculated_tp)
-                else:
-                    print(
-                        f"Warning: Cannot calculate 'open' TP - no previous TP or entry found"
-                    )
-                    # Skip this TP
-                    continue
-            else:
-                processed_tps.append(tp)
-
-        take_profits = processed_tps
-
-        # Sort TPs based on signal type
-        if signal.signal_type == "BUY":
-            # For BUY signals, TPs should be in ascending order (higher prices)
-            take_profits.sort()
+        # Check if we have only "open" TP values and no numeric TPs
+        numeric_tps = [tp for tp in take_profits if tp != "open"]
+        open_tps = [tp for tp in take_profits if tp == "open"]
+        
+        if len(numeric_tps) == 0 and len(open_tps) > 0:
+            # Special case: Only "open" TPs, no numeric TPs
+            # Set TP to 0 to indicate no TP should be set (order opens without TP)
+            signal.take_profits = [0]
         else:
-            # For SELL signals, TPs should be in descending order (lower prices)
-            take_profits.sort(reverse=True)
-        signal.take_profits = take_profits
+            # Process "open" TP values - calculate them based on previous TP and signal type
+            processed_tps = []
+            for i, tp in enumerate(take_profits):
+                if tp == "open":
+                    # Calculate "open" TP based on the previous TP (if exists) or entry price
+                    if i > 0 and isinstance(processed_tps[i - 1], (int, float)):
+                        # Case 1: Previous TP exists - use prev_tp ± 4
+                        prev_tp = processed_tps[i - 1]
+                        if signal.signal_type == "BUY":
+                            # For BUY: open TP should be higher (prev_tp + 4)
+                            calculated_tp = prev_tp + 4
+                        else:
+                            # For SELL: open TP should be lower (prev_tp - 4)
+                            calculated_tp = prev_tp - 4
+                        processed_tps.append(calculated_tp)
+                    elif signal.entry is not None and signal.entry != 0:
+                        # Case 2: No previous TP but have entry - use entry ± 6
+                        entry_price = signal.entry
+                        if signal.signal_type == "BUY":
+                            # For BUY: open TP should be higher (entry + 6)
+                            calculated_tp = entry_price + 6
+                        else:
+                            # For SELL: open TP should be lower (entry - 6)
+                            calculated_tp = entry_price - 6
+                        processed_tps.append(calculated_tp)
+                    else:
+                        print(
+                            f"Warning: Cannot calculate 'open' TP - no previous TP or entry found"
+                        )
+                        # Skip this TP
+                        continue
+                else:
+                    processed_tps.append(tp)
+
+            take_profits = processed_tps
+
+            # Sort TPs based on signal type
+            if signal.signal_type == "BUY":
+                # For BUY signals, TPs should be in ascending order (higher prices)
+                take_profits.sort()
+            else:
+                # For SELL signals, TPs should be in descending order (lower prices)
+                take_profits.sort(reverse=True)
+            signal.take_profits = take_profits
 
     # NEW: Simple check for immediate entry - set entry to 0 if NOW keyword found BUT no entry was set
     if "NOW" in text.upper() and signal.entry is None:
