@@ -62,7 +62,7 @@ def add_gid_mapping(message_id: int, group_id: int): # Hozzáadás és mentés
 
 # --- Telethon Client Setup ---
 SESSION_NAME = "userbot_session"
-client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+client = None
 
 # --- Fő Feldolgozó Függvények ---
 sl_clause="(sl|stoploss|stop loss)?"
@@ -196,8 +196,15 @@ async def run_userbot():
     logger.info("Bot indítása...")
     load_last_gid()
     load_message_gid_map()
-    try: await client.start(); logger.info("Sikeres csatlakozás Telethon kliensként.")
-    except Exception as e: logger.error(f"Hiba kliens indításakor: {e}"); return
+    # Create the Telethon client here (only after the event loop exists)
+    global client
+    client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+    try:
+        await client.start()
+        logger.info("Sikeres csatlakozás Telethon kliensként.")
+    except Exception as e:
+        logger.error(f"Hiba kliens indításakor: {e}")
+        return
 
     # Fill entity cache with channel IDs
     dialogs = await client.get_dialogs()
