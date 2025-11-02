@@ -26,7 +26,23 @@ def is_warmup_message(text: str):
         r"^ready\s+buy[\s\w]*[\.\!]*$",
         r"^Mid\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly[\.\!]*$",
         r"^HIGH\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly[\.\!]*$",
-        r"^ANOTHER\s+GOLD\s+BUY\s+READY[\.\!]*$"
+        r"^ANOTHER\s+GOLD\s+BUY\s+READY[\.\!]*$",
+        # New BUY patterns
+        r"^Gold\s+buy\s+now[\.\!]*$",
+        r"^HIGH\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly[\.\!]*$",
+        r"^Lets\s+scalping\s+buy\s+gold\s+slowly\s+HIGH\s+risk[\.\!]*$",
+        r"^Buy\s+gold\s+now\s+scalping[\.\!]*$",
+        r"^Lets\s+scalping\s+buy\s+gold\s+slowly\s+mid\s+risk\s*\(\s*scalping\s*\)?\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+buy\s+gold\s+slowly\s+HIGH\s+risk\s*-?\s*scalping\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+buy\s+gold\s+slowly\s+high\s+risk\s*\(\s*scalping\s*\)\s*[\.\!]*$",
+        r"^Gold\s+re-entry\s+buy\s+now[\.\!]*$",
+        r"^Lets\s+scalping\s+buy\s+gold\s+slowly\s*-?\s*scalping\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+buy\s+gold\s+slowly\s+mid\s+risk\s*\(\s*scalping\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+buy\s+gold\s+slowly\s+HIGH\s+risk\s*\(\s*scalping\s*[\.\!]*$",
+        r"^Let'?s\s+re-enter\s+scalping\s+buy\s+gold\s+small\s+lot\s+high\s+risk[\.\!]*$",  # Assumes "buy" context in re-enter
+        r"^Gold\s+buy\s+now[\.\!]+$",
+        r"^Standby\s+Gold\s+buy[\.\!]*$",
+        r"^Lets\s+scalping\s+buy\s+gold\s+slowly\s*\(\s*scalping\s*[\.\!]*$"
     ]
 
     # SELL patterns - exact matching for ready messages  
@@ -35,7 +51,20 @@ def is_warmup_message(text: str):
         r"^Let'?s\s+scalping\s+sell\s+gold\s+slowly\s+mid\s+risk[\.\!]*$",
         r"^ready\s+sell[\s\w]*[\.\!]*$",
         r"^Double\s+sell\s+ready[\.\!]*$",
-        r"^GOLD\s+SELL\s+READY[\.\!]*$"
+        r"^GOLD\s+SELL\s+READY[\.\!]*$",
+        # New SELL patterns
+        r"^Gold\s+sell\s+now[\.\!]*$",
+        r"^HIGH\s+risk\s+let'?s\s+scalping\s+sell\s+gold\s+slowly[\.\!]*$",
+        r"^Lets\s+scalping\s+sell\s+gold\s+slowly\s+HIGH\s+risk[\.\!]*$",
+        r"^Sell\s+gold\s+now\s+scalping[\.\!]*$",
+        r"^Lets\s+scalping\s+sell\s+gold\s+slowly\s+mid\s+risk\s*\(\s*scalping\s*\)?\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+sell\s+gold\s+slowly\s+HIGH\s+risk\s*-?\s*scalping\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+sell\s+gold\s+slowly\s+high\s+risk\s*\(\s*scalping\s*\)\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+sell\s+gold\s+slowly\s*-?\s*scalping\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+sell\s+gold\s+slowly\s+mid\s+risk\s*\(\s*scalping\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+sell\s+gold\s+slowly\s+HIGH\s+risk\s*\(\s*scalping\s*[\.\!]*$",
+        r"^Let'?s\s+re-enter\s+scalping\s+sell\s+gold\s+small\s+lot\s+high\s+risk[\.\!]*$",
+        r"^Lets\s+scalping\s+sell\s+gold\s+slowly\s*\(\s*scalping\s*[\.\!]*$"
     ]
 
     for pattern in buy_patterns:
