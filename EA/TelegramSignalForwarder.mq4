@@ -46,6 +46,7 @@ struct Signal {
   string             channelName;
   bool               isValid;
   bool               isWarmup;
+  string             signalLine;
 
                      Signal()
   {
@@ -60,6 +61,7 @@ struct Signal {
     channelName  = "";
     isValid      = false;
     isWarmup     = false;
+    signalLine   = "";
   }
 };
 
@@ -95,8 +97,8 @@ int      warmupTickets[];
 void    PrintLog(string message);
 Signal ReadSignalFile();
 Signal ReadSignalLine(string line, bool isStored);
-Signal ParseBuySellSignal(string &parts[]);
-Signal ParseActionSignal(string &parts[]);
+Signal ParseBuySellSignal(string &parts[], string line, bool isStored);
+Signal ParseActionSignal(string &parts[], string line, bool isStored);
 void    UpdateExistingOrdersSL(Signal &signal);
 void    SendOrders(Signal &signal);
 void    ProcessModifySlSignal(Signal &signal);
@@ -106,7 +108,7 @@ double  CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, strin
 OrderCommentInfo    ParseOrderComment();
 bool CloseCurrentOrder(Signal &signal);
 bool SetCurrentOrderStopLoss(Signal &signal);
-void SaveSignalToFile(string signal, int groupId);
+void SaveSignalToFile(Signal &signal);
 
 // Utility functions
 bool    IsSignalTooOld(long signalTimestampMs, int maxAgeSeconds);
@@ -281,7 +283,7 @@ Signal ReadSignalFile()
   if(signal.isValid) {
     PrintLog(": Found valid signal: " + line);
     storedTestSignal = "";
-    SaveSignalToFile(line, signal.groupId);
+    SaveSignalToFile(signal);
   }
 
   return signal;
@@ -295,6 +297,7 @@ Signal ReadSignalFile()
 Signal ReadSignalLine(string line, bool isStored)
 {
   Signal signal;
+  signal.signalLine = line;
 // Expect different formats based on signal type:
 // BUY/SELL: 123456789|TYPE|SYMBOL|ENTRY|TP1,TP2,TP3,...|SL|GID:<id>|CHANNEL_NAME
 // BREAKEVEN/CLOSE: 123456789|TYPE|GID:<id>|CHANNEL_NAME
@@ -342,7 +345,7 @@ Signal ReadSignalLine(string line, bool isStored)
     }
 
     // Parse full trading signal
-    return ParseBuySellSignal(parts, isStored);
+    return ParseBuySellSignal(parts, line, isStored);
 
   } else if(signal.type == "BREAKEVEN" || signal.type == "CLOSE" || signal.type == "MODIFY") {
     // Action signal format: TIMESTAMP|TYPE|GID:xxx|CHANNEL
@@ -352,7 +355,7 @@ Signal ReadSignalLine(string line, bool isStored)
       return signal;
     }
 
-    return ParseActionSignal(parts, isStored);
+    return ParseActionSignal(parts, line, isStored);
 
   }
 
@@ -362,9 +365,10 @@ Signal ReadSignalLine(string line, bool isStored)
 //+------------------------------------------------------------------+
 //| ParseFullTradingSignal: Parse BUY/SELL trading signals          |
 //+------------------------------------------------------------------+
-Signal ParseBuySellSignal(string &parts[], bool isStored)
+Signal ParseBuySellSignal(string &parts[], string line, bool isStored)
 {
   Signal signal;
+  signal.signalLine = line;
   bool isLive = !isStored;
 
 // Set basic info
@@ -500,9 +504,10 @@ Signal ParseBuySellSignal(string &parts[], bool isStored)
 //+------------------------------------------------------------------+
 //| ParseModifySignal: Parse MODIFY/CLOSE etc. SL signals                      |
 //+------------------------------------------------------------------+
-Signal ParseActionSignal(string &parts[], bool isStored)
+Signal ParseActionSignal(string &parts[], string line, bool isStored)
 {
   Signal signal;
+  signal.signalLine = line;
 
 // Set basic info
   signal.timestamp = StrToInteger(parts[0]);
@@ -1438,16 +1443,30 @@ string StringJoin(string &arr[], int size, string delimiter)
 //+------------------------------------------------------------------+
 //| saveSignal: Save a signal struct to signals/<GID>.txt          |
 //+------------------------------------------------------------------+
-void SaveSignalToFile(string signal, int groupId)
+void SaveSignalToFile(Signal &signal)
 {
   string dir = "signals";
-  string filename = dir + "/" + IntegerToString(groupId) + ".txt";
+  string filename = dir + "/" + IntegerToString(signal.groupId) + ".txt";
+  string signalLine = signal.signalLine;
+  if(signal.type == "MODIFY") {
+    if (signal.tpCount == 0) {
+      // TODO overwrite original SL in signal file with this modified one
+      PrintLog("Skipping saving stoploss modify command to file.");
+      return;
+    }
+    // try to find original signal and use its signal type (buy/sell)
+    Signal modifiedSignal = GetSignalFromFile(signal.groupId);
+    if (modifiedSignal.isValid) {
+      PrintLog("Replacing warmup MODIFY with " + modifiedSignal.type);
+      StringReplace(signalLine, "MODIFY", modifiedSignal.type);
+    }
+  }
   int handle = FileOpen(filename, FILE_WRITE|FILE_TXT|FILE_ANSI);
   if(handle == INVALID_HANDLE) {
     Print("SaveSignalToFile: Failed to open file: ", filename);
     return;
   }
-  FileWrite(handle, signal);
+  FileWrite(handle, signalLine);
   FileFlush(handle);
   FileClose(handle);
 }
