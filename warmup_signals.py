@@ -20,22 +20,26 @@ def is_warmup_message(text: str):
     # Determine signal type from ready message patterns
     signal_type = None
 
-    # BUY patterns - exact matching for ready messages
+    # BUY patterns - simplified flexible matching
     buy_patterns = [
-        r"^I'?m\s+buying\s+now[\.\!]*$",
-        r"^ready\s+buy[\s\w]*[\.\!]*$",
-        r"^Mid\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly[\.\!]*$",
-        r"^HIGH\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly[\.\!]*$",
-        r"^ANOTHER\s+GOLD\s+BUY\s+READY[\.\!]*$"
+        r"^I'?m\s+buying\s+now",
+        r"^ready\s+buy",
+        r"buy.*gold.*(now|ready)",
+        r"gold.*buy.*(now|ready)",
+        r"let'?s.*scalping.*buy.*gold",
+        r"re-?entry.*buy",
+        r"standby.*buy"
     ]
 
-    # SELL patterns - exact matching for ready messages  
+    # SELL patterns - simplified flexible matching
     sell_patterns = [
-        r"^I'?m\s+selling\s+now[\.\!]*$",
-        r"^Let'?s\s+scalping\s+sell\s+gold\s+slowly\s+mid\s+risk[\.\!]*$",
-        r"^ready\s+sell[\s\w]*[\.\!]*$",
-        r"^Double\s+sell\s+ready[\.\!]*$",
-        r"^GOLD\s+SELL\s+READY[\.\!]*$"
+        r"^I'?m\s+selling\s+now",
+        r"^ready\s+sell",
+        r"sell.*gold.*(now|ready)",
+        r"gold.*sell.*(now|ready)",
+        r"let'?s.*scalping.*sell.*gold",
+        r"re-?enter.*sell",
+        r"double.*sell.*ready"
     ]
 
     for pattern in buy_patterns:
