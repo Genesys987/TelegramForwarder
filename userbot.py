@@ -64,6 +64,123 @@ def add_gid_mapping(message_id: int, group_id: int): # Hozzáadás és mentés
 SESSION_NAME = "userbot_session"
 client = None
 
+# --- Message Handler ---
+async def handle_new_message(event):
+    message = event.message; message_text = message.text; message_id = message.id
+    chat_title = getattr(event.chat, 'title', None) or getattr(event.chat, 'username', None) or str(event.chat_id)
+    if not message_text: return
+    logger.info(f"📩 Új üzenet innen: '{chat_title}' (ID: {message_id})")
+
+    # === Reply üzenet kezelése ===
+    if message.is_reply:
+        reply_to_msg_id = message.reply_to_msg_id
+        logger.info(f"   Válasz. Eredeti ID: {reply_to_msg_id}")
+        reply_original_message = await message.get_reply_message()
+        if reply_original_message:
+            # Extract common variables for reply commands
+            retrieved_group_id = message_id_to_group_id.get(reply_to_msg_id)
+            clean_channel = clean_channel_name(chat_title)
+
+            # --- Unified trading instruction pattern matching ---
+            signal_type = None
+            # CLOSE
+            if re.search(r'close.*(profit|half|all).*breakeven', message_text, re.IGNORECASE) or \
+                 re.search(r'close.*half.*hold', message_text, re.IGNORECASE) or \
+                 re.search(r'close.*entries.*breakeven', message_text, re.IGNORECASE) or \
+                 re.search(r'secure.*(entry|entries|first|profit)', message_text, re.IGNORECASE) or \
+                 re.search(r'(close|exit|entries\s+are\s+closed)', message_text, re.IGNORECASE):
+                signal_type = SignalType.CLOSE
+            # MODIFY (SL adjust)
+            elif re.search(stoploss_regexp, message_text, re.IGNORECASE):
+                signal_type = SignalType.MODIFY
+            # BREAKEVEN
+            elif re.search(r'(breakeven|break\s*even|set\s+breakeven)', message_text, re.IGNORECASE):
+                signal_type = SignalType.BREAKEVEN
+
+            if signal_type:
+                logger.info(f"Processing trading instruction: {signal_type}")
+                if retrieved_group_id:
+                    is_success = False
+                    if signal_type == SignalType.MODIFY:
+                        is_success = process_stoploss_reply(message_text, retrieved_group_id, clean_channel)
+                    else:
+                        is_success = process_signal(signal_type, retrieved_group_id, clean_channel)
+                    if is_success:
+                        await forward_to_archive(message, chat_title, retrieved_group_id)
+                    else:
+                        logger.error(f"❌ Parancs hiba: {signal_type}")
+                else:
+                    logger.warning(f"Nincs GID találat (ID: {reply_to_msg_id}). A kereskedési utasítás nem lett feldolgozva!")
+            else:
+                logger.info(f"Ismeretlen kereskedési utasítás.")
+
+        else: logger.error(f"   Hiba: Eredeti üzenet lekérése sikertelen (ID: {reply_to_msg_id}).")
+        return
+
+    # === Standard szignál és warmup feldolgozás ===
+    else:
+        # Check for non-reply SL modification messages
+        if re.search(stoploss_regexp, message_text, re.IGNORECASE):
+            logger.info(f"Non-reply SL modification észlelve: {message_text}")
+            try:
+                # Non-reply SL modification konfigurálható csatornán (teszteléshez)
+                # Konfigurációból vesszük a csatorna nevet (alapértelmezett: FXTM)
+                channel_name = NON_REPLY_SL_CHANNEL_ID
+                success = process_stoploss_non_reply(message_text, channel_name)
+                if success:
+                    logger.info(f"Non-reply SL modification sikeresen feldolgozva {channel_name} csatornából")
+                    await forward_to_archive(message, chat_title, None)  # Forward to archive without group_id
+                else:
+                    logger.warning(f"Non-reply SL modification feldolgozása sikertelen {channel_name} csatornából")
+            except Exception as e:
+                logger.error(f"Hiba non-reply SL modification feldolgozásakor: {e}")
+                traceback.print_exc()
+            return  # Don't process as standard signal
+
+        # === Standard szignál feldolgozás ===
+        try:
+            group_id = None
+
+            # First check if warmup signals are enabled and this is a ready message
+            is_ready, signal_type, _ = is_warmup_message(message_text)
+            if is_ready:
+                # Process warmup signal (EA will calculate TP/SL from zeros)
+                group_id = await process_warmup_signal(message_text, message_id, message.date, chat_title)
+                if group_id is not None:
+                    await forward_to_archive(message, chat_title, group_id)
+                return  # Don't process as standard signal
+
+            # Try to parse as standard signal
+            signal_data = parse_signal(message_text)
+            if signal_data:
+                # Check if this is from warmup channel and should modify a warmup signal
+                clean_name = clean_channel_name(chat_title)
+                warmup_channel_clean = clean_channel_name(WARMUP_SIGNAL_CHANNEL)
+                if clean_name == warmup_channel_clean and current_warmup_gid:
+                    # Add metadata to signal_data
+                    if message.date:
+                        if message.date.tzinfo is None:
+                            message_date = message.date.replace(tzinfo=timezone.utc)
+                        else:
+                            message_date = message.date.astimezone(timezone.utc)
+                        signal_data.timestamp_utc = int(message_date.timestamp())
+                    else:
+                        signal_data.timestamp_utc = int(datetime.now(timezone.utc).timestamp())
+
+                    # Process as modify signal
+                    warmup_gid = await process_fxtm_signal_modify(signal_data)
+                    if warmup_gid:
+                        await forward_to_archive(message, chat_title, warmup_gid)
+                    return  # Don't process as standard signal
+
+            # Process as standard signal if not warmup or FXTM modify
+            group_id = await process_new_standard_signal(message_text, message_id, message.date, chat_title)
+            if group_id is not None:
+                await forward_to_archive(message, chat_title, group_id)
+
+        except Exception as e:
+            logger.error(f"   Hiba signal feldolgozás hívásakor: {e}"); traceback.print_exc()
+
 # --- Fő Feldolgozó Függvények ---
 sl_clause="(sl|stoploss|stop loss)?"
 stoploss_regexp=fr"{sl_clause}.*(level|change|move|moving|adjust|set|update).*{sl_clause}.*\d+"
@@ -242,120 +359,7 @@ async def run_userbot():
 
     @client.on(events.NewMessage(chats=joined_chats_entity))
     async def new_message_handler(event):
-        message = event.message; message_text = message.text; message_id = message.id
-        chat_title = getattr(event.chat, 'title', None) or getattr(event.chat, 'username', None) or str(event.chat_id)
-        if not message_text: return
-        logger.info(f"📩 Új üzenet innen: '{chat_title}' (ID: {message_id})")
-
-        # === Reply üzenet kezelése ===
-        if message.is_reply:
-            reply_to_msg_id = message.reply_to_msg_id
-            logger.info(f"   Válasz. Eredeti ID: {reply_to_msg_id}")
-            reply_original_message = await message.get_reply_message()
-            if reply_original_message:
-                # Extract common variables for reply commands
-                retrieved_group_id = message_id_to_group_id.get(reply_to_msg_id)
-                clean_channel = clean_channel_name(chat_title)
-
-                # --- Unified trading instruction pattern matching ---
-                signal_type = None
-                # CLOSE
-                if re.search(r'close.*(profit|half|all).*breakeven', message_text, re.IGNORECASE) or \
-                     re.search(r'close.*half.*hold', message_text, re.IGNORECASE) or \
-                     re.search(r'close.*entries.*breakeven', message_text, re.IGNORECASE) or \
-                     re.search(r'secure.*(entry|entries|first|profit)', message_text, re.IGNORECASE) or \
-                     re.search(r'(close|exit|entries\s+are\s+closed)', message_text, re.IGNORECASE):
-                    signal_type = SignalType.CLOSE
-                # MODIFY (SL adjust)
-                elif re.search(stoploss_regexp, message_text, re.IGNORECASE):
-                    signal_type = SignalType.MODIFY
-                # BREAKEVEN
-                elif re.search(r'(breakeven|break\s*even|set\s+breakeven)', message_text, re.IGNORECASE):
-                    signal_type = SignalType.BREAKEVEN
-
-                if signal_type:
-                    logger.info(f"Processing trading instruction: {signal_type}")
-                    if retrieved_group_id:
-                        is_success = False
-                        if signal_type == SignalType.MODIFY:
-                            is_success = process_stoploss_reply(message_text, retrieved_group_id, clean_channel)
-                        else:
-                            is_success = process_signal(signal_type, retrieved_group_id, clean_channel)
-                        if is_success:
-                            await forward_to_archive(message, chat_title, retrieved_group_id)
-                        else:
-                            logger.error(f"❌ Parancs hiba: {signal_type}")
-                    else:
-                        logger.warning(f"Nincs GID találat (ID: {reply_to_msg_id}). A kereskedési utasítás nem lett feldolgozva!")
-                else:
-                    logger.info(f"Ismeretlen kereskedési utasítás.")
-
-            else: logger.error(f"   Hiba: Eredeti üzenet lekérése sikertelen (ID: {reply_to_msg_id}).")
-            return
-
-        # === Standard szignál és warmup feldolgozás ===
-        else:
-            # Check for non-reply SL modification messages
-            if re.search(stoploss_regexp, message_text, re.IGNORECASE):
-                logger.info(f"Non-reply SL modification észlelve: {message_text}")
-                try:
-                    # Non-reply SL modification konfigurálható csatornán (teszteléshez)
-                    # Konfigurációból vesszük a csatorna nevet (alapértelmezett: FXTM)
-                    channel_name = NON_REPLY_SL_CHANNEL_ID
-                    success = process_stoploss_non_reply(message_text, channel_name)
-                    if success:
-                        logger.info(f"Non-reply SL modification sikeresen feldolgozva {channel_name} csatornából")
-                        await forward_to_archive(message, chat_title, None)  # Forward to archive without group_id
-                    else:
-                        logger.warning(f"Non-reply SL modification feldolgozása sikertelen {channel_name} csatornából")
-                except Exception as e:
-                    logger.error(f"Hiba non-reply SL modification feldolgozásakor: {e}")
-                    traceback.print_exc()
-                return  # Don't process as standard signal
-
-            # === Standard szignál feldolgozás ===
-            try:
-                group_id = None
-
-                # First check if warmup signals are enabled and this is a ready message
-                is_ready, signal_type, _ = is_warmup_message(message_text)
-                if is_ready:
-                    # Process warmup signal (EA will calculate TP/SL from zeros)
-                    group_id = await process_warmup_signal(message_text, message_id, message.date, chat_title)
-                    if group_id is not None:
-                        await forward_to_archive(message, chat_title, group_id)
-                    return  # Don't process as standard signal
-
-                # Try to parse as standard signal
-                signal_data = parse_signal(message_text)
-                if signal_data:
-                    # Check if this is from warmup channel and should modify a warmup signal
-                    clean_name = clean_channel_name(chat_title)
-                    warmup_channel_clean = clean_channel_name(WARMUP_SIGNAL_CHANNEL)
-                    if clean_name == warmup_channel_clean and current_warmup_gid:
-                        # Add metadata to signal_data
-                        if message.date:
-                            if message.date.tzinfo is None:
-                                message_date = message.date.replace(tzinfo=timezone.utc)
-                            else:
-                                message_date = message.date.astimezone(timezone.utc)
-                            signal_data.timestamp_utc = int(message_date.timestamp())
-                        else:
-                            signal_data.timestamp_utc = int(datetime.now(timezone.utc).timestamp())
-
-                        # Process as modify signal
-                        warmup_gid = await process_fxtm_signal_modify(signal_data)
-                        if warmup_gid:
-                            await forward_to_archive(message, chat_title, warmup_gid)
-                        return  # Don't process as standard signal
-
-                # Process as standard signal if not warmup or FXTM modify
-                group_id = await process_new_standard_signal(message_text, message_id, message.date, chat_title)
-                if group_id is not None:
-                    await forward_to_archive(message, chat_title, group_id)
-
-            except Exception as e:
-                logger.error(f"   Hiba signal feldolgozás hívásakor: {e}"); traceback.print_exc()
+        return handle_new_message(event)
 
     logger.info("🟢 Userbot elindult. Várakozás...")
     await client.run_until_disconnected()
