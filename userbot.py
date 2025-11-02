@@ -252,19 +252,19 @@ async def run_userbot():
 
                 # --- Unified trading instruction pattern matching ---
                 signal_type = None
-                # MODIFY (SL adjust)
-                if re.search(stoploss_regexp, message_text, re.IGNORECASE):
-                    signal_type = SignalType.MODIFY
-                # BREAKEVEN
-                elif re.search(r'(breakeven|break\s*even|set\s+breakeven)', message_text, re.IGNORECASE):
-                    signal_type = SignalType.BREAKEVEN
                 # CLOSE
-                elif re.search(r'close.*(profit|half|all).*breakeven', message_text, re.IGNORECASE) or \
+                if re.search(r'close.*(profit|half|all).*breakeven', message_text, re.IGNORECASE) or \
                      re.search(r'close.*half.*hold', message_text, re.IGNORECASE) or \
                      re.search(r'close.*entries.*breakeven', message_text, re.IGNORECASE) or \
                      re.search(r'secure.*(entry|entries|first|profit)', message_text, re.IGNORECASE) or \
                      re.search(r'(close|exit|entries\s+are\s+closed)', message_text, re.IGNORECASE):
                     signal_type = SignalType.CLOSE
+                # MODIFY (SL adjust)
+                elif re.search(stoploss_regexp, message_text, re.IGNORECASE):
+                    signal_type = SignalType.MODIFY
+                # BREAKEVEN
+                elif re.search(r'(breakeven|break\s*even|set\s+breakeven)', message_text, re.IGNORECASE):
+                    signal_type = SignalType.BREAKEVEN
 
                 if signal_type:
                     logger.info(f"Processing trading instruction: {signal_type}")
