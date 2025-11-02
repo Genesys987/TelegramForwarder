@@ -359,7 +359,7 @@ async def run_userbot():
 
     @client.on(events.NewMessage(chats=joined_chats_entity))
     async def new_message_handler(event):
-        return handle_new_message(event)
+        await handle_new_message(event)
 
     logger.info("🟢 Userbot elindult. Várakozás...")
     await client.run_until_disconnected()
