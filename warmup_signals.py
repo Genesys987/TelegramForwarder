@@ -20,26 +20,51 @@ def is_warmup_message(text: str):
     # Determine signal type from ready message patterns
     signal_type = None
 
-    # BUY patterns - simplified flexible matching
+    # BUY patterns - exact matching for ready messages
     buy_patterns = [
-        r"^I'?m\s+buying\s+now",
-        r"^ready\s+buy",
-        r"buy.*gold.*(now|ready)",
-        r"gold.*buy.*(now|ready)",
-        r"let'?s.*scalping.*buy.*gold",
-        r"re-?entry.*buy",
-        r"standby.*buy"
+        r"^I'?m\s+buying\s+now[\.\!]*$",
+        r"^ready\s+buy[\s\w]*[\.\!]*$",
+        r"^Mid\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly[\.\!]*$",
+        r"^HIGH\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly[\.\!]*$",
+        r"^ANOTHER\s+GOLD\s+BUY\s+READY[\.\!]*$",
+        # New BUY patterns
+        r"^Gold\s+buy\s+now[\.\!]*$",
+        r"^HIGH\s+risk\s+let'?s\s+scalping\s+buy\s+gold\s+slowly[\.\!]*$",
+        r"^Lets\s+scalping\s+buy\s+gold\s+slowly\s+HIGH\s+risk[\.\!]*$",
+        r"^Buy\s+gold\s+now\s+scalping[\.\!]*$",
+        r"^Lets\s+scalping\s+buy\s+gold\s+slowly\s+mid\s+risk\s*\(\s*scalping\s*\)?\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+buy\s+gold\s+slowly\s+HIGH\s+risk\s*-?\s*scalping\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+buy\s+gold\s+slowly\s+high\s+risk\s*\(\s*scalping\s*\)\s*[\.\!]*$",
+        r"^Gold\s+re-entry\s+buy\s+now[\.\!]*$",
+        r"^Lets\s+scalping\s+buy\s+gold\s+slowly\s*-?\s*scalping\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+buy\s+gold\s+slowly\s+mid\s+risk\s*\(\s*scalping\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+buy\s+gold\s+slowly\s+HIGH\s+risk\s*\(\s*scalping\s*[\.\!]*$",
+        r"^Let'?s\s+re-enter\s+scalping\s+buy\s+gold\s+small\s+lot\s+high\s+risk[\.\!]*$",  # Assumes "buy" context in re-enter
+        r"^Gold\s+buy\s+now[\.\!]+$",
+        r"^Standby\s+Gold\s+buy[\.\!]*$",
+        r"^Lets\s+scalping\s+buy\s+gold\s+slowly\s*\(\s*scalping\s*[\.\!]*$"
     ]
 
-    # SELL patterns - simplified flexible matching
+    # SELL patterns - exact matching for ready messages
     sell_patterns = [
-        r"^I'?m\s+selling\s+now",
-        r"^ready\s+sell",
-        r"sell.*gold.*(now|ready)",
-        r"gold.*sell.*(now|ready)",
-        r"let'?s.*scalping.*sell.*gold",
-        r"re-?enter.*sell",
-        r"double.*sell.*ready"
+        r"^I'?m\s+selling\s+now[\.\!]*$",
+        r"^Let'?s\s+scalping\s+sell\s+gold\s+slowly\s+mid\s+risk[\.\!]*$",
+        r"^ready\s+sell[\s\w]*[\.\!]*$",
+        r"^Double\s+sell\s+ready[\.\!]*$",
+        r"^GOLD\s+SELL\s+READY[\.\!]*$",
+        # New SELL patterns
+        r"^Gold\s+sell\s+now[\.\!]*$",
+        r"^HIGH\s+risk\s+let'?s\s+scalping\s+sell\s+gold\s+slowly[\.\!]*$",
+        r"^Lets\s+scalping\s+sell\s+gold\s+slowly\s+HIGH\s+risk[\.\!]*$",
+        r"^Sell\s+gold\s+now\s+scalping[\.\!]*$",
+        r"^Lets\s+scalping\s+sell\s+gold\s+slowly\s+mid\s+risk\s*\(\s*scalping\s*\)?\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+sell\s+gold\s+slowly\s+HIGH\s+risk\s*-?\s*scalping\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+sell\s+gold\s+slowly\s+high\s+risk\s*\(\s*scalping\s*\)\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+sell\s+gold\s+slowly\s*-?\s*scalping\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+sell\s+gold\s+slowly\s+mid\s+risk\s*\(\s*scalping\s*[\.\!]*$",
+        r"^Lets\s+scalping\s+sell\s+gold\s+slowly\s+HIGH\s+risk\s*\(\s*scalping\s*[\.\!]*$",
+        r"^Let'?s\s+re-enter\s+scalping\s+sell\s+gold\s+small\s+lot\s+high\s+risk[\.\!]*$",
+        r"^Lets\s+scalping\s+sell\s+gold\s+slowly\s*\(\s*scalping\s*[\.\!]*$"
     ]
 
     for pattern in buy_patterns:
@@ -80,4 +105,3 @@ def generate_warmup_signal(signal_type: str):
         channel_name=WARMUP_SIGNAL_CHANNEL,  # Use configured channel name
         is_warmup=True  # Flag to identify warmup signals
     )
-
