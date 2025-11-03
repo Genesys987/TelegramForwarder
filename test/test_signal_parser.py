@@ -241,6 +241,24 @@ class TestSignalParser(unittest.TestCase):
                 [0],
                 4361.0,
             ),
+            # Signal 26: Gold buy now with range and open TP
+            (
+                "Gold buy now 4017.1 - 4014\n\nSL: 4011\n\nTP: 4019\nTP: 4021\nTP: 4023\nTP: open",
+                "BUY",
+                "XAUUSD",
+                4017.1,
+                [4019.0, 4021.0, 4023.0, 4027.0],
+                4011.0,
+            ),
+            # Signal 27: Buy Gold @4013.3-4008.3 with two TPs
+            (
+                "Buy Gold @4013.3-4008.3\n\nSl :4006.3\n\nTp1 :4015.3\nTp2 :40018.3",
+                "BUY",
+                "XAUUSD",
+                4013.3,
+                [4015.3, 40018.3],
+                4006.3,
+            ),
         ]
 
         for i, (

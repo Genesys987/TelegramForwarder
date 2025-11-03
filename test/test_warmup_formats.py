@@ -171,6 +171,7 @@ class TestWarmupSignalFormats(unittest.TestCase):
             "Gold analysis",
             "Buy signal coming soon",
             "Sell ready later",
+            "Buy gold now 4000-4010",
         ]
         for pattern in non_warmup_patterns:
             is_ready, signal_type, price = is_warmup_message(pattern)

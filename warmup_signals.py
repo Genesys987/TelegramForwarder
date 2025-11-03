@@ -46,14 +46,16 @@ def is_warmup_message(text: str):
         r"^Let'?s\s+re-enter\s+scalping\s+sell\s+gold\s+small\s+lot\s+high\s+risk[\.\!]*$",
     ]
 
+    has_no_digits = re.search(r"\d", text) is None
+
     for pattern in buy_patterns:
-        if re.search(pattern, text, re.IGNORECASE):
+        if re.search(pattern, text, re.IGNORECASE) and has_no_digits:
             signal_type = "BUY"
             break
 
     if not signal_type:
         for pattern in sell_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
+            if re.search(pattern, text, re.IGNORECASE) and has_no_digits:
                 signal_type = "SELL"
                 break
 
