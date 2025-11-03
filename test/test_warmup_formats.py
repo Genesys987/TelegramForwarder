@@ -260,6 +260,8 @@ class TestWarmupSignalFormats(unittest.TestCase):
         """Test patterns that include newlines and annotations like (scalping) or -scalping."""
         patterns_with_annotations = [
             ("Lets scalping buy gold slowly mid risk\n\n(scalping)", "BUY"),
+            ("Lets scalping buy gold slowly \n\n(scalping)...", "BUY"),
+            ("Lets scalping sell gold slowly \n\n(scalping)...", "SELL"),
             ("Lets scalping sell gold slowly HIGH risk\n\n-scalping", "SELL"),
             ("Lets scalping buy gold slowly\n\n-scalping", "BUY"),
             ("Lets scalping sell gold slowly\n\n(scalping", "SELL"),
@@ -279,7 +281,9 @@ class TestWarmupSignalFormats(unittest.TestCase):
         """Test all the specifically provided new formats from the user request."""
         new_formats = [
             ("Gold buy now", "BUY"),
+            ("Gold buy now...", "BUY"),
             ("Gold sell now", "SELL"),
+            ("Gold sell now...", "SELL"),
             ("HIGH risk let's scalping buy gold slowly", "BUY"),
             ("HIGH risk let's scalping sell gold slowly", "SELL"),
             ("Lets scalping sell gold slowly HIGH risk", "SELL"),
