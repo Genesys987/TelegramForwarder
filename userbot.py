@@ -222,42 +222,47 @@ async def handle_new_message(event):
         # === Standard szignál feldolgozás ===
         try:
             group_id = None
-
-            # First check if warmup signals are enabled and this is a ready message
-            is_ready, signal_type, _ = is_warmup_message(message_text)
-            if is_ready:
-                # Process warmup signal (EA will calculate TP/SL from zeros)
-                group_id = await process_warmup_signal(
-                    message_text, message_id, message.date, chat_title
+            clean_name = clean_channel_name(chat_title)
+            warmup_channel_clean = clean_channel_name(WARMUP_SIGNAL_CHANNEL)
+            if clean_name == warmup_channel_clean:
+                logger.info(
+                    "Checking for ready/warmup modify message in warmup channel."
                 )
-                if group_id is not None:
-                    await forward_to_archive(message, chat_title, group_id)
-                return  # Don't process as standard signal
-
-            # Try to parse as standard signal
-            signal_data = parse_signal(message_text)
-            if signal_data:
-                # Check if this is from warmup channel and should modify a warmup signal
-                clean_name = clean_channel_name(chat_title)
-                warmup_channel_clean = clean_channel_name(WARMUP_SIGNAL_CHANNEL)
-                if clean_name == warmup_channel_clean and current_warmup_gid:
-                    # Add metadata to signal_data
-                    if message.date:
-                        if message.date.tzinfo is None:
-                            message_date = message.date.replace(tzinfo=timezone.utc)
-                        else:
-                            message_date = message.date.astimezone(timezone.utc)
-                        signal_data.timestamp_utc = int(message_date.timestamp())
-                    else:
-                        signal_data.timestamp_utc = int(
-                            datetime.now(timezone.utc).timestamp()
-                        )
-
-                    # Process as modify signal
-                    warmup_gid = await process_fxtm_signal_modify(signal_data)
-                    if warmup_gid:
-                        await forward_to_archive(message, chat_title, warmup_gid)
+                # First check if warmup signals are enabled and this is a ready message
+                is_ready, signal_type, _ = is_warmup_message(message_text)
+                if is_ready:
+                    # Process warmup signal (EA will calculate TP/SL from zeros)
+                    group_id = await process_warmup_signal(
+                        message_text, message_id, message.date, chat_title
+                    )
+                    if group_id is not None:
+                        await forward_to_archive(message, chat_title, group_id)
                     return  # Don't process as standard signal
+
+                # Try to parse as standard signal
+                signal_data = parse_signal(message_text)
+                if signal_data:
+                    # Check if this is from warmup channel and should modify a warmup signal
+                    clean_name = clean_channel_name(chat_title)
+                    warmup_channel_clean = clean_channel_name(WARMUP_SIGNAL_CHANNEL)
+                    if clean_name == warmup_channel_clean and current_warmup_gid:
+                        # Add metadata to signal_data
+                        if message.date:
+                            if message.date.tzinfo is None:
+                                message_date = message.date.replace(tzinfo=timezone.utc)
+                            else:
+                                message_date = message.date.astimezone(timezone.utc)
+                            signal_data.timestamp_utc = int(message_date.timestamp())
+                        else:
+                            signal_data.timestamp_utc = int(
+                                datetime.now(timezone.utc).timestamp()
+                            )
+
+                        # Process as modify signal
+                        warmup_gid = await process_fxtm_signal_modify(signal_data)
+                        if warmup_gid:
+                            await forward_to_archive(message, chat_title, warmup_gid)
+                        return  # Don't process as standard signal
 
             # Process as standard signal if not warmup or FXTM modify
             group_id = await process_new_standard_signal(

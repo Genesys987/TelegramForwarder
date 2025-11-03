@@ -1,7 +1,10 @@
+import logging
 from config import WARMUP_SIGNAL_CHANNEL
 from signal_data import SignalData
 
 import re
+
+logger = logging.getLogger(__name__)
 
 
 def is_warmup_message(text: str):
@@ -14,8 +17,6 @@ def is_warmup_message(text: str):
     Returns:
         tuple: (is_ready: bool, signal_type: str or None, current_price: float or None)
     """
-
-    text_lower = text.lower()
 
     # Determine signal type from ready message patterns
     signal_type = None
@@ -60,6 +61,7 @@ def is_warmup_message(text: str):
         # No price extraction needed - warmup signals use instant execution
         return True, signal_type, None
 
+    logger.info("Signal is not a warmup ready message.")
     return False, None, None
 
 
