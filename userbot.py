@@ -259,12 +259,12 @@ async def handle_new_message(event):
                             )
 
                         # Process as modify signal
-                        warmup_gid = await process_fxtm_signal_modify(signal_data)
+                        warmup_gid = await process_warmup_signal_modify(signal_data)
                         if warmup_gid:
                             await forward_to_archive(message, chat_title, warmup_gid)
                         return  # Don't process as standard signal
 
-            # Process as standard signal if not warmup or FXTM modify
+            # Process as standard signal if not warmup or warmup modify
             group_id = await process_new_standard_signal(
                 message_text, message_id, message.date, chat_title
             )
@@ -400,7 +400,7 @@ async def process_warmup_signal(
         return None
 
 
-async def process_fxtm_signal_modify(signal_data: SignalData):
+async def process_warmup_signal_modify(signal_data: SignalData):
     """Process FXTM signals as modifications to existing warmup signals."""
     global current_warmup_gid
 
@@ -427,7 +427,9 @@ async def process_fxtm_signal_modify(signal_data: SignalData):
 
     # Add to queue as modification
     if add_signal_to_queue(modify_data):
-        logger.info(f"   FXTM modify signal queue-hoz adva (GID {current_warmup_gid}).")
+        logger.info(
+            f"   Warmup modify signal queue-hoz adva (GID {current_warmup_gid})."
+        )
         # Clear warmup tracking as it's now processed
         warmup_gid = current_warmup_gid
         current_warmup_gid = None
@@ -435,7 +437,7 @@ async def process_fxtm_signal_modify(signal_data: SignalData):
         return warmup_gid
     else:
         logger.error(
-            f"   Hiba: FXTM modify signal queue-hoz adása sikertelen (GID {current_warmup_gid})."
+            f"   Hiba: warmup modify signal queue-hoz adása sikertelen (GID {current_warmup_gid})."
         )
         return False
 
