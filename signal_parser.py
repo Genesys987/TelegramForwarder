@@ -1,5 +1,8 @@
+import logging
 import re
 from signal_data import SignalData
+
+logger = logging.getLogger(__name__)
 
 # Dictionary of common symbol mappings
 symbol_mappings = {
@@ -344,20 +347,9 @@ def parse_signal(text: str) -> SignalData | None:
 
         # Signal Type and Symbol parsing - handle multiple formats
         if not signal.signal_type:
-            # Format 0: NOW signals with emojis like "🚨 GOLD SELL NOW 🚨"
-            match_emoji_now = re.match(
-                r"^🚨?\s*([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*🚨?", line, re.IGNORECASE
-            )
-            if match_emoji_now:
-                raw_symbol = match_emoji_now.group(1).upper()
-                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
-                signal.signal_type = match_emoji_now.group(2).upper()
-                signal.entry = 0
-                continue
-
             # Format 1: "GOLD SELL FROM 3313/3315" or "SYMBOL BUY FROM price" (check this first, it's more specific)
             match_symbol_type_from = re.match(
-                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+FROM\s+([\d\/\.\-@]+)",
+                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+(?:FROM|NOW)\s+([\d\/\.\-@]+)",
                 line,
                 re.IGNORECASE,
             )
@@ -372,7 +364,7 @@ def parse_signal(text: str) -> SignalData | None:
 
             # Format 1.5: "Sell Gold @3339-3344" or similar @ formats including space variations
             match_symbol_at = re.match(
-                r"^(BUY|SELL)\s+([\w\.\/\-]+)\s+@\s*([\d\-\s]+)", line, re.IGNORECASE
+                r"^(BUY|SELL)\s+([\w\.\/\-]+)\s+@\s*([\d\.\-\s]+)", line, re.IGNORECASE
             )
             if match_symbol_at:
                 signal.signal_type = match_symbol_at.group(1).upper()
@@ -384,7 +376,7 @@ def parse_signal(text: str) -> SignalData | None:
 
             # Format 1.6: "Gold Sell @ 4231 - 4235" - symbol first, then action, then @ range
             match_symbol_sell_at = re.match(
-                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+@\s*([\d\-\s]+)", line, re.IGNORECASE
+                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+@\s*([\d\.\-\s]+)", line, re.IGNORECASE
             )
             if match_symbol_sell_at:
                 raw_symbol = match_symbol_sell_at.group(1).upper()
@@ -396,7 +388,7 @@ def parse_signal(text: str) -> SignalData | None:
 
             # Format 1.7: "Sell gold price @ 4355-4358" - action, symbol, price, @ range
             match_sell_symbol_price_at = re.match(
-                r"^(BUY|SELL)\s+([\w\.\/\-]+)\s+price\s+@\s*([\d\-\s]+)",
+                r"^(BUY|SELL)\s+([\w\.\/\-]+)\s+price\s+@\s*([\d\.\-\s]+)",
                 line,
                 re.IGNORECASE,
             )
@@ -519,6 +511,17 @@ def parse_signal(text: str) -> SignalData | None:
                 # Extract and parse the range from parentheses as entry price
                 range_text = match_im_now.group(3).strip()
                 signal.entry = parse_entry_price(range_text, signal.signal_type)
+                continue
+
+            # Format 7: NOW signals with emojis like "🚨 GOLD SELL NOW 🚨"
+            match_emoji_now = re.match(
+                r"^🚨?\s*([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*🚨?", line, re.IGNORECASE
+            )
+            if match_emoji_now:
+                raw_symbol = match_emoji_now.group(1).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_emoji_now.group(2).upper()
+                signal.entry = 0
                 continue
 
         # Entry Price parsing
@@ -711,6 +714,9 @@ def parse_signal(text: str) -> SignalData | None:
 
     # NEW: Simple check for immediate entry - set entry to 0 if NOW keyword found BUT no entry was set
     if "NOW" in text.upper() and signal.entry is None:
+        logger.info(
+            "No entry price parsed, 'now' keyword found - set to immediate entry"
+        )
         signal.entry = 0
 
     # Final Validation: Check if all essential parts were found
