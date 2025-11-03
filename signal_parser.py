@@ -3,9 +3,10 @@ from signal_data import SignalData
 
 # Dictionary of common symbol mappings
 symbol_mappings = {
-  "GOLD": "XAUUSD",
-  "GODL": "XAUUSD",
+    "GOLD": "XAUUSD",
+    "GODL": "XAUUSD",
 }
+
 
 def clean_channel_name(channel_name: str) -> str:
     """
@@ -44,30 +45,30 @@ def clean_channel_name(channel_name: str) -> str:
 def expand_abbreviated_price(price_text):
     """
     Expand abbreviated price format like '4207/04' to '4207/4204'
-    
+
     Args:
         price_text: Text that may contain abbreviated prices
-        
+
     Returns:
         Expanded price text or original if no abbreviation found
     """
     if "/" not in price_text:
         return price_text
-    
+
     parts = price_text.split("/")
     if len(parts) != 2:
         return price_text
-    
+
     first_price = parts[0].strip()
     second_price = parts[1].strip()
-    
+
     # Check if second price is abbreviated (2 digits)
     if len(second_price) == 2 and second_price.isdigit() and len(first_price) >= 3:
         # Expand by taking first digits from first price + abbreviated part
         base_digits = first_price[:-2]  # All but last 2 digits
         expanded_second = base_digits + second_price
         return f"{first_price}/{expanded_second}"
-    
+
     return price_text
 
 
@@ -84,7 +85,7 @@ def parse_entry_price(entry_text, signal_type):
     """
     # Clean up the entry text - remove @ symbol and extra spaces
     entry_text = entry_text.strip().lstrip("@").strip()
-    
+
     # Expand abbreviated prices like 4207/04 -> 4207/4204
     entry_text = expand_abbreviated_price(entry_text)
 
@@ -216,33 +217,25 @@ def parse_single_line_signal(text) -> SignalData | None:
                     raw_symbol = match.group(1).upper()
                     signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                     signal.signal_type = match.group(2).upper()
-                    signal.entry = parse_entry_price(
-                        match.group(3), signal.signal_type
-                    )
+                    signal.entry = parse_entry_price(match.group(3), signal.signal_type)
                 elif "@" in pattern:
                     # @ format: SYMBOL BUY/SELL @price-range
                     raw_symbol = match.group(1).upper()
                     signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                     signal.signal_type = match.group(2).upper()
-                    signal.entry = parse_entry_price(
-                        match.group(3), signal.signal_type
-                    )
+                    signal.entry = parse_entry_price(match.group(3), signal.signal_type)
                 elif pattern == r"([\w\.\/\-]+)\s+(BUY|SELL)\s+([\d\-@]+)":
                     # SYMBOL BUY/SELL price-range format: Gold Sell 3341-3346
                     raw_symbol = match.group(1).upper()
                     signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                     signal.signal_type = match.group(2).upper()
-                    signal.entry = parse_entry_price(
-                        match.group(3), signal.signal_type
-                    )
+                    signal.entry = parse_entry_price(match.group(3), signal.signal_type)
                 elif pattern == r"([\w\.\/\-]+)\s+(BUY|SELL)\s+([\d\/\.]+)":
                     # SYMBOL BUY/SELL price format: XAUUSD BUY 3417
                     raw_symbol = match.group(1).upper()
                     signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                     signal.signal_type = match.group(2).upper()
-                    signal.entry = parse_entry_price(
-                        match.group(3), signal.signal_type
-                    )
+                    signal.entry = parse_entry_price(match.group(3), signal.signal_type)
                 else:
                     # Regular format: BUY/SELL SYMBOL price
                     signal.signal_type = match.group(1).upper()
@@ -403,7 +396,9 @@ def parse_signal(text: str) -> SignalData | None:
 
             # Format 1.7: "Sell gold price @ 4355-4358" - action, symbol, price, @ range
             match_sell_symbol_price_at = re.match(
-                r"^(BUY|SELL)\s+([\w\.\/\-]+)\s+price\s+@\s*([\d\-\s]+)", line, re.IGNORECASE
+                r"^(BUY|SELL)\s+([\w\.\/\-]+)\s+price\s+@\s*([\d\-\s]+)",
+                line,
+                re.IGNORECASE,
             )
             if match_sell_symbol_price_at:
                 signal.signal_type = match_sell_symbol_price_at.group(1).upper()
@@ -663,7 +658,7 @@ def parse_signal(text: str) -> SignalData | None:
         # Check if we have only "open" TP values and no numeric TPs
         numeric_tps = [tp for tp in take_profits if tp != "open"]
         open_tps = [tp for tp in take_profits if tp == "open"]
-        
+
         if len(numeric_tps) == 0 and len(open_tps) > 0:
             # Special case: Only "open" TPs, no numeric TPs
             # Set TP to 0 to indicate no TP should be set (order opens without TP)
@@ -696,7 +691,7 @@ def parse_signal(text: str) -> SignalData | None:
                         processed_tps.append(calculated_tp)
                     else:
                         print(
-                            f"Warning: Cannot calculate 'open' TP - no previous TP or entry found"
+                            "Warning: Cannot calculate 'open' TP - no previous TP or entry found"
                         )
                         # Skip this TP
                         continue

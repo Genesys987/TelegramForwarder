@@ -1,8 +1,8 @@
-from dotenv import dotenv_values
 from config import WARMUP_SIGNAL_CHANNEL
 from signal_data import SignalData
 
 import re
+
 
 def is_warmup_message(text: str):
     """
@@ -81,5 +81,5 @@ def generate_warmup_signal(signal_type: str):
         take_profits=[0, 0],  # EA will calculate based on its logic
         stop_loss=0,  # EA will calculate based on its logic
         channel_name=WARMUP_SIGNAL_CHANNEL,  # Use configured channel name
-        is_warmup=True  # Flag to identify warmup signals
+        is_warmup=True,  # Flag to identify warmup signals
     )

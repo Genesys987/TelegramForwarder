@@ -1,5 +1,6 @@
 from typing import List, Optional
 
+
 class SignalData:
     def __init__(
         self,
@@ -13,7 +14,7 @@ class SignalData:
         timestamp_utc: Optional[int] = None,
         group_id: Optional[int] = None,
         original_channel: Optional[str] = None,
-        is_modify: bool = False
+        is_modify: bool = False,
     ):
         self.signal_type = signal_type
         self.symbol = symbol
@@ -35,18 +36,18 @@ class SignalData:
             "take_profits": self.take_profits,
             "stop_loss": self.stop_loss,
             "channel_name": self.channel_name,
-            "is_warmup": self.is_warmup
+            "is_warmup": self.is_warmup,
         }
 
     def is_valid(self) -> bool:
         return (
-            bool(self.signal_type) and
-            bool(self.symbol) and
-            self.entry is not None and
-            self.take_profits is not None and
-            isinstance(self.take_profits, list) and
-            len(self.take_profits) > 0 and
-            self.stop_loss is not None
+            bool(self.signal_type)
+            and bool(self.symbol)
+            and self.entry is not None
+            and self.take_profits is not None
+            and isinstance(self.take_profits, list)
+            and len(self.take_profits) > 0
+            and self.stop_loss is not None
         )
 
     def debug_missing_parts(self, messageText: str):
@@ -62,6 +63,8 @@ class SignalData:
             missing.append("take_profits")
         if not self.stop_loss:
             missing.append("stop_loss")
-            
-        print(f"Debug: Signal parsing incomplete. Missing or invalid parts: {missing}. Original text: {messageText[:1000]}...")
+
+        print(
+            f"Debug: Signal parsing incomplete. Missing or invalid parts: {missing}. Original text: {messageText[:1000]}..."
+        )
         return None

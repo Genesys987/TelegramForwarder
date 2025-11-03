@@ -30,6 +30,7 @@ assert mt4_data_folders is not None, "MT4_FOLDERS is not set in .env file"
 for folder in mt4_data_folders:
     assert os.path.exists(folder), f"MT4 data folder does not exist: {folder}"
 
+
 # --- Helper function to get MT4 data folder ID ---
 def getMT4DataFolderId(folder_path):
     """
@@ -43,6 +44,7 @@ def getMT4DataFolderId(folder_path):
         return ""
     folder_name = os.path.basename(cleaned_path)
     return folder_name[:6] if len(folder_name) >= 6 else folder_name
+
 
 # --- Files used for communication ---
 # Queue files (Python writes signals here temporarily) - Can be anywhere Python has access
