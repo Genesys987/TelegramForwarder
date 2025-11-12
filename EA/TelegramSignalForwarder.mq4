@@ -747,18 +747,14 @@ void SendOrders(Signal &signal)
 
 // Always use the original stop loss from signal
   double rawSL = NormalizeDouble(signal.stopLoss, digits);
-  double fallbackSL = (shouldBuy)
-                      ? price - MathAbs(signal.entry - signal.stopLoss)
-                      : price + MathAbs(signal.stopLoss - signal.entry);
-  fallbackSL = NormalizeDouble(fallbackSL, digits);
-
+ 
 // Apply minimum distance for SL if needed
   double minDist = MathMax(stopLevel * point, point);
-  if(shouldBuy && price - fallbackSL < minDist)
-    fallbackSL = price - minDist;
-  if(!shouldBuy && fallbackSL - price < minDist)
-    fallbackSL = price + minDist;
-  fallbackSL = NormalizeDouble(fallbackSL, digits);
+  if(shouldBuy && price - rawSL < minDist)
+    rawSL = price - minDist;
+  if(!shouldBuy && rawSL - price < minDist)
+    rawSL = price + minDist;
+  rawSL = NormalizeDouble(rawSL, digits);
 
 // Normalize all TP levels and ensure minimum distance
   for(int j=0; j<signal.tpCount; j++) {
@@ -808,12 +804,9 @@ void SendOrders(Signal &signal)
                            rawSL, signal.tpLevels[k], comment, magicNumber, expiration, cols[colorIndex]);
 
     if(ticket < 0) {
-      PrintLog(": Error creating order[" + IntegerToString(k) + "] ticket=" + IntegerToString(ticket) + " error=" + IntegerToString(GetLastError()));
-      Sleep(1000);
-      RefreshRates();
-      PrintLog(": Retrying with fallback SL=" + DoubleToString(fallbackSL, digits));
-      ticket = OrderSend(signal.symbol, orderType, lotSize, price, slippage,
-                         fallbackSL, signal.tpLevels[k], comment, magicNumber, expiration, cols[colorIndex]);
+      PrintLog(": ❌ Failed to create order[" + IntegerToString(k) + "] - " +
+             "Error=" + IntegerToString(GetLastError()) + 
+             " (SL may be too close to entry price)");
     }
 
     if(ticket > 0 && signal.isWarmup) {
