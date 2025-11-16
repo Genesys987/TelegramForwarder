@@ -264,13 +264,16 @@ def find_latest_group_id_for_channel(channel_name: str) -> Optional[int]:
         return None
 
 
-def process_stoploss_non_reply(message_text: str, channel_name: str) -> bool | None:
+def process_stoploss_non_reply(
+    message_text: str, channel_name: str, latest_group_id: int
+) -> bool | None:
     """
     Process SL modification from non-reply messages using natural language parsing.
 
     Args:
         message_text: The message text containing SL modification
         channel_name: The target channel name (will be cleaned to 4 chars)
+        latest_group_id: The latest group ID for the channel
 
     Returns:
         True if SL modification was successfully processed, False otherwise
@@ -281,25 +284,17 @@ def process_stoploss_non_reply(message_text: str, channel_name: str) -> bool | N
         # Clean the channel name to 4-character format
         clean_channel = clean_channel_name(channel_name)
 
-        # Find the latest group ID for this channel
-        group_id = find_latest_group_id_for_channel(clean_channel)
-        if group_id is None:
-            logger.warning(
-                f"No recent signals found for channel {clean_channel}, cannot modify SL"
-            )
-            return False
-
         new_formatted_sl_value = get_formatted_sl_value(message_text)
         if not new_formatted_sl_value:
             return False
 
         # Process the SL modification
         logger.info(
-            f"Processing non-reply SL modification: GID={group_id}, Channel={clean_channel}, New SL={new_formatted_sl_value}"
+            f"Processing non-reply SL modification: GID={latest_group_id}, Channel={clean_channel}, New SL={new_formatted_sl_value}"
         )
         return process_signal(
             SignalType.MODIFY,
-            group_id,
+            latest_group_id,
             clean_channel,
             modified_value=new_formatted_sl_value,
         )
