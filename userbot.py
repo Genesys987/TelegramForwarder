@@ -13,6 +13,7 @@ from stoploss_update import (
     SignalType,
     process_signal,
     process_stoploss_non_reply,
+    find_latest_group_id_for_channel,
 )
 from config import (
     API_ID,
@@ -137,30 +138,7 @@ async def handle_new_message(event):
             clean_channel = clean_channel_name(chat_title)
 
             # --- Unified trading instruction pattern matching ---
-            signal_type = None
-            # CLOSE
-            if (
-                re.search(
-                    r"close.*(profit|half|all).*breakeven", message_text, re.IGNORECASE
-                )
-                or re.search(r"close.*half.*hold", message_text, re.IGNORECASE)
-                or re.search(r"close.*entries.*breakeven", message_text, re.IGNORECASE)
-                or re.search(
-                    r"secure.*(entry|entries|first|profit)", message_text, re.IGNORECASE
-                )
-                or re.search(
-                    r"(close|exit|entries\s+are\s+closed)", message_text, re.IGNORECASE
-                )
-            ):
-                signal_type = SignalType.CLOSE
-            # MODIFY (SL adjust)
-            elif re.search(stoploss_regexp, message_text, re.IGNORECASE):
-                signal_type = SignalType.MODIFY
-            # BREAKEVEN
-            elif re.search(
-                r"(breakeven|break\s*even|set\s+breakeven)", message_text, re.IGNORECASE
-            ):
-                signal_type = SignalType.BREAKEVEN
+            signal_type = detect_signal_type(message_text, stoploss_regexp)
 
             if signal_type:
                 logger.info(f"Processing trading instruction: {signal_type}")
@@ -195,27 +173,53 @@ async def handle_new_message(event):
 
     # === Standard szignál és warmup feldolgozás ===
     else:
-        # Check for non-reply SL modification messages
-        if re.search(stoploss_regexp, message_text, re.IGNORECASE):
-            logger.info(f"Non-reply SL modification észlelve: {message_text}")
+        # Check for trading instructions in non-reply messages
+        signal_type = detect_signal_type(message_text, stoploss_regexp)
+
+        if signal_type:
+            logger.info(f"Non-reply trading instruction detected: {signal_type}")
             try:
-                # Non-reply SL modification konfigurálható csatornán (teszteléshez)
-                # Konfigurációból vesszük a csatorna nevet (alapértelmezett: FXTM)
-                channel_name = NON_REPLY_SL_CHANNEL_ID
-                success = process_stoploss_non_reply(message_text, channel_name)
-                if success:
-                    logger.info(
-                        f"Non-reply SL modification sikeresen feldolgozva {channel_name} csatornából"
-                    )
-                    await forward_to_archive(
-                        message, chat_title, None
-                    )  # Forward to archive without group_id
+                clean_channel = clean_channel_name(chat_title)
+
+                # Find the latest group ID for this channel (same as process_stoploss_non_reply)
+                latest_group_id = find_latest_group_id_for_channel(clean_channel)
+
+                if latest_group_id is not None:
+                    is_success = False
+
+                    if signal_type == SignalType.MODIFY:
+                        # Handle SL modification using existing logic
+                        channel_name = NON_REPLY_SL_CHANNEL_ID
+                        is_success = process_stoploss_non_reply(
+                            message_text, channel_name, latest_group_id
+                        )
+                        if is_success:
+                            logger.info(
+                                f"Non-reply SL modification successfully processed from {channel_name}"
+                            )
+                    else:
+                        # Handle CLOSE and BREAKEVEN operations on latest signal
+                        is_success = process_signal(
+                            signal_type, latest_group_id, clean_channel
+                        )
+                        if is_success:
+                            logger.info(
+                                f"Non-reply {signal_type} operation successfully processed with GID: {latest_group_id}"
+                            )
+
+                    if is_success:
+                        await forward_to_archive(message, chat_title, latest_group_id)
+                    else:
+                        logger.warning(
+                            f"Non-reply {signal_type} processing failed for GID: {latest_group_id}"
+                        )
                 else:
                     logger.warning(
-                        f"Non-reply SL modification feldolgozása sikertelen {channel_name} csatornából"
+                        f"No recent signals found for channel {clean_channel}, cannot process {signal_type}"
                     )
+
             except Exception as e:
-                logger.error(f"Hiba non-reply SL modification feldolgozásakor: {e}")
+                logger.error(f"Error processing non-reply trading instruction: {e}")
                 traceback.print_exc()
             return  # Don't process as standard signal
 
@@ -281,6 +285,36 @@ sl_clause = "(sl|stoploss|stop loss)?"
 stoploss_regexp = (
     rf"{sl_clause}.*(level|change|move|moving|adjust|set|update).*{sl_clause}.*\d+"
 )
+
+
+def detect_signal_type(message_text, stoploss_regexp):
+    """
+    Detect the type of trading signal from message text.
+    Returns SignalType enum value or None if no match.
+    """
+    # CLOSE
+    if (
+        re.search(r"close.*(profit|half|all).*breakeven", message_text, re.IGNORECASE)
+        or re.search(r"close.*half.*hold", message_text, re.IGNORECASE)
+        or re.search(r"close.*entries.*breakeven", message_text, re.IGNORECASE)
+        or re.search(
+            r"secure.*(entry|entries|first|profit)", message_text, re.IGNORECASE
+        )
+        or re.search(
+            r"(close|exit|entries\s+are\s+closed)", message_text, re.IGNORECASE
+        )
+    ):
+        return SignalType.CLOSE
+    # MODIFY (SL adjust)
+    elif re.search(stoploss_regexp, message_text, re.IGNORECASE):
+        return SignalType.MODIFY
+    # BREAKEVEN
+    elif re.search(
+        r"(breakeven|break\s*even|set\s+breakeven)", message_text, re.IGNORECASE
+    ):
+        return SignalType.BREAKEVEN
+
+    return None
 
 
 def populate_signal_metadata(signal_data, message_date, channel_name, is_warmup=False):

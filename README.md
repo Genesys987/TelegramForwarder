@@ -17,4 +17,6 @@ pipenv install
 pipenv run python main.py
 # run unit tests
 pipenv run python -m unittest discover -s test
+# run formatter
+pipenv run ruff format
 ```
