@@ -168,7 +168,10 @@ def parse_single_line_signal(text) -> SignalData | None:
             r"(BUY|SELL)\s+([\w\.\/\-]+)\s+NOW",  # BUY GOLD NOW
             r"([\w\.\/\-]+)\s+NOW\s+(BUY|SELL)",  # GOLD NOW SELL
             r"NOW\s+(BUY|SELL)\s+([\w\.\/\-]+)",  # NOW BUY BTCUSD
-            r"I[\'\u2019]?M\s+(SELLING|BUYING)\s+([\w\.\/\-]+)\s+NOW\s*\(([\d\-\s@\.]+)\)",  # I'M SELLING XAUUSD NOW (3337 - 3340)
+            r"I[\'’]?M\s+(SELLING|BUYING)\s+([\w\.\/\-]+)\s+NOW\s*\(([\d\-\s@\.]+)\)",  # I'M SELLING XAUUSD NOW (3337 - 3340)
+            # New NOW patterns with optional ranges
+            r"([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s+([\d\s\-\.]+)",  # GOLD Sell Now 4086 - 4090
+            r"#([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW",  # #EURAUD SELL NOW
             # Regular patterns (existing + new @ and - range formats)
             r"([\w\.\/\-]+)\s+(BUY|SELL)\s+FROM\s+([\d\/\.\-@]+)",  # GOLD SELL FROM 3313/3315.3
             r"([\w\.\/\-]+)\s+(BUY|SELL)\s+@([\d\-]+)",  # Sell Gold @3339-3344
@@ -524,6 +527,30 @@ def parse_signal(text: str) -> SignalData | None:
                 signal.entry = 0
                 continue
 
+            # Format 8: Hash prefixed NOW signals like "#EURAUD SELL NOW"
+            match_hash_now = re.match(
+                r"^#([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW", line, re.IGNORECASE
+            )
+            if match_hash_now:
+                raw_symbol = match_hash_now.group(1).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_hash_now.group(2).upper()
+                signal.entry = 0
+                continue
+
+            # Format 9: NOW signals with ranges like "GOLD Sell Now 4086 - 4090"
+            match_now_range = re.match(
+                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s+([\d\s\-\.]+)", line, re.IGNORECASE
+            )
+            if match_now_range:
+                raw_symbol = match_now_range.group(1).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_now_range.group(2).upper()
+                # Extract range and use as entry price
+                range_text = match_now_range.group(3).strip()
+                signal.entry = parse_entry_price(range_text, signal.signal_type)
+                continue
+
         # Entry Price parsing
         if signal.entry is None:
             # Look for ENTRY keyword with optional colon
@@ -533,18 +560,18 @@ def parse_signal(text: str) -> SignalData | None:
                 signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
 
-            # NEW: Check for standalone entry price line (just numbers with optional slash)
+            # NEW: Check for standalone entry price line (just numbers with optional slash or dash range)
             # This should be a line that looks like an entry price but not TPs
-            entry_standalone_pattern = r"^([\d\.]+(?:/[\d\.]+)?)$"
+            entry_standalone_pattern = r"^([\d\.]+(?:[/\-\s]+[\d\.]+)?)$"
             entry_match = re.match(entry_standalone_pattern, line.strip())
             if entry_match and signal.signal_type and signal.symbol:
                 # Make sure this looks like an entry price and not TPs
                 entry_text = entry_match.group(1)
                 potential_entry = parse_entry_price(entry_text, signal.signal_type)
 
-                # Simple heuristic: if it's a range (contains /), treat as entry
+                # Simple heuristic: if it's a range (contains / or -), treat as entry
                 # or if it's a single reasonable value for the symbol
-                if "/" in entry_text or (
+                if ("/" in entry_text or "-" in entry_text) or (
                     isinstance(potential_entry, (int, float)) and potential_entry > 0
                 ):
                     signal.entry = potential_entry
@@ -557,8 +584,10 @@ def parse_signal(text: str) -> SignalData | None:
             r"[🤑💰✅]\s*TP\d+\s+([\d\.]+(?:/[\d\.]+)*|open)",  # Emoji TP formats like "✅TP1 109700" (without colon)
             r"T\.P\d+\s+([\d\.]+|open)",  # "T.P1 114600", "T.P2 114500" (T.P format)
             r"TP\s*\d+\s*:\s*([\d\.]+|open)",  # "TP1: 3289.0", "TP 2 : open", "Tp 1 : 3346" (with colon)
+            r"TP\s+(\d+)\s+([\d\.]+)",  # "TP 1 4081", "TP 2 4078" (numbered format with space)
             r"TP\d+\s+([\d\.]+|open)",  # "TP1 3420", "TP2 3423" (without colon, with number)
             r"TP\s*:\s*([\d\.]+|open)",  # "TP: 1.1455", "TP: open"
+            r"Target\s+Profit\s*:\s*([\d\.]+)",  # "Target Profit : 4081"
             r"(?:TAKE\s*PROFIT)\s*\d*\s*(?:at\s+)?([\d\.]+|open)",  # "Take profit 1 at 89500.00", "Take profit 2 at open"
             r"TP\s+([\d\.]+(?:/[\d\.]+)*|open)",  # "TP 3364" or "TP 3332/3334/3336/3338/3340" or "TP open" (without colon)
         ]
@@ -568,36 +597,44 @@ def parse_signal(text: str) -> SignalData | None:
             m = re.search(tp_pattern, line, re.IGNORECASE)
             if m:
                 try:
-                    tp_values_text = m.group(1)
-                    if "/" in tp_values_text:
-                        # Multiple TP values separated by slashes
-                        tp_values = tp_values_text.split("/")
-                        for tp_val in tp_values:
-                            if tp_val.strip().lower() == "open":
+                    # Handle special numbered TP format "TP 1 4081"
+                    if tp_pattern == r"TP\s+(\d+)\s+([\d\.]+)":
+                        # For numbered format, use the second group (the price)
+                        tp_value = float(m.group(2))
+                        if tp_value > 0.1:
+                            take_profits.append(tp_value)
+                        tp_found = True
+                    else:
+                        tp_values_text = m.group(1)
+                        if "/" in tp_values_text:
+                            # Multiple TP values separated by slashes
+                            tp_values = tp_values_text.split("/")
+                            for tp_val in tp_values:
+                                if tp_val.strip().lower() == "open":
+                                    # Store "open" as a special marker
+                                    take_profits.append("open")
+                                else:
+                                    tp_value = float(tp_val.strip())
+                                    if (
+                                        tp_value > 0.1
+                                    ):  # Filter out very small numbers but allow forex values
+                                        take_profits.append(tp_value)
+                            tp_found = True
+                        else:
+                            # Single TP value or "open"
+                            if tp_values_text.strip().lower() == "open":
                                 # Store "open" as a special marker
                                 take_profits.append("open")
                             else:
-                                tp_value = float(tp_val.strip())
+                                tp_value = float(tp_values_text)
                                 if (
                                     tp_value > 0.1
                                 ):  # Filter out very small numbers but allow forex values
                                     take_profits.append(tp_value)
-                        tp_found = True
-                    else:
-                        # Single TP value or "open"
-                        if tp_values_text.strip().lower() == "open":
-                            # Store "open" as a special marker
-                            take_profits.append("open")
-                        else:
-                            tp_value = float(tp_values_text)
-                            if (
-                                tp_value > 0.1
-                            ):  # Filter out very small numbers but allow forex values
-                                take_profits.append(tp_value)
-                        tp_found = True
+                            tp_found = True
                     break
                 except ValueError:
-                    print(f"Warning: Invalid number for TP: {m.group(1)}")
+                    print(f"Warning: Invalid number for TP: {m.group(1) if len(m.groups()) == 1 else m.group(2)}")
 
         # NEW: Check for slash-separated TP values OR single numeric TP (e.g., "3332/3330/3328/3325" or "3340")
         if not tp_found:

@@ -12,8 +12,8 @@ from signal_parser import parse_signal
 
 
 class TestSignalParser(unittest.TestCase):
-    def test_all_25_user_signals(self):
-        """Test all 25 signal formats provided by the user including new FXTM VIP formats"""
+    def test_all_30_user_signals(self):
+        """Test all 30 signal formats provided by the user including new NOW signal formats"""
 
         signals = [
             # Signal 1: Standard BUY format
@@ -259,6 +259,33 @@ class TestSignalParser(unittest.TestCase):
                 [4015.3, 40018.3],
                 4006.3,
             ),
+            # Signal 28: Hash prefixed SELL NOW with standard TPs
+            (
+                "#EURAUD SELL NOW\n\nTP:  1.77120\nTP:  1.76300\nTP:  1.75300\n\nSL:  1.79450",
+                "SELL",
+                "EURAUD",
+                0,
+                [1.77120, 1.76300, 1.75300],
+                1.79450,
+            ),
+            # Signal 29: GOLD Sell Now with range and Target Profit format
+            (
+                "GOLD Sell Now 4086 - 4090\n\nStop loss 4092\n\nTarget Profit : 4081\nTarget Profit : 4078",
+                "SELL",
+                "XAUUSD",
+                4086.0,
+                [4081.0, 4078.0],
+                4092.0,
+            ),
+            # Signal 30: Multi-line GOLD SELL NOW with range and numbered TPs
+            (
+                "GOLD SELL NOW\n4084 - 4087\n\nTP 1 4081\nTP 2 4078\nTP 3 4075\nTP 4 4070\nTP 5 4064\n\nSL 4097",
+                "SELL",
+                "XAUUSD",
+                4084.0,
+                [4081.0, 4078.0, 4075.0, 4070.0, 4064.0],
+                4097.0,
+            ),
         ]
 
         for i, (
@@ -301,7 +328,7 @@ class TestSignalParser(unittest.TestCase):
 
                 # Note: Open-only TP signals have take_profits = [0] which is now valid
 
-        print("✅ All 25 user-provided signal formats passed!")
+        print("✅ All 30 user-provided signal formats passed!")
 
 
 if __name__ == "__main__":
