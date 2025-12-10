@@ -10,7 +10,6 @@ from signal_parser import clean_channel_name, parse_signal
 from queue_manager import add_signal_to_queue
 from stoploss_update import (
     process_stoploss_reply,
-    SignalType,
     process_signal,
     process_stoploss_non_reply,
     find_latest_group_id_for_channel,
@@ -398,7 +397,7 @@ async def process_new_standard_signal(
 
 
 async def process_warmup_signal(
-    message_text: str, message_id: int, message_date, channel_name: str = None
+    message_text: str, message_id: int, message_date, channel_name: str | None = None
 ):
     """Process ready messages and generate warmup signals."""
     logger.info(

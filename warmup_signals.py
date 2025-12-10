@@ -1,13 +1,13 @@
 import logging
 from config import WARMUP_SIGNAL_CHANNEL
-from signal_data import SignalData
+from signal_data import SignalData, SignalType
 
 import re
 
 logger = logging.getLogger(__name__)
 
 
-def is_warmup_message(text: str):
+def is_warmup_message(text: str) -> tuple[bool, SignalType | None, float | None]:
     """
     Check if the message matches any ready message pattern for warmup signals.
 
@@ -67,7 +67,7 @@ def is_warmup_message(text: str):
     return False, None, None
 
 
-def generate_warmup_signal(signal_type: str):
+def generate_warmup_signal(signal_type: SignalType | None):
     """
     Generate a warmup signal with zero values - EA calculates actual TP/SL.
 
