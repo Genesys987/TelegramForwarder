@@ -358,11 +358,7 @@ def populate_signal_metadata(
         signal_data.timestamp_utc = timestamp
 
     # For Art of Trading gold trades, add 1$ to the range
-    if (
-        signal_data.symbol == "XAUUSD"
-        and signal_data.channel_name == "THEA"
-        and signal_data.entry is not None
-    ):
+    if signal_data.symbol == "XAUUSD" and signal_data.entry is not None:
         logger.info("Shifting AOT Gold signal by 1$")
         signal_data.entry = (
             signal_data.entry + 1

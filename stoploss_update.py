@@ -61,7 +61,7 @@ def _cleanup_old_tracking():
 
 
 def _get_signal_key(group_id, channel_name, signal_type):
-    return f"{group_id}_{channel_name}_{signal_type.value}"
+    return f"{group_id}_{channel_name}_{signal_type}"
 
 
 def _is_signal_processed(group_id, channel_name, signal_type: SignalType):
@@ -78,7 +78,7 @@ def _mark_signal_processed(group_id, channel_name, signal_type: SignalType):
     if signal_type in _processed_signals:
         _processed_signals[signal_type][key] = timestamp
         logger.info(
-            f"{signal_type.value.upper()} marked as processed for GID={group_id}, Channel={channel_name}"
+            f"{signal_type.upper()} marked as processed for GID={group_id}, Channel={channel_name}"
         )
     else:
         logger.error(f"Unknown signal type: {signal_type}")
@@ -101,18 +101,14 @@ def process_signal(
     signal_type: SignalType, group_id, channel_name="UNKN", modified_value=None
 ):
     """Internal unified signal processor for CLOSE, BREAKEVEN, MODIFY"""
-    logger.info(f"Process: {signal_type.value} GID={group_id}, Channel={channel_name}")
+    logger.info(f"Process: {signal_type} GID={group_id}, Channel={channel_name}")
     if not isinstance(group_id, int) or group_id <= 0:
-        logger.error(
-            f"Hiba {signal_type.value} Process: Érvénytelen group_id: {group_id}"
-        )
+        logger.error(f"Hiba {signal_type} Process: Érvénytelen group_id: {group_id}")
         return None
 
     # For MODIFY, extra_value is required
     if signal_type == "MODIFY" and not modified_value:
-        logger.error(
-            f"Hiba {signal_type.value} Process: extra_value (new SL) is required."
-        )
+        logger.error(f"Hiba {signal_type} Process: extra_value (new SL) is required.")
         return None
 
     # Check if already processed (except for MODIFY)
@@ -120,7 +116,7 @@ def process_signal(
         group_id, channel_name, signal_type
     ):
         logger.warning(
-            f"{signal_type.value} már feldolgozva GID={group_id}, Channel={channel_name} - kihagyás"
+            f"{signal_type} már feldolgozva GID={group_id}, Channel={channel_name} - kihagyás"
         )
         return None
 
@@ -132,7 +128,7 @@ def process_signal(
     if signal_type == "MODIFY":
         signal_line = f"{timestamp}|{signal_type}|{modified_value}|GID:{group_id}|{channel_name}\n"
     else:
-        signal_line = f"{timestamp}|{signal_type.value}|GID:{group_id}|{channel_name}\n"
+        signal_line = f"{timestamp}|{signal_type}|GID:{group_id}|{channel_name}\n"
 
     return write_message_to_queue(signal_line)
 

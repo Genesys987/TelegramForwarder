@@ -3,6 +3,7 @@ from typing import List, Literal, Optional
 
 SignalType = Literal["CLOSE", "BREAKEVEN", "MODIFY", "BUY", "SELL"]
 
+
 class SignalData:
     def __init__(
         self,
