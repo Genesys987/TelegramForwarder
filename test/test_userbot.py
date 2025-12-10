@@ -61,7 +61,7 @@ class TestHandleNewMessage(unittest.TestCase):
         """
         Simulate a reply message that contains a 'close' instruction.
         Expectation:
-         - userbot.process_signal is awaited with SignalType.CLOSE and the mapped group id
+         - userbot.process_signal is awaited with "CLOSE" and the mapped group id
          - userbot.forward_to_archive is awaited with the original message, channel title and the same group id
         """
         # The message text to test (should be interpreted as a "close" style message)
@@ -105,7 +105,7 @@ class TestHandleNewMessage(unittest.TestCase):
             # First argument should be the CLOSE SignalType stored in module
             self.assertEqual(
                 called_args[0],
-                ub.SignalType.CLOSE,
+                "CLOSE",
                 "process_signal was not called with CLOSE signal type",
             )
             # Second argument should be the mapped group id
@@ -140,7 +140,7 @@ class TestHandleNewMessage(unittest.TestCase):
         """
         Simulate a non-reply message that contains a 'close' instruction.
         Expectation:
-         - userbot.process_signal is awaited with SignalType.CLOSE and the mapped group id
+         - userbot.process_signal is awaited with "CLOSE" and the mapped group id
          - userbot.forward_to_archive is awaited with the original message, channel title and the same group id
         """
         # The message text to test (should be interpreted as a "close" style message)
@@ -216,7 +216,7 @@ class TestHandleNewMessage(unittest.TestCase):
             # First argument should be the CLOSE SignalType
             self.assertEqual(
                 called_args[0],
-                ub.SignalType.CLOSE,
+                "CLOSE",
                 "process_signal was not called with CLOSE signal type",
             )
             # Second argument should be the mapped group id

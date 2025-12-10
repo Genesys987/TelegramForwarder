@@ -144,7 +144,7 @@ async def handle_new_message(event):
                 logger.info(f"Processing trading instruction: {signal_type}")
                 if retrieved_group_id:
                     is_success = False
-                    if signal_type == SignalType.MODIFY:
+                    if signal_type == "MODIFY":
                         is_success = process_stoploss_reply(
                             message_text, retrieved_group_id, clean_channel
                         )
@@ -187,7 +187,7 @@ async def handle_new_message(event):
                 if latest_group_id is not None:
                     is_success = False
 
-                    if signal_type == SignalType.MODIFY:
+                    if signal_type == "MODIFY":
                         # Handle SL modification using existing logic
                         channel_name = NON_REPLY_SL_CHANNEL_ID
                         is_success = process_stoploss_non_reply(
@@ -229,6 +229,7 @@ async def handle_new_message(event):
             clean_name = clean_channel_name(chat_title)
             warmup_channel_clean = clean_channel_name(WARMUP_SIGNAL_CHANNEL)
             if clean_name == warmup_channel_clean:
+                # Warmup message
                 logger.info(
                     "Checking for ready/warmup modify message in warmup channel."
                 )
@@ -293,10 +294,8 @@ def detect_signal_type(message_text, stoploss_regexp):
     Returns SignalType enum value or None if no match.
     """
     # BREAKEVEN - has higher priority than close
-    if re.search(
-        r"(breakeven|break\s*even)", message_text, re.IGNORECASE
-    ):
-        return SignalType.BREAKEVEN
+    if re.search(r"(breakeven|break\s*even)", message_text, re.IGNORECASE):
+        return "BREAKEVEN"
     # CLOSE
     elif (
         re.search(r"close.*(profit|half|all).*breakeven", message_text, re.IGNORECASE)
@@ -309,15 +308,20 @@ def detect_signal_type(message_text, stoploss_regexp):
             r"(close|exit|entries\s+are\s+closed)", message_text, re.IGNORECASE
         )
     ):
-        return SignalType.CLOSE
+        return "CLOSE"
     # MODIFY (SL adjust)
     elif re.search(stoploss_regexp, message_text, re.IGNORECASE):
-        return SignalType.MODIFY
+        return "MODIFY"
 
     return None
 
 
-def populate_signal_metadata(signal_data, message_date, channel_name, is_warmup=False):
+def populate_signal_metadata(
+    signal_data: SignalData,
+    message_date: datetime | None,
+    channel_name: str | None,
+    is_warmup=False,
+):
     """
     Populate signal_data with channel name and UTC timestamp.
     For warmup signals, set .original_channel instead of .channel_name.
@@ -353,9 +357,22 @@ def populate_signal_metadata(signal_data, message_date, channel_name, is_warmup=
         timestamp = int(datetime.now(timezone.utc).timestamp())
         signal_data.timestamp_utc = timestamp
 
+    # For Art of Trading gold trades, add 1$ to the range
+    if (
+        signal_data.symbol == "XAUUSD"
+        and signal_data.channel_name == "THEA"
+        and signal_data.entry is not None
+    ):
+        logger.info("Shifting AOT Gold signal by 1$")
+        signal_data.entry = (
+            signal_data.entry + 1
+            if signal_data.signal_type == "BUY"
+            else signal_data.entry - 1
+        )
+
 
 async def process_new_standard_signal(
-    message_text: str, message_id: int, message_date, channel_name: str = None
+    message_text: str, message_id: int, message_date, channel_name: str | None = None
 ):
     logger.info(
         f"   Standard szignál feldolgozása (ID: {message_id}) csatornából: {channel_name or 'UNKNOWN'}..."

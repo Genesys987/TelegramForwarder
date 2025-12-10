@@ -540,7 +540,9 @@ def parse_signal(text: str) -> SignalData | None:
 
             # Format 9: NOW signals with ranges like "GOLD Sell Now 4086 - 4090"
             match_now_range = re.match(
-                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s+([\d\s\-\.]+)", line, re.IGNORECASE
+                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s+([\d\s\-\.]+)",
+                line,
+                re.IGNORECASE,
             )
             if match_now_range:
                 raw_symbol = match_now_range.group(1).upper()
@@ -634,7 +636,9 @@ def parse_signal(text: str) -> SignalData | None:
                             tp_found = True
                     break
                 except ValueError:
-                    print(f"Warning: Invalid number for TP: {m.group(1) if len(m.groups()) == 1 else m.group(2)}")
+                    print(
+                        f"Warning: Invalid number for TP: {m.group(1) if len(m.groups()) == 1 else m.group(2)}"
+                    )
 
         # NEW: Check for slash-separated TP values OR single numeric TP (e.g., "3332/3330/3328/3325" or "3340")
         if not tp_found:

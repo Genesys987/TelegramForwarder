@@ -4,27 +4,20 @@ import logging
 import time
 import os
 from collections import OrderedDict
-from enum import Enum
 from typing import Optional
 from queue_manager import write_message_to_queue
+from signal_data import SignalType
 from signal_parser import clean_channel_name
 
 logger = logging.getLogger(__name__)
 
-
-class SignalType(Enum):
-    CLOSE = "CLOSE"
-    BREAKEVEN = "BREAKEVEN"
-    MODIFY = "MODIFY"
-
-
 # Global tracking with timestamps for automatic cleanup
 _processed_signals = {
-    SignalType.BREAKEVEN: OrderedDict(),
-    SignalType.CLOSE: OrderedDict(),
+    "BREAKEVEN": OrderedDict(),
+    "CLOSE": OrderedDict(),
 }
 
-trackable_signal_types = [SignalType.CLOSE, SignalType.BREAKEVEN]
+trackable_signal_types: list[SignalType] = ["CLOSE", "BREAKEVEN"]
 
 # Auto-cleanup settings
 TRACKING_CLEANUP_DAYS = 2  # Clean entries older than 2 days
@@ -116,7 +109,7 @@ def process_signal(
         return None
 
     # For MODIFY, extra_value is required
-    if signal_type == SignalType.MODIFY and not modified_value:
+    if signal_type == "MODIFY" and not modified_value:
         logger.error(
             f"Hiba {signal_type.value} Process: extra_value (new SL) is required."
         )
@@ -136,8 +129,8 @@ def process_signal(
         _mark_signal_processed(group_id, channel_name, signal_type)
 
     timestamp = int(time.time())
-    if signal_type == SignalType.MODIFY:
-        signal_line = f"{timestamp}|{signal_type.value}|{modified_value}|GID:{group_id}|{channel_name}\n"
+    if signal_type == "MODIFY":
+        signal_line = f"{timestamp}|{signal_type}|{modified_value}|GID:{group_id}|{channel_name}\n"
     else:
         signal_line = f"{timestamp}|{signal_type.value}|GID:{group_id}|{channel_name}\n"
 
@@ -157,7 +150,7 @@ def process_stoploss_reply(reply_text, group_id, channel_name="UNKN"):
         return None
 
     return process_signal(
-        SignalType.MODIFY, group_id, channel_name, modified_value=new_sl_value_formatted
+        "MODIFY", group_id, channel_name, modified_value=new_sl_value_formatted
     )
 
 
@@ -293,7 +286,7 @@ def process_stoploss_non_reply(
             f"Processing non-reply SL modification: GID={latest_group_id}, Channel={clean_channel}, New SL={new_formatted_sl_value}"
         )
         return process_signal(
-            SignalType.MODIFY,
+            "MODIFY",
             latest_group_id,
             clean_channel,
             modified_value=new_formatted_sl_value,
