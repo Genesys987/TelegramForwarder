@@ -1,10 +1,12 @@
-from typing import List, Optional
+from typing import List, Literal, Optional
 
+
+SignalType = Literal["CLOSE", "BREAKEVEN", "MODIFY", "BUY", "SELL"]
 
 class SignalData:
     def __init__(
         self,
-        signal_type: Optional[str] = None,
+        signal_type: Optional[SignalType] = None,
         symbol: Optional[str] = None,
         entry: Optional[float] = None,
         take_profits: Optional[List[float]] = None,
