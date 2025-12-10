@@ -292,8 +292,13 @@ def detect_signal_type(message_text, stoploss_regexp):
     Detect the type of trading signal from message text.
     Returns SignalType enum value or None if no match.
     """
+    # BREAKEVEN - has higher priority than close
+    if re.search(
+        r"(breakeven|break\s*even)", message_text, re.IGNORECASE
+    ):
+        return SignalType.BREAKEVEN
     # CLOSE
-    if (
+    elif (
         re.search(r"close.*(profit|half|all).*breakeven", message_text, re.IGNORECASE)
         or re.search(r"close.*half.*hold", message_text, re.IGNORECASE)
         or re.search(r"close.*entries.*breakeven", message_text, re.IGNORECASE)
@@ -308,11 +313,6 @@ def detect_signal_type(message_text, stoploss_regexp):
     # MODIFY (SL adjust)
     elif re.search(stoploss_regexp, message_text, re.IGNORECASE):
         return SignalType.MODIFY
-    # BREAKEVEN
-    elif re.search(
-        r"(breakeven|break\s*even|set\s+breakeven)", message_text, re.IGNORECASE
-    ):
-        return SignalType.BREAKEVEN
 
     return None
 
