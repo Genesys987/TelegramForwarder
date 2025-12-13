@@ -12,11 +12,13 @@ for e in "${env_files[@]}"; do
     pids+=($!)
 done
 
+echo ${pids[@]}
+
 # Function to kill all started processes
 cleanup() {
     echo "Stopping all Python scripts..."
     for pid in "${pids[@]}"; do
-        kill -SIGINT "$pid" 2>/dev/null || true
+        kill -SIGTERM "$pid" 2>/dev/null || true
     done
     # Wait for them to exit
     wait
