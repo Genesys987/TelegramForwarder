@@ -1,8 +1,9 @@
 # --- config.py (Updated) ---
 import os
+import sys
 from dotenv import dotenv_values
 
-config = dotenv_values(".env")
+config = dotenv_values(".env") if len(sys.argv) <= 1 else dotenv_values(sys.argv[1])
 
 # Get the directory where config.py is located
 _basedir = os.path.dirname(os.path.abspath(__file__))
@@ -82,3 +83,5 @@ WARMUP_SIGNAL_CHANNEL = config.get("WARMUP_SIGNAL_CHANNEL") or "FXTM"
 # Channel name for non-reply SL modifications (configurable for testing)
 # Default: "FXTM" for production, can be set to "LocalDemo" for testing
 NON_REPLY_SL_CHANNEL_ID = config.get("NON_REPLY_SL_CHANNEL_ID") or "FXTM"
+
+SESSION_NAME = config.get("SESSION_NAME") or "userbot_session"

@@ -22,6 +22,7 @@ from config import (
     MESSAGE_GID_MAP_FILE,
     ARCHIVE_CHANNEL,
     NON_REPLY_SL_CHANNEL_ID,
+    SESSION_NAME,
     WARMUP_SIGNAL_CHANNEL,
 )
 from signal_parser import SignalData
@@ -108,7 +109,6 @@ def add_gid_mapping(message_id: int, group_id: int):  # Hozzáadás és mentés
 
 
 # --- Telethon Client Setup ---
-SESSION_NAME = "userbot_session"
 client = None
 
 
