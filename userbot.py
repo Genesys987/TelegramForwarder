@@ -26,13 +26,18 @@ from config import (
     WARMUP_SIGNAL_CHANNEL,
 )
 from signal_parser import SignalData
+from filelock import FileLock
 
 logger = logging.getLogger(__name__)
 
 # --- Perzisztens Group ID Számláló ---
 current_group_id = 1000
 
+last_gid_lock = FileLock(LAST_GID_FILE + ".lock", timeout=5)
+message_gid_map_lock = FileLock(MESSAGE_GID_MAP_FILE + ".lock", timeout=5)
 
+
+@last_gid_lock
 def load_last_gid():  # Betöltés indításkor
     global current_group_id
     try:
@@ -50,6 +55,7 @@ def load_last_gid():  # Betöltés indításkor
         logger.error(f"Hiba GID betöltésekor: {e}. Indul: {current_group_id + 1}")
 
 
+@last_gid_lock
 def save_last_gid():  # Mentés növelés után
     global current_group_id
     try:
@@ -74,6 +80,7 @@ message_id_to_group_id = {}
 current_warmup_gid = None
 
 
+@message_gid_map_lock
 def load_message_gid_map():  # Betöltés indításkor
     global message_id_to_group_id
     try:
@@ -90,6 +97,7 @@ def load_message_gid_map():  # Betöltés indításkor
         message_id_to_group_id = {}
 
 
+@message_gid_map_lock
 def save_message_gid_map():  # Mentés hozzáadás után
     global message_id_to_group_id
     try:
