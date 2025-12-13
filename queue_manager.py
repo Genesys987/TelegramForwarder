@@ -12,17 +12,13 @@ import os
 import traceback
 import logging
 
-from filelock import FileLock
+from file_locks import queue_files_lock, signal_archive_lock
 from signal_data import SignalData
-from config import MT4_QUEUE_FILE_PATHS, MT4_SIGNAL_FILE_PATHS, queue_filename
+from config import MT4_QUEUE_FILE_PATHS, MT4_SIGNAL_FILE_PATHS
 from signal_parser import clean_channel_name
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
-
-_basedir = os.path.dirname(os.path.abspath(__file__))
-signal_archive_lock = FileLock(os.path.join(_basedir, "logs", "signals_archive_lock.txt"), timeout=5)
-queue_files_lock = FileLock(os.path.join(_basedir, "queue_files.lock"), timeout=5)
 
 @signal_archive_lock
 def _write_signal_archive(message: str) -> None:

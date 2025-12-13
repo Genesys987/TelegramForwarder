@@ -5,6 +5,7 @@ from telethon import TelegramClient, events
 import traceback
 import os
 import logging
+from file_locks import last_gid_lock, message_gid_map_lock
 from warmup_signals import generate_warmup_signal, is_warmup_message
 from signal_parser import clean_channel_name, parse_signal
 from queue_manager import add_signal_to_queue
@@ -26,16 +27,11 @@ from config import (
     WARMUP_SIGNAL_CHANNEL,
 )
 from signal_parser import SignalData
-from filelock import FileLock
 
 logger = logging.getLogger(__name__)
 
 # --- Perzisztens Group ID Számláló ---
 current_group_id = 1000
-
-last_gid_lock = FileLock(LAST_GID_FILE + ".lock", timeout=5)
-message_gid_map_lock = FileLock(MESSAGE_GID_MAP_FILE + ".lock", timeout=5)
-
 
 @last_gid_lock
 def load_last_gid():  # Betöltés indításkor
