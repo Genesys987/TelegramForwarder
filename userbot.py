@@ -5,6 +5,7 @@ from telethon import TelegramClient, events
 import traceback
 import os
 import logging
+from file_locks import last_gid_lock, message_gid_map_lock
 from warmup_signals import generate_warmup_signal, is_warmup_message
 from signal_parser import clean_channel_name, parse_signal
 from queue_manager import add_signal_to_queue
@@ -22,6 +23,7 @@ from config import (
     MESSAGE_GID_MAP_FILE,
     ARCHIVE_CHANNEL,
     NON_REPLY_SL_CHANNEL_ID,
+    SESSION_NAME,
     WARMUP_SIGNAL_CHANNEL,
 )
 from signal_parser import SignalData
@@ -31,7 +33,7 @@ logger = logging.getLogger(__name__)
 # --- Perzisztens Group ID Számláló ---
 current_group_id = 1000
 
-
+@last_gid_lock
 def load_last_gid():  # Betöltés indításkor
     global current_group_id
     try:
@@ -49,6 +51,7 @@ def load_last_gid():  # Betöltés indításkor
         logger.error(f"Hiba GID betöltésekor: {e}. Indul: {current_group_id + 1}")
 
 
+@last_gid_lock
 def save_last_gid():  # Mentés növelés után
     global current_group_id
     try:
@@ -73,6 +76,7 @@ message_id_to_group_id = {}
 current_warmup_gid = None
 
 
+@message_gid_map_lock
 def load_message_gid_map():  # Betöltés indításkor
     global message_id_to_group_id
     try:
@@ -89,6 +93,7 @@ def load_message_gid_map():  # Betöltés indításkor
         message_id_to_group_id = {}
 
 
+@message_gid_map_lock
 def save_message_gid_map():  # Mentés hozzáadás után
     global message_id_to_group_id
     try:
@@ -108,7 +113,6 @@ def add_gid_mapping(message_id: int, group_id: int):  # Hozzáadás és mentés
 
 
 # --- Telethon Client Setup ---
-SESSION_NAME = "userbot_session"
 client = None
 
 

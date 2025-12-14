@@ -11,6 +11,8 @@ Feladata:
 import os
 import traceback
 import logging
+
+from file_locks import queue_files_lock, signal_archive_lock
 from signal_data import SignalData
 from config import MT4_QUEUE_FILE_PATHS, MT4_SIGNAL_FILE_PATHS
 from signal_parser import clean_channel_name
@@ -18,7 +20,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-
+@signal_archive_lock
 def _write_signal_archive(message: str) -> None:
     """
     Writes the given message to the daily signals archive file.
@@ -36,6 +38,7 @@ def _write_signal_archive(message: str) -> None:
         )
 
 
+@queue_files_lock
 def write_message_to_queue(message: str) -> bool:
     """
     Writes the given message to all MT4 queue files.
@@ -150,6 +153,7 @@ def add_signal_to_queue(signal_data: SignalData) -> bool:
         return False
 
 
+@queue_files_lock
 def process_signal_queue() -> None:
     """
     Feladata, hogy a queue-fájlokból kivesz egy (nem üres) sort,

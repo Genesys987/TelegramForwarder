@@ -5,6 +5,7 @@ import time
 import os
 from collections import OrderedDict
 from typing import Optional
+from file_locks import signal_archive_lock
 from queue_manager import write_message_to_queue
 from signal_data import SignalType
 from signal_parser import clean_channel_name
@@ -168,6 +169,7 @@ def get_formatted_sl_value(reply_text: str) -> Optional[str]:
         return None
 
 
+@signal_archive_lock
 def find_latest_group_id_for_channel(channel_name: str) -> Optional[int]:
     """
     Find the most recent group ID for a specific channel by searching archive files.

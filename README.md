@@ -13,8 +13,12 @@ cp .env.example .env
 python -m pip install --user pipenv
 # install project dependencies
 pipenv install
-# run app
+# run app (using .env)
 pipenv run python main.py
+# run app (using custom env file)
+pipenv run python main.py .env.gergely
+# run all .env files in folder at the same time
+./run.sh
 # run unit tests
 pipenv run python -m unittest discover -s test
 # run formatter

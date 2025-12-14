@@ -1,7 +1,7 @@
-userbot_session.session
-userbot_session.session-journal
+*.session
+*.session-journal
 
-.env
+.env*
 
 # Compiled Metatrader files
 *.ex4
@@ -15,3 +15,6 @@ channels.txt
 
 __pycache__/
 .vscode/settings.json
+
+*.lock
+!Pipfile.lock
