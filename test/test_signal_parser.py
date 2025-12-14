@@ -12,8 +12,8 @@ from signal_parser import parse_signal
 
 class TestSignalParser(unittest.TestCase):
     
-    def test_all_25_user_signals(self):
-        """Test all 25 signal formats provided by the user including new FXTM VIP formats"""
+    def test_all_29_user_signals(self):
+        """Test all 29 signal formats including symbol auto-detection"""
         
         signals = [
             # Signal 1: Standard BUY format
@@ -115,7 +115,21 @@ class TestSignalParser(unittest.TestCase):
             # Signal 25: NEW - Sell gold price @ range format with open-only TP
             ("Sell gold price @ 4355-4358\n\nSl 4361\nTp open",
              "SELL", "XAUUSD", 4355.0, [0], 4361.0),
-        ]
+            
+            # Signal 26: Multi-line individual TP format 
+            ("GOLD BUY 4272/4270\n\n4275\n4277\n4280\n4282\n4285\n4290\n4295\n4300\n\nSL 4255",
+             "BUY", "XAUUSD", 4272.0, [4275.0, 4277.0, 4280.0, 4282.0, 4285.0, 4290.0, 4295.0, 4300.0], 4255.0),
+             
+            # Signal 27: GOLD BUY with extra blank lines
+            ("GOLD BUY 4192/4190\n\n\n4195\n4197\n4200\n4202\n4205\n4210\n4215\n\nSL 4185",
+             "BUY", "XAUUSD", 4192.0, [4195.0, 4197.0, 4200.0, 4202.0, 4205.0, 4210.0, 4215.0], 4185.0),
+             
+            # Signal 28: Hash prefix with em-dash entry range
+            ("#XAUUSD SELL\nENTRY: 4229–4232\nSL: 4239\nTP: 4226\nTP: 4223\nTP: 4220\nTP: 4217\nTP: 4214\n\nStay focused and trust the setup—precision beats speed in volatile markets.",
+             "SELL", "XAUUSD", 4229.0, [4226.0, 4223.0, 4220.0, 4217.0, 4214.0], 4239.0),             
+            # Signal 29: Symbol-less SELL FROM with auto-detection based on price range
+            ("SELL FROM 4210/4215\n\n4205/4203/4200/4198/4195/4195/4190/4185/4180\n\nSL 4225",
+             "SELL", "XAUUSD", 4210.0, [4205.0, 4203.0, 4200.0, 4198.0, 4195.0, 4195.0, 4190.0, 4185.0, 4180.0], 4225.0),        ]
         
         for i, (signal_text, expected_type, expected_symbol, expected_entry, expected_tps, expected_sl) in enumerate(signals, 1):
             with self.subTest(signal=i):
@@ -132,7 +146,7 @@ class TestSignalParser(unittest.TestCase):
                 
                 # Note: Open-only TP signals have take_profits = [0] which is now valid
 
-        print("✅ All 25 user-provided signal formats passed!")
+        print("✅ All 29 user-provided signal formats passed!")
 
 
 if __name__ == '__main__':

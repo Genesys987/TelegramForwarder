@@ -4,6 +4,70 @@ from signal_data import SignalData
 # Dictionary of common symbol mappings
 symbol_mappings = {"GOLD": "XAUUSD"}
 
+def detect_symbol_from_prices(prices):
+    """
+    Auto-detect symbol based on price ranges
+    
+    Args:
+        prices: List of price values
+        
+    Returns:
+        Detected symbol or None if cannot determine
+    """
+    if not prices:
+        return None
+        
+    # Convert to float and filter valid prices
+    valid_prices = []
+    for p in prices:
+        try:
+            price_val = float(p)
+            if price_val > 0:
+                valid_prices.append(price_val)
+        except (ValueError, TypeError):
+            continue
+            
+    if not valid_prices:
+        return None
+        
+    # Check if all prices are in XAUUSD range (2000-5000)
+    if all(2000 <= p <= 5000 for p in valid_prices):
+        return "XAUUSD"
+        
+    return None
+
+def detect_symbol_from_prices(prices):
+    """
+    Auto-detect symbol based on price ranges
+    
+    Args:
+        prices: List of price values
+        
+    Returns:
+        Detected symbol or None if cannot determine
+    """
+    if not prices:
+        return None
+        
+    # Convert to float and filter valid prices
+    valid_prices = []
+    for p in prices:
+        try:
+            price_val = float(p)
+            if price_val > 0:
+                valid_prices.append(price_val)
+        except (ValueError, TypeError):
+            continue
+            
+    if not valid_prices:
+        return None
+        
+    # Check if all prices are in XAUUSD range (2000-5000)
+    if all(2000 <= p <= 5000 for p in valid_prices):
+        return "XAUUSD"
+        
+    return None
+
 # Ready message patterns for warmup signals
 READY_MESSAGE_PATTERNS = [
     r"I'?m\s+buying\s+now",
@@ -85,7 +149,7 @@ def expand_abbreviated_price(price_text):
 
 def parse_entry_price(entry_text, signal_type):
     """
-    Parse entry price from text, handling range formats like '3334/3337', '3339-3344', '@3339-3344', '4207/04'
+    Parse entry price from text, handling range formats like '3334/3337', '3339-3344', '@3339-3344', '4207/04', '4229–4232'
 
     Args:
         entry_text: The entry price text to parse
@@ -100,9 +164,11 @@ def parse_entry_price(entry_text, signal_type):
     # Expand abbreviated prices like 4207/04 -> 4207/4204
     entry_text = expand_abbreviated_price(entry_text)
 
-    # Handle different range separators (including space-separated like "3340.5 -3338")
+    # Handle different range separators (including space-separated like "3340.5 -3338" and em-dash "4229–4232")
     if "/" in entry_text:
         split = entry_text.split("/")
+    elif "–" in entry_text:  # Em-dash (U+2013)
+        split = entry_text.split("–")
     elif "-" in entry_text:
         # Handle both "3339-3344" and "3340.5 -3338" formats
         if " -" in entry_text:
@@ -368,7 +434,20 @@ def parse_signal(text: str) -> SignalData | None:
 
         # Signal Type and Symbol parsing - handle multiple formats
         if not signal.signal_type:
-            # Format 0: NOW signals with emojis like "🚨 GOLD SELL NOW 🚨"
+            # Format 0.1: Hash prefixed signals like "#XAUUSD SELL" or "#EURAUD SELL NOW"
+            match_hash_signal = re.match(
+                r"^#([\w\.\/\-]+)\s+(BUY|SELL)(?:\s+NOW)?", line, re.IGNORECASE
+            )
+            if match_hash_signal:
+                raw_symbol = match_hash_signal.group(1).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_hash_signal.group(2).upper()
+                # Set entry to 0 if NOW is present, otherwise leave None for later parsing
+                if "NOW" in line.upper():
+                    signal.entry = 0
+                continue
+                
+            # Format 0.2: NOW signals with emojis like "🚨 GOLD SELL NOW 🚨"
             match_emoji_now = re.match(
                 r"^🚨?\s*([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*🚨?", line, re.IGNORECASE
             )
@@ -391,6 +470,21 @@ def parse_signal(text: str) -> SignalData | None:
                 signal.signal_type = match_symbol_type_from.group(2).upper()
                 # Also capture the entry price from the FROM clause
                 entry_text = match_symbol_type_from.group(3)
+                signal.entry = parse_entry_price(entry_text, signal.signal_type)
+                continue
+                
+            # Format 1.1: Symbol-less "SELL FROM range" or "BUY FROM range" format (supports em-dash)
+            match_symbolless_from = re.match(
+                r"^(BUY|SELL)\s+FROM\s+([\d\/\.\-@\u2013]+)",
+                line,
+                re.IGNORECASE,
+            )
+            if match_symbolless_from:
+                signal.signal_type = match_symbolless_from.group(1).upper()
+                # Mark symbol as None for auto-detection later
+                signal.symbol = None
+                # Capture the entry price from the FROM clause
+                entry_text = match_symbolless_from.group(2)
                 signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
 
@@ -545,25 +639,25 @@ def parse_signal(text: str) -> SignalData | None:
 
         # Entry Price parsing
         if signal.entry is None:
-            # Look for ENTRY keyword with optional colon
-            m = re.search(r"ENTRY\s*:?\s*(?:at\s+)?([\d\/\.\-@]+)", line, re.IGNORECASE)
+            # Look for ENTRY keyword with optional colon (including em-dash ranges)
+            m = re.search(r"ENTRY\s*:?\s*(?:at\s+)?([\d\/\.\-–@]+)", line, re.IGNORECASE)
             if m:
                 entry_text = m.group(1)
                 signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
 
-            # NEW: Check for standalone entry price line (just numbers with optional slash)
+            # NEW: Check for standalone entry price line (just numbers with optional slash or dash range)
             # This should be a line that looks like an entry price but not TPs
-            entry_standalone_pattern = r"^([\d\.]+(?:/[\d\.]+)?)$"
+            entry_standalone_pattern = r"^([\d\.]+(?:[/\-–\s]+[\d\.]+)?)$"
             entry_match = re.match(entry_standalone_pattern, line.strip())
             if entry_match and signal.signal_type and signal.symbol:
                 # Make sure this looks like an entry price and not TPs
                 entry_text = entry_match.group(1)
                 potential_entry = parse_entry_price(entry_text, signal.signal_type)
 
-                # Simple heuristic: if it's a range (contains /), treat as entry
+                # Simple heuristic: if it's a range (contains /, -, or –), treat as entry
                 # or if it's a single reasonable value for the symbol
-                if "/" in entry_text or (
+                if ("/" in entry_text or "-" in entry_text or "–" in entry_text) or (
                     isinstance(potential_entry, (int, float)) and potential_entry > 0
                 ):
                     signal.entry = potential_entry
@@ -674,6 +768,22 @@ def parse_signal(text: str) -> SignalData | None:
                         break
                     except ValueError:
                         print(f"Warning: Invalid number for Stop Loss: {m.group(1)}")
+
+    # Auto-detect symbol if missing based on price ranges
+    if signal.symbol is None and signal.signal_type and (signal.entry is not None or take_profits or signal.stop_loss):
+        # Collect all available prices for analysis
+        all_prices = []
+        if signal.entry is not None and signal.entry != 0:
+            all_prices.append(signal.entry)
+        if take_profits:
+            all_prices.extend([tp for tp in take_profits if isinstance(tp, (int, float)) and tp != "open"])
+        if signal.stop_loss:
+            all_prices.append(signal.stop_loss)
+            
+        detected_symbol = detect_symbol_from_prices(all_prices)
+        if detected_symbol:
+            signal.symbol = detected_symbol
+            print(f"Debug: Auto-detected symbol {detected_symbol} based on price range {min(all_prices) if all_prices else 'N/A'}-{max(all_prices) if all_prices else 'N/A'}")
 
     # Sort take profits and add to signal
     if take_profits:
