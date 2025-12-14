@@ -509,7 +509,7 @@ async def run_userbot():
 
     # Fill entity cache with channel IDs
     dialogs = await client.get_dialogs()
-    with open("channels.txt", "w", encoding="utf-8") as f:
+    with open(f"channels_{SESSION_NAME}.txt", "w", encoding="utf-8") as f:
         for dialog in dialogs:
             if dialog.is_channel:
                 entity = dialog.entity
