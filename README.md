@@ -17,6 +17,7 @@ pipenv install
 pipenv run python main.py
 # run app (using custom env file)
 pipenv run python main.py .env.gergely
+./run.sh .env.gergely
 # run all .env files in folder at the same time
 ./run.sh
 # run unit tests

@@ -1,5 +1,10 @@
 #!/bin/bash
 
+if [ "$#" -gt 0 ]; then
+    pipenv run python main.py "$1"
+    exit 0
+fi
+
 env_files=$(find . -maxdepth 1 -name ".env*" ! -name ".env.example")
 
 # Keep track of PIDs
