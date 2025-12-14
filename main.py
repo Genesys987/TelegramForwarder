@@ -6,6 +6,7 @@ from logging.handlers import TimedRotatingFileHandler
 import time
 import threading
 
+from config import SESSION_NAME
 from userbot import run_userbot
 from queue_manager import process_signal_queue
 
@@ -31,7 +32,7 @@ if __name__ == "__main__":
     )
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
+        format=f"%(asctime)s [{SESSION_NAME}] [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[log_handler, logging.StreamHandler()],
         encoding="utf-8",
