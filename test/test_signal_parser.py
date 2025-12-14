@@ -12,8 +12,8 @@ from signal_parser import parse_signal
 
 
 class TestSignalParser(unittest.TestCase):
-    def test_all_30_user_signals(self):
-        """Test all 30 signal formats provided by the user including new NOW signal formats"""
+    def test_all_34_user_signals(self):
+        """Test all 34 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
 
         signals = [
             # Signal 1: Standard BUY format
@@ -286,6 +286,42 @@ class TestSignalParser(unittest.TestCase):
                 [4081.0, 4078.0, 4075.0, 4070.0, 4064.0],
                 4097.0,
             ),
+            # Signal 31: GOLD BUY with range and separate TP lines
+            (
+                "GOLD BUY 4192/4190\n\n4195\n4197\n4200\n4202\n4205\n4210\n4215\n\nSL 4185",
+                "BUY",
+                "XAUUSD",
+                4192.0,
+                [4195.0, 4197.0, 4200.0, 4202.0, 4205.0, 4210.0, 4215.0],
+                4185.0,
+            ),
+            # Signal 32: Hash-prefixed XAUUSD SELL with unicode dash in ENTRY
+            (
+                "#XAUUSD SELL\nENTRY: 4229–4232\nSL: 4239\nTP: 4226\nTP: 4223\nTP: 4220\nTP: 4217\nTP: 4214\n\nStay focused and trust the setup—precision beats speed in volatile markets.",
+                "SELL",
+                "XAUUSD",
+                4229.0,
+                [4226.0, 4223.0, 4220.0, 4217.0, 4214.0],
+                4239.0,
+            ),
+            # Signal 33: Another GOLD BUY with range and separate TP lines
+            (
+                "GOLD BUY 4272/4270\n\n4275\n4277\n4280\n4282\n4285\n4290\n4295\n4300\n\nSL 4255",
+                "BUY",
+                "XAUUSD",
+                4272.0,
+                [4275.0, 4277.0, 4280.0, 4282.0, 4285.0, 4290.0, 4295.0, 4300.0],
+                4255.0,
+            ),
+            # Signal 34: SELL FROM without symbol (should auto-detect XAUUSD from price range)
+            (
+                "SELL FROM 4210/4215\n\n4205/4203/4200/4198/4195/4195/4190/4185/4180\n\nSL 4225",
+                "SELL",
+                "XAUUSD",
+                4210.0,
+                [4205.0, 4203.0, 4200.0, 4198.0, 4195.0, 4195.0, 4190.0, 4185.0, 4180.0],
+                4225.0,
+            ),
         ]
 
         for i, (
@@ -328,7 +364,7 @@ class TestSignalParser(unittest.TestCase):
 
                 # Note: Open-only TP signals have take_profits = [0] which is now valid
 
-        print("✅ All 30 user-provided signal formats passed!")
+        print("✅ All 34 user-provided signal formats passed!")
 
 
 if __name__ == "__main__":
