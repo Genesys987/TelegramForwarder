@@ -63,6 +63,7 @@ def save_last_gid():  # Mentés növelés után
 
 def get_next_group_id():  # Következő GID lekérése és mentése
     global current_group_id
+    load_last_gid()
     current_group_id += 1
     save_last_gid()
     return current_group_id
@@ -108,6 +109,7 @@ def save_message_gid_map():  # Mentés hozzáadás után
 def add_gid_mapping(message_id: int, group_id: int):  # Hozzáadás és mentés
     if not isinstance(message_id, int) or not isinstance(group_id, int):
         return
+    load_message_gid_map()
     message_id_to_group_id[message_id] = group_id
     save_message_gid_map()
 
