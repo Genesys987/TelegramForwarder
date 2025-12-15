@@ -61,6 +61,7 @@ def save_last_gid():  # Mentés növelés után
         logger.error(f"Hiba GID mentésekor: {e}")
 
 
+@last_gid_lock
 def get_next_group_id():  # Következő GID lekérése és mentése
     global current_group_id
     load_last_gid()
@@ -106,6 +107,7 @@ def save_message_gid_map():  # Mentés hozzáadás után
         logger.error(f"Hiba map mentésekor: {e}")
 
 
+@message_gid_map_lock
 def add_gid_mapping(message_id: int, group_id: int):  # Hozzáadás és mentés
     if not isinstance(message_id, int) or not isinstance(group_id, int):
         return
