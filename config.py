@@ -1,4 +1,5 @@
 # --- config.py (Updated) ---
+import hashlib
 import os
 import sys
 from dotenv import dotenv_values
@@ -36,15 +37,13 @@ for folder in mt4_data_folders:
 def getMT4DataFolderId(folder_path):
     """
     Get the MT4 data folder ID from the last directory name.
-    Takes the first 6 characters of the last folder name.
-    Example: /path/to/7D024799C00A011848A10ECEDFE5CBC2 -> 7D0247
+    Takes the last 6 characters of the MD5 of the folder name
     """
     # Remove trailing separators (both / and \) first, then get basename
     cleaned_path = folder_path.rstrip("/\\")
     if not cleaned_path:
         return ""
-    folder_name = os.path.basename(cleaned_path)
-    return folder_name[:6] if len(folder_name) >= 6 else folder_name
+    return hashlib.md5(cleaned_path.encode()).hexdigest()[:6]
 
 
 # --- Files used for communication ---
