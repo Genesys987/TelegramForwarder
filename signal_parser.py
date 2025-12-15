@@ -95,10 +95,18 @@ def parse_entry_price(entry_text, signal_type):
     # Handle different range separators (including space-separated like "3340.5 -3338")
     if "/" in entry_text:
         split = entry_text.split("/")
-    elif "-" in entry_text:
-        # Handle both "3339-3344" and "3340.5 -3338" formats
+    elif "-" in entry_text or "–" in entry_text or "—" in entry_text:
+        # Handle various dash formats: regular dash (-), en dash (–), em dash (—)
         if " -" in entry_text:
             split = entry_text.split(" -")
+        elif " –" in entry_text:
+            split = entry_text.split(" –")
+        elif " —" in entry_text:
+            split = entry_text.split(" —")
+        elif "–" in entry_text:
+            split = entry_text.split("–")
+        elif "—" in entry_text:
+            split = entry_text.split("—")
         else:
             split = entry_text.split("-")
     else:
@@ -311,6 +319,7 @@ def parse_single_line_signal(text) -> SignalData | None:
             signal.take_profits.sort(reverse=True)
 
     # Validate essential components
+    signal.fill_symbol_if_missing()
     return signal if signal.is_valid() else None
 
 
@@ -339,6 +348,7 @@ def parse_signal(text: str) -> SignalData | None:
     # First, try to parse as a single line with all components
     single_line_result = parse_single_line_signal(text)
     if single_line_result:
+        single_line_result.fill_symbol_if_missing()
         return single_line_result
 
     # If single line parsing fails, use multi-line parsing
@@ -350,9 +360,32 @@ def parse_signal(text: str) -> SignalData | None:
 
         # Signal Type and Symbol parsing - handle multiple formats
         if not signal.signal_type:
-            # Format 1: "GOLD SELL FROM 3313/3315" or "SYMBOL BUY FROM price" (check this first, it's more specific)
+            # Format 0: "#XAUUSD SELL" - hash prefix with symbol and action
+            match_hash_symbol = re.match(
+                r"^#([\w\.\/\-]+)\s+(BUY|SELL)", line, re.IGNORECASE
+            )
+            if match_hash_symbol:
+                raw_symbol = match_hash_symbol.group(1).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_hash_symbol.group(2).upper()
+                continue
+
+            # Format 1a: "SELL FROM 4210/4215" - action FROM price without symbol
+            match_type_from_no_symbol = re.match(
+                r"^(BUY|SELL)\s+FROM\s+([\d\/\.\-@–—]+)",
+                line,
+                re.IGNORECASE,
+            )
+            if match_type_from_no_symbol:
+                signal.signal_type = match_type_from_no_symbol.group(1).upper()
+                # No symbol - will be filled by fill_symbol_if_missing()
+                entry_text = match_type_from_no_symbol.group(2)
+                signal.entry = parse_entry_price(entry_text, signal.signal_type)
+                continue
+
+            # Format 1b: "GOLD SELL FROM 3313/3315" or "SYMBOL BUY FROM price" (check this first, it's more specific)
             match_symbol_type_from = re.match(
-                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+(?:FROM|NOW)\s+([\d\/\.\-@]+)",
+                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+(?:FROM|NOW)\s+([\d\/\.\-@–—]+)",
                 line,
                 re.IGNORECASE,
             )
@@ -555,8 +588,8 @@ def parse_signal(text: str) -> SignalData | None:
 
         # Entry Price parsing
         if signal.entry is None:
-            # Look for ENTRY keyword with optional colon
-            m = re.search(r"ENTRY\s*:?\s*(?:at\s+)?([\d\/\.\-@]+)", line, re.IGNORECASE)
+            # Look for ENTRY keyword with optional colon (support unicode dashes)
+            m = re.search(r"ENTRY\s*:?\s*(?:at\s+)?([\d\/\.\-@–—\s]+)", line, re.IGNORECASE)
             if m:
                 entry_text = m.group(1)
                 signal.entry = parse_entry_price(entry_text, signal.signal_type)
@@ -761,6 +794,7 @@ def parse_signal(text: str) -> SignalData | None:
         signal.entry = 0
 
     # Final Validation: Check if all essential parts were found
+    signal.fill_symbol_if_missing()
     if signal.is_valid():
         # Debug: Show parsed signal info
         if signal.channel_name:
