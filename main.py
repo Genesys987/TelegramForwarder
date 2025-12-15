@@ -22,7 +22,7 @@ def queue_loop():
 
 if __name__ == "__main__":
     log_handler = TimedRotatingFileHandler(
-        "logs/forwarder_log.txt", when="midnight", encoding="utf-8"
+        f"logs/forwarder_log_{SESSION_NAME}.txt", when="midnight", encoding="utf-8"
     )
     log_handler.suffix = "%Y-%m-%d"
     log_handler.setFormatter(
