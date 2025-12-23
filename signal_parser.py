@@ -1,5 +1,6 @@
 import logging
 import re
+import unicodedata
 from signal_data import SignalData
 
 logger = logging.getLogger(__name__)
@@ -9,6 +10,55 @@ symbol_mappings = {
     "GOLD": "XAUUSD",
     "GODL": "XAUUSD",
 }
+
+
+def clean_invisible_chars(text: str) -> str:
+    """
+    Remove invisible/hidden characters from text.
+    This includes:
+    - Non-breaking spaces (U+00A0)
+    - Zero-width spaces (U+200B)
+    - Zero-width non-joiners (U+200C)
+    - Zero-width joiners (U+200D)
+    - Other invisible Unicode characters
+    
+    Args:
+        text: Input text that may contain invisible characters
+        
+    Returns:
+        Cleaned text with invisible characters removed
+    """
+    if not text:
+        return text
+    
+    # Replace invisible characters line by line to preserve structure
+    lines = text.splitlines()
+    cleaned_lines = []
+    
+    for line in lines:
+        # Replace invisible characters with regular spaces to preserve word boundaries
+        invisible_chars = {
+            '\u00A0': ' ',  # Non-breaking space -> regular space
+            '\u200B': '',   # Zero-width space -> nothing
+            '\u200C': '',   # Zero-width non-joiner -> nothing
+            '\u200D': '',   # Zero-width joiner -> nothing
+            '\u2060': '',   # Word joiner -> nothing
+            '\uFEFF': '',   # Byte order mark / Zero-width no-break space -> nothing
+        }
+        
+        cleaned_line = line
+        for char, replacement in invisible_chars.items():
+            cleaned_line = cleaned_line.replace(char, replacement)
+        
+        # Also normalize Unicode to remove any other hidden characters
+        cleaned_line = unicodedata.normalize('NFKC', cleaned_line)
+        
+        # Clean up multiple spaces that might have been introduced
+        cleaned_line = re.sub(r' +', ' ', cleaned_line)
+        
+        cleaned_lines.append(cleaned_line)
+    
+    return '\n'.join(cleaned_lines)
 
 
 def clean_channel_name(channel_name: str) -> str:
@@ -341,6 +391,9 @@ def parse_signal(text: str) -> SignalData | None:
     """
     if not text:
         return None  # Handle empty input
+    
+    # Clean invisible characters from the input text
+    text = clean_invisible_chars(text)
 
     signal = SignalData()
     take_profits = signal.take_profits

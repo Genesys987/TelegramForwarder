@@ -366,6 +366,40 @@ class TestSignalParser(unittest.TestCase):
 
         print("✅ All 34 user-provided signal formats passed!")
 
+    def test_invisible_characters(self):
+        """Test signal parsing with invisible/hidden characters like non-breaking spaces, zero-width spaces, etc."""
+        
+        # Test signal with various invisible characters at the beginning
+        test_signals = [
+            # Non-breaking space (U+00A0) at the beginning
+            ("\u00A0GOLD BUY 4323/4320\n\n4325\n4327\n4330\n4332\n4335\n4340\n4345\n4350\n\nSL 4310", "BUY", "XAUUSD", 4323.0, [4325.0, 4327.0, 4330.0, 4332.0, 4335.0, 4340.0, 4345.0, 4350.0], 4310.0),
+            
+            # Zero-width space (U+200B) at the beginning
+            ("\u200BGOLD BUY 4323/4320\n\n4325\n4327\n4330\n4332\n4335\n4340\n4345\n4350\n\nSL 4310", "BUY", "XAUUSD", 4323.0, [4325.0, 4327.0, 4330.0, 4332.0, 4335.0, 4340.0, 4345.0, 4350.0], 4310.0),
+            
+            # Zero-width non-joiner (U+200C) at the beginning
+            ("\u200CGOLD BUY 4323/4320\n\n4325\n4327\n4330\n4332\n4335\n4340\n4345\n4350\n\nSL 4310", "BUY", "XAUUSD", 4323.0, [4325.0, 4327.0, 4330.0, 4332.0, 4335.0, 4340.0, 4345.0, 4350.0], 4310.0),
+            
+            # Multiple invisible characters combined
+            ("\u00A0\u200B\u200CGOLD BUY 4323/4320\n\n4325\n4327\n4330\n4332\n4335\n4340\n4345\n4350\n\nSL 4310", "BUY", "XAUUSD", 4323.0, [4325.0, 4327.0, 4330.0, 4332.0, 4335.0, 4340.0, 4345.0, 4350.0], 4310.0),
+            
+            # Invisible characters within the text
+            ("GOLD\u00A0BUY\u200B4323/4320\n\n4325\n4327\n4330\n4332\n4335\n4340\n4345\n4350\n\nSL 4310", "BUY", "XAUUSD", 4323.0, [4325.0, 4327.0, 4330.0, 4332.0, 4335.0, 4340.0, 4345.0, 4350.0], 4310.0),
+        ]
+        
+        for i, (signal_text, expected_type, expected_symbol, expected_entry, expected_tps, expected_sl) in enumerate(test_signals, 1):
+            print(f"Testing invisible characters signal {i}...")
+            result = parse_signal(signal_text)
+            
+            self.assertIsNotNone(result, f"Invisible char signal {i} should parse successfully")
+            self.assertEqual(result.signal_type, expected_type, f"Invisible char signal {i} type mismatch")
+            self.assertEqual(result.symbol, expected_symbol, f"Invisible char signal {i} symbol mismatch")
+            self.assertEqual(result.entry, expected_entry, f"Invisible char signal {i} entry mismatch")
+            self.assertEqual(result.take_profits, expected_tps, f"Invisible char signal {i} take_profits mismatch")
+            self.assertEqual(result.stop_loss, expected_sl, f"Invisible char signal {i} stop_loss mismatch")
+        
+        print("✅ All invisible character signals passed!")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
