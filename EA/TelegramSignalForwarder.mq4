@@ -142,7 +142,7 @@ void OnInit()
 void OnDeinit(const int reason)
 {
   if(debugMode)
-    PrintLog(": Deinitialized, Reason: " + reason);
+    PrintLog(": Deinitialized, Reason: " + IntegerToString(reason));
 }
 
 datetime lastTrailingScanTime = 0;
