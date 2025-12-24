@@ -139,13 +139,13 @@ void OnInit()
 //+------------------------------------------------------------------+
 //| Expert deinitialization function                                 |
 //+------------------------------------------------------------------+
-void OnDeinit()
+void OnDeinit(const int reason)
 {
   if(debugMode)
-    PrintLog(": Deinitialized");
+    PrintLog(": Deinitialized, Reason: " + reason);
 }
 
-datetime lastTime = 0;
+datetime lastTrailingScanTime = 0;
 
 /*
  * Only used for EA testing - Timer won't run in test mode
@@ -155,8 +155,8 @@ void OnTick()
   if (!IsTesting()) return;
   datetime currentTime = TimeCurrent();
 
-  if (currentTime - lastTime >= trailingScanPeriodSeconds) {
-    lastTime = currentTime;
+  if (currentTime - lastTrailingScanTime >= trailingScanPeriodSeconds) {
+    lastTrailingScanTime = currentTime;
     OnTimer();
   }
 }
@@ -995,7 +995,7 @@ bool CloseCurrentOrder(Signal &signal)
   int orderType = OrderType();
 
   RefreshRates();
-  double closePrice;
+  double closePrice = 0.0;
   if(orderType == OP_BUY) {
     closePrice = MarketInfo(symbol, MODE_BID);
   } else if(orderType == OP_SELL) {
@@ -1585,7 +1585,7 @@ double GetPositionSize(Signal &signal)
 // e.g. if we want to use up 70% maximum, we need 100%-70% = 30% remaining
   double minimumRemainingMargin = AccountFreeMargin() * (1 - marginBufferPercentage / 100.0);
   int orderType = (signal.type == "BUY") ? OP_BUY : OP_SELL;
-  double freeMarginRemaining;
+  double freeMarginRemaining = 1.0;
   while(positionSize >= minLot) {
     freeMarginRemaining = AccountFreeMarginCheck(symbol, orderType, positionSize);
     if (debugMode) {
