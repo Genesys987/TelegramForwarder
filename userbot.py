@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 # --- Perzisztens Group ID Számláló ---
 current_group_id = 1000
 
+
 @last_gid_lock
 def load_last_gid():  # Betöltés indításkor
     global current_group_id

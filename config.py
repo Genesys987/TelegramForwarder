@@ -2,9 +2,15 @@
 import hashlib
 import os
 import sys
+
 from dotenv import dotenv_values
 
-config = dotenv_values(".env") if len(sys.argv) <= 1 else dotenv_values(sys.argv[1])
+is_unittest = "unittest" in sys.modules.keys()
+config = (
+    dotenv_values(".env")
+    if len(sys.argv) <= 1 or is_unittest
+    else dotenv_values(sys.argv[1])
+)
 
 # Get the directory where config.py is located
 _basedir = os.path.dirname(os.path.abspath(__file__))

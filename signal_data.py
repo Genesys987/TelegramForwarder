@@ -60,25 +60,25 @@ class SignalData:
         """
         if self.symbol:
             return  # Symbol already set
-            
+
         # Check if any price value suggests GOLD/XAUUSD
         price_values = []
-        
+
         if self.entry is not None and self.entry > 0:
             price_values.append(self.entry)
-            
+
         if self.take_profits:
             price_values.extend([tp for tp in self.take_profits if tp > 0])
-            
+
         if self.stop_loss is not None and self.stop_loss > 0:
             price_values.append(self.stop_loss)
-            
+
         # If any price is in GOLD range (2000-5000), assume XAUUSD
         for price in price_values:
             if 2000 <= price <= 5000:
                 self.symbol = "XAUUSD"
                 return
-                
+
         # Default fallback if no symbol can be determined
         # Could be extended with other logic for different instruments
         pass
