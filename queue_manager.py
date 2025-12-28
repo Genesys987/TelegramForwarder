@@ -20,6 +20,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+
 @signal_archive_lock
 def _write_signal_archive(message: str) -> None:
     """
