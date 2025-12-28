@@ -667,8 +667,7 @@ void UpdateExistingOrdersSL(Signal &signal)
     if(MathAbs(currSL - signal.stopLoss) > SL_MODIFY_THRESHOLD) {
       double openP = OrderOpenPrice();
       double tp    = OrderTakeProfit();
-      datetime expiration = OrderExpiration();
-      bool ok = OrderModify(OrderTicket(), openP, signal.stopLoss, tp, expiration, clrBlue);
+      bool ok = OrderModify(OrderTicket(), openP, signal.stopLoss, tp, OrderExpiration(), clrBlue);
       if(ok)
         PrintLog(": Updated SL for ticket=" + IntegerToString(OrderTicket()) +
                  " from channel '" + signal.channelName + "' (" + DoubleToString(currSL, digits) +
@@ -903,9 +902,8 @@ bool SetCurrentOrderStopLoss(Signal &signal)
 
   if (slChanged || tpChanged) {
     double op = OrderOpenPrice();
-    double expiration = OrderExpiration();
 
-    if (OrderModify(OrderTicket(), op, normalizedNewSL, newTp, expiration, clrGold)) {
+    if (OrderModify(OrderTicket(), op, normalizedNewSL, newTp, OrderExpiration(), clrGold)) {
       string logMsg = "✅ " + operation + " success for ticket " + IntegerToString(OrderTicket()) +
                       " GID=" + IntegerToString(signal.groupId);
 
@@ -1264,9 +1262,8 @@ void ProcessDynamicTrailingStop()
     double currentSL = OrderStopLoss();
     double newSL = CalculateNewSL(tpHitLevel, currentSL, signal, info.channelName);
     if(MathAbs(currentSL - newSL) > SL_MODIFY_THRESHOLD) {
-      double expiration = OrderExpiration();
       bool modified = OrderModify(OrderTicket(), OrderOpenPrice(), newSL,
-                                  OrderTakeProfit(), expiration, clrOrange);
+                                  OrderTakeProfit(), OrderExpiration(), clrOrange);
       int digits = MarketInfo(OrderSymbol(), MODE_DIGITS);
       if(modified) {
         PrintLog(": Trailing SL updated for ticket:" + IntegerToString(OrderTicket()) +
