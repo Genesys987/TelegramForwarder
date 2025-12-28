@@ -3,7 +3,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.8.3"
+#property version "2.8.4"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -139,13 +139,13 @@ void OnInit()
 //+------------------------------------------------------------------+
 //| Expert deinitialization function                                 |
 //+------------------------------------------------------------------+
-void OnDeinit()
+void OnDeinit(const int reason)
 {
   if(debugMode)
-    PrintLog(": Deinitialized");
+    PrintLog(": Deinitialized, Reason: " + IntegerToString(reason));
 }
 
-datetime lastTime = 0;
+datetime lastTrailingScanTime = 0;
 
 /*
  * Only used for EA testing - Timer won't run in test mode
@@ -155,8 +155,8 @@ void OnTick()
   if (!IsTesting()) return;
   datetime currentTime = TimeCurrent();
 
-  if (currentTime - lastTime >= trailingScanPeriodSeconds) {
-    lastTime = currentTime;
+  if (currentTime - lastTrailingScanTime >= trailingScanPeriodSeconds) {
+    lastTrailingScanTime = currentTime;
     OnTimer();
   }
 }
@@ -667,7 +667,7 @@ void UpdateExistingOrdersSL(Signal &signal)
     if(MathAbs(currSL - signal.stopLoss) > SL_MODIFY_THRESHOLD) {
       double openP = OrderOpenPrice();
       double tp    = OrderTakeProfit();
-      bool ok = OrderModify(OrderTicket(), openP, signal.stopLoss, tp, 0, clrBlue);
+      bool ok = OrderModify(OrderTicket(), openP, signal.stopLoss, tp, OrderExpiration(), clrBlue);
       if(ok)
         PrintLog(": Updated SL for ticket=" + IntegerToString(OrderTicket()) +
                  " from channel '" + signal.channelName + "' (" + DoubleToString(currSL, digits) +
@@ -747,7 +747,7 @@ void SendOrders(Signal &signal)
 
 // Always use the original stop loss from signal
   double rawSL = NormalizeDouble(signal.stopLoss, digits);
- 
+
 // Apply minimum distance for SL if needed
   double minDist = MathMax(stopLevel * point, point);
   if(shouldBuy && price - rawSL < minDist)
@@ -805,8 +805,8 @@ void SendOrders(Signal &signal)
 
     if(ticket < 0) {
       PrintLog(": ❌ Failed to create order[" + IntegerToString(k) + "] - " +
-             "Error=" + IntegerToString(GetLastError()) + 
-             " (SL may be too close to entry price)");
+               "Error=" + IntegerToString(GetLastError()) +
+               " (SL may be too close to entry price)");
     }
 
     if(ticket > 0 && signal.isWarmup) {
@@ -903,7 +903,7 @@ bool SetCurrentOrderStopLoss(Signal &signal)
   if (slChanged || tpChanged) {
     double op = OrderOpenPrice();
 
-    if (OrderModify(OrderTicket(), op, normalizedNewSL, newTp, 0, clrGold)) {
+    if (OrderModify(OrderTicket(), op, normalizedNewSL, newTp, OrderExpiration(), clrGold)) {
       string logMsg = "✅ " + operation + " success for ticket " + IntegerToString(OrderTicket()) +
                       " GID=" + IntegerToString(signal.groupId);
 
@@ -993,7 +993,7 @@ bool CloseCurrentOrder(Signal &signal)
   int orderType = OrderType();
 
   RefreshRates();
-  double closePrice;
+  double closePrice = 0.0;
   if(orderType == OP_BUY) {
     closePrice = MarketInfo(symbol, MODE_BID);
   } else if(orderType == OP_SELL) {
@@ -1263,7 +1263,7 @@ void ProcessDynamicTrailingStop()
     double newSL = CalculateNewSL(tpHitLevel, currentSL, signal, info.channelName);
     if(MathAbs(currentSL - newSL) > SL_MODIFY_THRESHOLD) {
       bool modified = OrderModify(OrderTicket(), OrderOpenPrice(), newSL,
-                                  OrderTakeProfit(), 0, clrOrange);
+                                  OrderTakeProfit(), OrderExpiration(), clrOrange);
       int digits = MarketInfo(OrderSymbol(), MODE_DIGITS);
       if(modified) {
         PrintLog(": Trailing SL updated for ticket:" + IntegerToString(OrderTicket()) +
@@ -1582,7 +1582,7 @@ double GetPositionSize(Signal &signal)
 // e.g. if we want to use up 70% maximum, we need 100%-70% = 30% remaining
   double minimumRemainingMargin = AccountFreeMargin() * (1 - marginBufferPercentage / 100.0);
   int orderType = (signal.type == "BUY") ? OP_BUY : OP_SELL;
-  double freeMarginRemaining;
+  double freeMarginRemaining = 1.0;
   while(positionSize >= minLot) {
     freeMarginRemaining = AccountFreeMarginCheck(symbol, orderType, positionSize);
     if (debugMode) {
