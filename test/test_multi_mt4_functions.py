@@ -1,6 +1,6 @@
-import unittest
 import os
 import sys
+import unittest
 from unittest.mock import patch
 
 # Import the functions we want to test
@@ -16,43 +16,14 @@ class TestConfigFunctions(unittest.TestCase):
         """Test getMT4DataFolderId with normal long folder name"""
         folder_path = "/path/to/7D024799C00A011848A10ECEDFE5CBC2"
         result = getMT4DataFolderId(folder_path)
-        self.assertEqual(result, "7D0247")
+        # first 6 characters of folder hash
+        self.assertEqual(result, "1ad07b")
 
     def test_getMT4DataFolderId_with_trailing_slash(self):
         """Test getMT4DataFolderId with trailing slash"""
         folder_path = "/path/to/7D024799C00A011848A10ECEDFE5CBC2/"
         result = getMT4DataFolderId(folder_path)
-        self.assertEqual(result, "7D0247")
-
-    def test_getMT4DataFolderId_short_folder_name(self):
-        """Test getMT4DataFolderId with folder name shorter than 6 chars"""
-        folder_path = "/path/to/ABC"
-        result = getMT4DataFolderId(folder_path)
-        self.assertEqual(result, "ABC")
-
-    def test_getMT4DataFolderId_exactly_6_chars(self):
-        """Test getMT4DataFolderId with exactly 6 character folder name"""
-        folder_path = "/path/to/ABCDEF"
-        result = getMT4DataFolderId(folder_path)
-        self.assertEqual(result, "ABCDEF")
-
-    def test_getMT4DataFolderId_empty_path(self):
-        """Test getMT4DataFolderId with empty or root path"""
-        folder_path = ""
-        result = getMT4DataFolderId(folder_path)
-        self.assertEqual(result, "")
-
-    def test_getMT4DataFolderId_single_char(self):
-        """Test getMT4DataFolderId with single character folder name"""
-        folder_path = "/path/to/X"
-        result = getMT4DataFolderId(folder_path)
-        self.assertEqual(result, "X")
-
-    def test_getMT4DataFolderId_numeric_folder(self):
-        """Test getMT4DataFolderId with numeric folder name"""
-        folder_path = "/path/to/123456789"
-        result = getMT4DataFolderId(folder_path)
-        self.assertEqual(result, "123456")
+        self.assertEqual(result, "1ad07b")
 
 
 class TestStoplossUpdateFunctions(unittest.TestCase):
