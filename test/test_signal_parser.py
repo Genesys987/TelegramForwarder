@@ -417,9 +417,9 @@ class TestSignalParser(unittest.TestCase):
                 [4325.0, 4327.0, 4330.0, 4332.0, 4335.0, 4340.0, 4345.0, 4350.0],
                 4310.0,
             ),
-            # Invisible characters within the text
+            # Invisible characters within the text with Markdown characters
             (
-                "GOLD\u00a0BUY\u200b4323/4320\n\n4325\n4327\n4330\n4332\n4335\n4340\n4345\n4350\n\nSL 4310",
+                "**GOLD\u00a0BUY\u200b4323/4320\n\n4325\n4327\n4330\n4332\n4335\n4340\n4345\n4350\n\nSL 4310**",
                 "BUY",
                 "XAUUSD",
                 4323.0,
