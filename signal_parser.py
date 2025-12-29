@@ -21,7 +21,7 @@ def clean_invisible_chars(text: str) -> str:
     - Zero-width non-joiners (U+200C)
     - Zero-width joiners (U+200D)
     - Other invisible Unicode characters
-    - *_ markdown
+    - *_=+ markdown characters
 
     Args:
         text: Input text that may contain invisible characters
