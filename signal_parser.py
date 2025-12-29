@@ -56,8 +56,8 @@ def clean_invisible_chars(text: str) -> str:
 
         # Clean up multiple spaces that might have been introduced
         cleaned_line = re.sub(r" +", " ", cleaned_line)
-        # Remove markdown characters
-        cleaned_line = re.sub(r"[*_#=+]", "", cleaned_line)
+        # Remove markdown characters (but preserve '#' used in signal format)
+        cleaned_line = re.sub(r"[*_=+]", "", cleaned_line)
 
         cleaned_lines.append(cleaned_line)
 
