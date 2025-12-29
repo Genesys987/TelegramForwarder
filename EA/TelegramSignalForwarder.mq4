@@ -403,10 +403,11 @@ Signal ParseBuySellSignal(string &parts[], string line, bool isStored)
   }
 
 // Enforce maximum TP count limit (array size is 10)
-  if(signal.tpCount > MathMin(maxTpLevels, 10)) {
+  int allowedTpLevels = MathMin(maxTpLevels, 10);
+  if(signal.tpCount > allowedTpLevels) {
     if (isLive)
-      PrintLog(": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum " + IntegerToString(maxTpLevels) + ", truncating");
-    signal.tpCount = maxTpLevels;
+      PrintLog(": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum " + IntegerToString(allowedTpLevels) + ", truncating");
+    signal.tpCount = allowedTpLevels;
   }
 
 // Resize array to hold all TPs (up to maximum)
