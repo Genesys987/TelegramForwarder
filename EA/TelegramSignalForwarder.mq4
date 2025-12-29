@@ -3,7 +3,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.8.4"
+#property version "2.9.0"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -17,6 +17,7 @@ extern double accountRiskPercentage = 1.0; // Risk percentage per trade
 extern double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0.0 = entry, 1.0 = keep original SL
 extern double marginBufferPercentage             = 70.0;   // Amount of free margin to use maximum
 extern int warmupTimeoutSeconds = 120; // Time in seconds to keep warmup orders before auto-closing
+extern int maxTpLevels = 10; // Maximum TP level to consider, at most 10
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -402,10 +403,10 @@ Signal ParseBuySellSignal(string &parts[], string line, bool isStored)
   }
 
 // Enforce maximum TP count limit (array size is 10)
-  if(signal.tpCount > 10) {
+  if(signal.tpCount > MathMin(maxTpLevels, 10)) {
     if (isLive)
-      PrintLog(": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum 10, truncating");
-    signal.tpCount = 10;
+      PrintLog(": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum " + IntegerToString(maxTpLevels) + ", truncating");
+    signal.tpCount = maxTpLevels;
   }
 
 // Resize array to hold all TPs (up to maximum)
