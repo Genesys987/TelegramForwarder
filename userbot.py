@@ -1,32 +1,33 @@
-import re
 import json  # GID map perzisztenciához
-from datetime import datetime, timezone
-from telethon import TelegramClient, events
-import traceback
-import os
 import logging
-from file_locks import last_gid_lock, message_gid_map_lock
-from warmup_signals import generate_warmup_signal, is_warmup_message
-from signal_parser import clean_channel_name, parse_signal
-from queue_manager import add_signal_to_queue
-from stoploss_update import (
-    process_stoploss_reply,
-    process_signal,
-    process_stoploss_non_reply,
-    find_latest_group_id_for_channel,
-)
+import os
+import re
+import traceback
+from datetime import datetime, timezone
+
+from telethon import TelegramClient, events
+
 from config import (
-    API_ID,
     API_HASH,
+    API_ID,
+    ARCHIVE_CHANNEL,
     INVITE_LINKS,
     LAST_GID_FILE,
     MESSAGE_GID_MAP_FILE,
-    ARCHIVE_CHANNEL,
     NON_REPLY_SL_CHANNEL_ID,
     SESSION_NAME,
     WARMUP_SIGNAL_CHANNEL,
 )
-from signal_parser import SignalData
+from file_locks import last_gid_lock, message_gid_map_lock
+from queue_manager import add_signal_to_queue
+from signal_parser import SignalData, clean_channel_name, parse_signal
+from stoploss_update import (
+    find_latest_group_id_for_channel,
+    process_signal,
+    process_stoploss_non_reply,
+    process_stoploss_reply,
+)
+from warmup_signals import generate_warmup_signal, is_warmup_message
 
 logger = logging.getLogger(__name__)
 
@@ -324,6 +325,9 @@ def detect_signal_type(message_text, stoploss_regexp):
     return None
 
 
+GOLD_SHIFT_CHANNELS = ["BENS", "GOLD", "VIPE"]
+
+
 def populate_signal_metadata(
     signal_data: SignalData,
     message_date: datetime | None,
@@ -366,8 +370,12 @@ def populate_signal_metadata(
         signal_data.timestamp_utc = timestamp
 
     # For Art of Trading gold trades, add 1$ to the range
-    if signal_data.symbol == "XAUUSD" and signal_data.entry is not None:
-        logger.info("Shifting AOT Gold signal by 1$")
+    if (
+        signal_data.symbol == "XAUUSD"
+        and signal_data.entry is not None
+        and signal_data.channel_name in GOLD_SHIFT_CHANNELS
+    ):
+        logger.info("Shifting Gold signal by 1$")
         signal_data.entry = (
             signal_data.entry + 1
             if signal_data.signal_type == "BUY"
