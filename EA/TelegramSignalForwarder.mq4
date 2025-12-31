@@ -3,7 +3,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.9.0"
+#property version "2.10.0"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -12,12 +12,11 @@ extern bool   debugMode                = true;  // Enable detailed logging
 extern int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC in minutes (e.g., UTC+2 = 120)
 extern int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
 extern string symbolPostfix            = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
-extern double fallbackLotSize             = 0.02;  // Default lot size for FX orders
 extern double accountRiskPercentage = 1.0; // Risk percentage per trade
 extern double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0.0 = entry, 1.0 = keep original SL
 extern double marginBufferPercentage             = 70.0;   // Amount of free margin to use maximum
-extern int warmupTimeoutSeconds = 120; // Time in seconds to keep warmup orders before auto-closing
-extern int maxTpLevels = 10; // Maximum TP level to consider, at most 10
+extern int    warmupTimeoutSeconds = 120; // Time in seconds to keep warmup orders before auto-closing
+extern int    maxTpLevels = 10; // Maximum TP level to consider, at most 10
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -41,6 +40,7 @@ struct Signal {
   string             symbol;
   double             entry;
   double             tpLevels[10];
+  double             lotSizes[10];
   int                tpCount;
   double             stopLoss;
   int                groupId;
@@ -56,6 +56,7 @@ struct Signal {
     symbol       = "";
     entry        = 0.0;
     ArrayInitialize(tpLevels, 0.0);
+    ArrayInitialize(lotSizes, 0.0);
     tpCount      = 0;
     stopLoss     = 0.0;
     groupId      = 0;
@@ -118,7 +119,7 @@ bool    IsValidDouble(string s);
 string  CleanChannelName(string channelName);
 string  FormatMT4Comment(int groupId, string channelName, int tpLevel);
 int     GetMagic(string channelName);
-double  GetPositionSize(Signal &signal);
+void    SetSignalLotSizes(Signal &signal);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -773,10 +774,15 @@ void SendOrders(Signal &signal)
            " TP Count=" + IntegerToString(signal.tpCount));
 
   color cols[6] = { clrBlue, clrGreen, clrRed, clrYellow, clrMagenta, clrCyan };
-  double lotSize = GetPositionSize(signal);
+  SetSignalLotSizes(signal);
 
 // Create orders for each TP level
   for(int k=0; k < signal.tpCount; k++) {
+    double lotSize = signal.lotSizes[k];
+    if(lotSize <= 0) {
+      PrintLog("TP levels from " + IntegerToString(k + 1) + " to " + IntegerToString(signal.tpCount) + " have been dropped to limit risk");
+      break;
+    }
     // for market orders we want to get the correct current price
     // to avoid off-quotes errors
     RefreshRates();
@@ -1549,13 +1555,13 @@ void SetWarmupLevels(Signal &signal)
 }
 
 //+------------------------------------------------------------------+
-//| getPositionSize: Calculate position size based on risk management|
+//| SetSignalLotSizes: Calculate position size based on risk management|
 //+------------------------------------------------------------------+
-double GetPositionSize(Signal &signal)
+void SetSignalLotSizes(Signal &signal)
 {
   if(!signal.isValid || signal.tpCount <= 0) {
     PrintLog(": Invalid signal for position sizing");
-    return fallbackLotSize;
+    return;
   }
 
   string symbol = signal.symbol;
@@ -1577,34 +1583,43 @@ double GetPositionSize(Signal &signal)
   double totalLots = riskAmount / riskValuePerLot;
 
 // Round down to the nearest valid lot step
-  double positionSize = MathFloor(totalLots / lotStep) * lotStep;
-  double originalPositionSize = positionSize;
+  double adjustedPositionSize = MathFloor(totalLots / lotStep) * lotStep;
+  double originalPositionSize = adjustedPositionSize;
 
 // decrease position size until it fits existing margin
 // e.g. if we want to use up 70% maximum, we need 100%-70% = 30% remaining
   double minimumRemainingMargin = AccountFreeMargin() * (1 - marginBufferPercentage / 100.0);
   int orderType = (signal.type == "BUY") ? OP_BUY : OP_SELL;
   double freeMarginRemaining = 1.0;
-  while(positionSize >= minLot) {
-    freeMarginRemaining = AccountFreeMarginCheck(symbol, orderType, positionSize);
+  while(adjustedPositionSize >= minLot) {
+    freeMarginRemaining = AccountFreeMarginCheck(symbol, orderType, adjustedPositionSize);
     if (debugMode) {
-      PrintLog(": Checking margin for " + symbol + ", lot size " + DoubleToString(positionSize, 2) + " - Free remains: " + DoubleToString(freeMarginRemaining, 2) + ", Needed free: " + DoubleToString(minimumRemainingMargin, 2));
+      PrintLog(": Checking margin for " + symbol + ", lot size " + DoubleToString(adjustedPositionSize, 2) + " - Free remains: " + DoubleToString(freeMarginRemaining, 2) + ", Needed free: " + DoubleToString(minimumRemainingMargin, 2));
     }
     if(freeMarginRemaining >= 0 && freeMarginRemaining >= minimumRemainingMargin && GetLastError() == 0)
       break;
-    positionSize -= lotStep;
-    positionSize = MathFloor(positionSize / lotStep) * lotStep;
+    adjustedPositionSize -= lotStep;
+    adjustedPositionSize = MathFloor(adjustedPositionSize / lotStep) * lotStep;
   }
 
-  if(positionSize != originalPositionSize)
-    PrintLog(": Adjusted position size for " + symbol + " from " + DoubleToString(originalPositionSize, 2) + " to " + DoubleToString(positionSize, 2));
+  if(adjustedPositionSize != originalPositionSize)
+    PrintLog(": Adjusted position size for " + symbol + " from " + DoubleToString(originalPositionSize, 2) + " to " + DoubleToString(adjustedPositionSize, 2));
 
 // Divide across TP levels
-  positionSize = positionSize / signal.tpCount;
-  positionSize = MathFloor(positionSize / lotStep) * lotStep;
+  double tpPositionSize = adjustedPositionSize / signal.tpCount;
+  tpPositionSize = MathFloor(tpPositionSize / lotStep) * lotStep;
 
 // Ensure lot size is within allowed range
-  positionSize = MathMax(minLot, MathMin(maxLot, positionSize));
+  tpPositionSize = MathMax(minLot, MathMin(maxLot, tpPositionSize));
+
+  double totalPositionSize = 0;
+  for(int i = 0; i < signal.tpCount; i++) {
+    if (totalPositionSize + tpPositionSize > adjustedPositionSize) {
+      break;
+    }
+    signal.lotSizes[i] = tpPositionSize;
+    totalPositionSize += tpPositionSize;
+  }
 
   PrintLog(": Position sizing: " + symbol +
            " FreeMargin= " + DoubleToString(AccountFreeMargin(), 2) +
@@ -1612,9 +1627,8 @@ double GetPositionSize(Signal &signal)
            " RiskAmount=" + DoubleToString(riskAmount, 2) +
            " RiskPerLot=" + DoubleToString(riskValuePerLot, 4) +
            " TotalLots=" + DoubleToString(totalLots, 2) +
-           " PerTP=" + DoubleToString(positionSize, 2) +
+           " MarginAdjustedLots=" + DoubleToString(totalPositionSize, 2) +
+           " PerTP=" + DoubleToString(tpPositionSize, 2) +
            " TPCount=" + IntegerToString(signal.tpCount));
-
-  return positionSize;
 }
 //+------------------------------------------------------------------+
