@@ -12,12 +12,11 @@ extern bool   debugMode                = true;  // Enable detailed logging
 extern int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC in minutes (e.g., UTC+2 = 120)
 extern int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
 extern string symbolPostfix            = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
-extern double fallbackLotSize             = 0.02;  // Default lot size for FX orders
 extern double accountRiskPercentage = 1.0; // Risk percentage per trade
 extern double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0.0 = entry, 1.0 = keep original SL
 extern double marginBufferPercentage             = 70.0;   // Amount of free margin to use maximum
-extern int warmupTimeoutSeconds = 120; // Time in seconds to keep warmup orders before auto-closing
-extern int maxTpLevels = 10; // Maximum TP level to consider, at most 10
+extern int    warmupTimeoutSeconds = 120; // Time in seconds to keep warmup orders before auto-closing
+extern int    maxTpLevels = 10; // Maximum TP level to consider, at most 10
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
