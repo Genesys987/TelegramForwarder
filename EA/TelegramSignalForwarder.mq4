@@ -3,7 +3,7 @@
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.9.0"
+#property version "2.10.0"
 
 //+------------------------------------------------------------------+
 //|--- Extern Parameters (EA Configuration)                         |
@@ -118,7 +118,7 @@ bool    IsValidDouble(string s);
 string  CleanChannelName(string channelName);
 string  FormatMT4Comment(int groupId, string channelName, int tpLevel);
 int     GetMagic(string channelName);
-double  GetPositionSize(Signal &signal);
+double[]   GetPositionSizes(Signal &signal);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -773,10 +773,15 @@ void SendOrders(Signal &signal)
            " TP Count=" + IntegerToString(signal.tpCount));
 
   color cols[6] = { clrBlue, clrGreen, clrRed, clrYellow, clrMagenta, clrCyan };
-  double lotSize = GetPositionSize(signal);
+  double[] lotSizes = GetPositionSizes(signal);
 
 // Create orders for each TP level
   for(int k=0; k < signal.tpCount; k++) {
+    double lotSize = lotSizes[k];
+    if(lotSize <= 0) {
+        PrintLog("TP level " + IntegerToString(k + 1) + " has been dropped to limit risk");
+        break;
+    }
     // for market orders we want to get the correct current price
     // to avoid off-quotes errors
     RefreshRates();
@@ -1549,9 +1554,9 @@ void SetWarmupLevels(Signal &signal)
 }
 
 //+------------------------------------------------------------------+
-//| getPositionSize: Calculate position size based on risk management|
+//| GetPositionSizes: Calculate position size based on risk management|
 //+------------------------------------------------------------------+
-double GetPositionSize(Signal &signal)
+double[] GetPositionSizes(Signal &signal)
 {
   if(!signal.isValid || signal.tpCount <= 0) {
     PrintLog(": Invalid signal for position sizing");
@@ -1600,11 +1605,22 @@ double GetPositionSize(Signal &signal)
     PrintLog(": Adjusted position size for " + symbol + " from " + DoubleToString(originalPositionSize, 2) + " to " + DoubleToString(positionSize, 2));
 
 // Divide across TP levels
-  positionSize = positionSize / signal.tpCount;
-  positionSize = MathFloor(positionSize / lotStep) * lotStep;
+  double tpPositionSize = positionSize / signal.tpCount;
+  tpPositionSize = MathFloor(tpPositionSize / lotStep) * lotStep;
 
 // Ensure lot size is within allowed range
-  positionSize = MathMax(minLot, MathMin(maxLot, positionSize));
+  tpPositionSize = MathMax(minLot, MathMin(maxLot, positionSize));
+
+  double[] tpPositionSizes = new double[signal.tpCount];
+  double totalPositionSize = 0;
+  for(int i = 0; i < signal.tpCount; i++) {
+    double currentTpPositionSize = tpPositionSize;
+    if (totalPositionSize + currentTpPositionSize > positionSize) {
+      break;
+    }
+    tpPositionSizes[i] = tpPositionSize;
+    totalPositionSize += tpPositionSizes[i];
+  }
 
   PrintLog(": Position sizing: " + symbol +
            " FreeMargin= " + DoubleToString(AccountFreeMargin(), 2) +
