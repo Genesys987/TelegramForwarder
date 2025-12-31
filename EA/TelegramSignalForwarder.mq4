@@ -1614,8 +1614,7 @@ void SetSignalLotSizes(Signal &signal)
 
   double totalPositionSize = 0;
   for(int i = 0; i < signal.tpCount; i++) {
-    double currentTpPositionSize = tpPositionSize;
-    if (totalPositionSize + currentTpPositionSize > adjustedPositionSize) {
+    if (totalPositionSize + tpPositionSize > adjustedPositionSize) {
       break;
     }
     signal.lotSizes[i] = tpPositionSize;
