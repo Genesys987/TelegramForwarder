@@ -2,21 +2,23 @@
 //|                                     TelegramSignalForwarder.mq4  |
 //|                           Copyright 2025, OpenAI & User Request  |
 //+------------------------------------------------------------------+
+// Formatting style: K&R, 2 spaces
 #property strict
-#property version "2.10.0"
+#property version "2.11.0"
 
 //+------------------------------------------------------------------+
-//|--- Extern Parameters (EA Configuration)                         |
+//|--- Input Parameters (EA Configuration)                         |
 //+------------------------------------------------------------------+
-extern bool   debugMode                = true;  // Enable detailed logging
-extern int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC in minutes (e.g., UTC+2 = 120)
-extern int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
-extern string symbolPostfix            = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
-extern double accountRiskPercentage = 1.0; // Risk percentage per trade
-extern double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0.0 = entry, 1.0 = keep original SL
-extern double marginBufferPercentage             = 70.0;   // Amount of free margin to use maximum
-extern int    warmupTimeoutSeconds = 120; // Time in seconds to keep warmup orders before auto-closing
-extern int    maxTpLevels = 10; // Maximum TP level to consider, at most 10
+input bool   debugMode                = true;  // Enable detailed logging
+input int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC in minutes (e.g., UTC+2 = 120)
+input int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
+input string symbolPostfix            = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
+input double accountRiskPercentage = 1.0; // Risk percentage per trade
+input double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0.0 = entry, 1.0 = keep original SL
+input double marginBufferPercentage             = 70.0;   // Amount of free margin to use maximum
+input int    warmupTimeoutSeconds = 120; // Time in seconds to keep warmup orders before auto-closing
+input int    maxTpLevels = 10; // Maximum TP level to consider, at most 10
+input bool   weightedLotSizes = false; // Enable weighted lot sizes (TP1 gets the biggest lot size etc.)
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -27,6 +29,8 @@ static string gTempFile       = "processing.txt";     // Temp file to avoid re-r
 static string gSignalFile               = "signals.txt";       // Incoming signal file
 
 static int slippage = 20;  // maximum allowed slippage during order creation/modification
+static double tpAlpha = 0.7; // exponential decay factor for TP lot sizes
+
 
 int trailingScanPeriodSeconds = 2;
 
@@ -49,7 +53,7 @@ struct Signal {
   bool               isWarmup;
   string             signalLine;
 
-                     Signal()
+  Signal()
   {
     timestamp    = 0;
     type         = "";
@@ -76,7 +80,7 @@ struct OrderCommentInfo {
   int                tpLevel;
   bool               isValid;
 
-                     OrderCommentInfo()
+  OrderCommentInfo()
   {
     groupId      = 0;
     channelName  = "";
@@ -1605,21 +1609,25 @@ void SetSignalLotSizes(Signal &signal)
   if(adjustedPositionSize != originalPositionSize)
     PrintLog(": Adjusted position size for " + symbol + " from " + DoubleToString(originalPositionSize, 2) + " to " + DoubleToString(adjustedPositionSize, 2));
 
-// Divide across TP levels
-  double tpPositionSize = adjustedPositionSize / signal.tpCount;
-  tpPositionSize = MathFloor(tpPositionSize / lotStep) * lotStep;
 
-// Ensure lot size is within allowed range
-  tpPositionSize = MathMax(minLot, MathMin(maxLot, tpPositionSize));
-
-  double totalPositionSize = 0;
+  string lotSizesLog = "[";
+  double allocatedPositionSize = 0.0;
   for(int i = 0; i < signal.tpCount; i++) {
-    if (totalPositionSize + tpPositionSize > adjustedPositionSize) {
+    double nextLotSize = weightedLotSizes ? (adjustedPositionSize * MathPow(tpAlpha, i)) : (adjustedPositionSize / signal.tpCount);
+    nextLotSize = MathMax(minLot, MathMin(maxLot, nextLotSize));
+    nextLotSize = MathFloor(nextLotSize / lotStep) * lotStep;
+    if (i != 0) lotSizesLog += ", ";
+    if (allocatedPositionSize + nextLotSize > adjustedPositionSize) {
+      double remainder = adjustedPositionSize - allocatedPositionSize;
+      signal.lotSizes[i] = remainder;
+      lotSizesLog += DoubleToString(remainder, 2);
       break;
     }
-    signal.lotSizes[i] = tpPositionSize;
-    totalPositionSize += tpPositionSize;
+    signal.lotSizes[i] = nextLotSize;
+    lotSizesLog += DoubleToString(nextLotSize, 2);
+    allocatedPositionSize += nextLotSize;
   }
+  lotSizesLog += "]";
 
   PrintLog(": Position sizing: " + symbol +
            " FreeMargin= " + DoubleToString(AccountFreeMargin(), 2) +
@@ -1627,8 +1635,8 @@ void SetSignalLotSizes(Signal &signal)
            " RiskAmount=" + DoubleToString(riskAmount, 2) +
            " RiskPerLot=" + DoubleToString(riskValuePerLot, 4) +
            " TotalLots=" + DoubleToString(totalLots, 2) +
-           " MarginAdjustedLots=" + DoubleToString(totalPositionSize, 2) +
-           " PerTP=" + DoubleToString(tpPositionSize, 2) +
+           " MarginAdjustedLots=" + DoubleToString(allocatedPositionSize, 2) +
+           " LotSizes=" + lotSizesLog +
            " TPCount=" + IntegerToString(signal.tpCount));
 }
 //+------------------------------------------------------------------+
