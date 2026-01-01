@@ -23,12 +23,12 @@ input bool   weightedLotSizes = false; // Enable weighted lot sizes (TP1 gets th
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
 //+------------------------------------------------------------------+
-#define SL_MODIFY_THRESHOLD   0.00001            // Minimum SL diff to apply
+const double SL_MODIFY_THRESHOLD = 0.00001;            // Minimum SL diff to apply
 
-static string gTempFile       = "processing.txt";     // Temp file to avoid re-read
-static string gSignalFile               = "signals.txt";       // Incoming signal file
+const string gTempFile       = "processing.txt";     // Temp file to avoid re-read
+const string gSignalFile     = "signals.txt";       // Incoming signal file
 
-static int slippage = 20;  // maximum allowed slippage during order creation/modification
+const int SLIPPAGE = 20;  // maximum allowed slippage during order creation/modification
 // tpAlpha controls the exponential decay used when computing weighted lot sizes
 // across TP levels (when `weightedLotSizes` is enabled). The lot assigned to each
 // successive TP level is scaled roughly by tpAlpha^levelIndex, so:
@@ -36,10 +36,9 @@ static int slippage = 20;  // maximum allowed slippage during order creation/mod
 //   - Smaller values (e.g., 0.5) make the decay steeper (TP1 is much larger than later TPs).
 // The default 0.7 was chosen empirically to give TP1 a clearly larger share of the position
 // while still leaving meaningful lot sizes for higher TP levels in typical multi-TP setups.
-static double tpAlpha = 0.7;
+const double TP_ALPHA = 0.7;
 
-
-int trailingScanPeriodSeconds = 2;
+const int TRAILING_SCAN_PERIOD_SECONDS = 2;
 
 /*
  * Represents a signal coming from the forwarder.
@@ -146,7 +145,7 @@ void OnInit()
     PrintLog(": Initialized");
 
 // Use event timer for events
-  EventSetTimer(trailingScanPeriodSeconds);
+  EventSetTimer(TRAILING_SCAN_PERIOD_SECONDS);
 }
 
 //+------------------------------------------------------------------+
@@ -168,14 +167,14 @@ void OnTick()
   if (!IsTesting()) return;
   datetime currentTime = TimeCurrent();
 
-  if (currentTime - lastTrailingScanTime >= trailingScanPeriodSeconds) {
+  if (currentTime - lastTrailingScanTime >= TRAILING_SCAN_PERIOD_SECONDS) {
     lastTrailingScanTime = currentTime;
     OnTimer();
   }
 }
 
 //+------------------------------------------------------------------+
-//| Timer handler (trailingScanPeriodSeconds)                      |
+//| Timer handler (TRAILING_SCAN_PERIOD_SECONDS)                      |
 //+------------------------------------------------------------------+
 void OnTimer()
 {
@@ -819,7 +818,7 @@ void SendOrders(Signal &signal)
 
     int colorIndex = k % 6;
 
-    int ticket = OrderSend(signal.symbol, orderType, lotSize, price, slippage,
+    int ticket = OrderSend(signal.symbol, orderType, lotSize, price, SLIPPAGE,
                            rawSL, signal.tpLevels[k], comment, magicNumber, expiration, cols[colorIndex]);
 
     if(ticket < 0) {
@@ -1022,7 +1021,7 @@ bool CloseCurrentOrder(Signal &signal)
   bool isPendingOrder = orderType == OP_BUYLIMIT || orderType == OP_SELLLIMIT;
   if(isPendingOrder ?
       OrderDelete(ticket) :
-      OrderClose(ticket, lots, closePrice, slippage, clrRed)) {
+      OrderClose(ticket, lots, closePrice, SLIPPAGE, clrRed)) {
     PrintLog(": ✅ Closed order ticket " + IntegerToString(ticket) +
              " GID=" + IntegerToString(signal.groupId) +
              " Symbol=" + symbol +
@@ -1619,7 +1618,7 @@ void SetSignalLotSizes(Signal &signal)
   double weights[10];
   double weightSum = 0.0;
   for(int i = 0; i < signal.tpCount; i++) {
-    weights[i] = MathPow(tpAlpha, i);
+    weights[i] = MathPow(TP_ALPHA, i);
     weightSum += weights[i];
   }
 
