@@ -29,7 +29,14 @@ static string gTempFile       = "processing.txt";     // Temp file to avoid re-r
 static string gSignalFile               = "signals.txt";       // Incoming signal file
 
 static int slippage = 20;  // maximum allowed slippage during order creation/modification
-static double tpAlpha = 0.7; // exponential decay factor for TP lot sizes
+// tpAlpha controls the exponential decay used when computing weighted lot sizes
+// across TP levels (when `weightedLotSizes` is enabled). The lot assigned to each
+// successive TP level is scaled roughly by tpAlpha^levelIndex, so:
+//   - Values closer to 1.0 produce a flatter distribution (later TPs keep more size).
+//   - Smaller values (e.g., 0.5) make the decay steeper (TP1 is much larger than later TPs).
+// The default 0.7 was chosen empirically to give TP1 a clearly larger share of the position
+// while still leaving meaningful lot sizes for higher TP levels in typical multi-TP setups.
+static double tpAlpha = 0.7;
 
 
 int trailingScanPeriodSeconds = 2;
