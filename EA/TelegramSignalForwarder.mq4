@@ -1631,8 +1631,11 @@ void SetSignalLotSizes(Signal &signal)
     if (i != 0) lotSizesLog += ", ";
     if (allocatedPositionSize + nextLotSize > adjustedPositionSize) {
       double remainder = adjustedPositionSize - allocatedPositionSize;
-      signal.lotSizes[i] = remainder;
-      lotSizesLog += DoubleToString(remainder, 2);
+      remainder = MathFloor(remainder / lotStep) * lotStep;
+      if (remainder > minLot) {
+        signal.lotSizes[i] = remainder;
+        lotSizesLog += DoubleToString(remainder, 2);
+      }
       break;
     }
     signal.lotSizes[i] = nextLotSize;
