@@ -53,7 +53,7 @@ struct Signal {
   bool               isWarmup;
   string             signalLine;
 
-  Signal()
+                     Signal()
   {
     timestamp    = 0;
     type         = "";
@@ -80,7 +80,7 @@ struct OrderCommentInfo {
   int                tpLevel;
   bool               isValid;
 
-  OrderCommentInfo()
+                     OrderCommentInfo()
   {
     groupId      = 0;
     channelName  = "";
@@ -1609,11 +1609,17 @@ void SetSignalLotSizes(Signal &signal)
   if(adjustedPositionSize != originalPositionSize)
     PrintLog(": Adjusted position size for " + symbol + " from " + DoubleToString(originalPositionSize, 2) + " to " + DoubleToString(adjustedPositionSize, 2));
 
+  double weights[10];
+  double weightSum = 0.0;
+  for(int i = 0; i < signal.tpCount; i++) {
+    weights[i] = MathPow(tpAlpha, i);
+    weightSum += weights[i];
+  }
 
   string lotSizesLog = "[";
   double allocatedPositionSize = 0.0;
   for(int i = 0; i < signal.tpCount; i++) {
-    double nextLotSize = weightedLotSizes ? (adjustedPositionSize * MathPow(tpAlpha, i)) : (adjustedPositionSize / signal.tpCount);
+    double nextLotSize = weightedLotSizes ? (adjustedPositionSize * (weights[i] / weightSum)) : (adjustedPositionSize / signal.tpCount);
     nextLotSize = MathMax(minLot, MathMin(maxLot, nextLotSize));
     nextLotSize = MathFloor(nextLotSize / lotStep) * lotStep;
     if (i != 0) lotSizesLog += ", ";
