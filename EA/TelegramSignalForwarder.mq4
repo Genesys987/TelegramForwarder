@@ -18,7 +18,7 @@ input double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0
 input double marginBufferPercentage             = 70.0;   // Amount of free margin to use maximum
 input int    warmupTimeoutSeconds = 120; // Time in seconds to keep warmup orders before auto-closing
 input int    maxTpLevels = 10; // Maximum TP level to consider, at most 10
-input bool   weightedLotSizes = false; // Enable weighted lot sizes (TP1 gets the biggest lot size etc.)
+input double lotSizeFactor = 1.0; // 1.0 = same lots, ~0.7 = exponential
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -29,14 +29,6 @@ const string gTempFile       = "processing.txt";     // Temp file to avoid re-re
 const string gSignalFile     = "signals.txt";       // Incoming signal file
 
 const int SLIPPAGE = 20;  // maximum allowed slippage during order creation/modification
-// tpAlpha controls the exponential decay used when computing weighted lot sizes
-// across TP levels (when `weightedLotSizes` is enabled). The lot assigned to each
-// successive TP level is scaled roughly by tpAlpha^levelIndex, so:
-//   - Values closer to 1.0 produce a flatter distribution (later TPs keep more size).
-//   - Smaller values (e.g., 0.5) make the decay steeper (TP1 is much larger than later TPs).
-// The default 0.7 was chosen empirically to give TP1 a clearly larger share of the position
-// while still leaving meaningful lot sizes for higher TP levels in typical multi-TP setups.
-const double TP_ALPHA = 0.7;
 
 const int TRAILING_SCAN_PERIOD_SECONDS = 2;
 
@@ -1618,14 +1610,14 @@ void SetSignalLotSizes(Signal &signal)
   double weights[10];
   double weightSum = 0.0;
   for(int i = 0; i < signal.tpCount; i++) {
-    weights[i] = MathPow(TP_ALPHA, i);
+    weights[i] = MathPow(lotSizeFactor, i);
     weightSum += weights[i];
   }
 
   string lotSizesLog = "[";
   double allocatedPositionSize = 0.0;
   for(int i = 0; i < signal.tpCount; i++) {
-    double nextLotSize = weightedLotSizes ? (adjustedPositionSize * (weights[i] / weightSum)) : (adjustedPositionSize / signal.tpCount);
+    double nextLotSize = adjustedPositionSize * (weights[i] / weightSum);
     nextLotSize = MathMax(minLot, MathMin(maxLot, nextLotSize));
     nextLotSize = MathFloor(nextLotSize / lotStep) * lotStep;
     if (i != 0) lotSizesLog += ", ";
