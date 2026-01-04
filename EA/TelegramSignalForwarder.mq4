@@ -18,7 +18,7 @@ input double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0
 input double marginBufferPercentage             = 70.0;   // Amount of free margin to use maximum
 input int    warmupTimeoutSeconds = 120; // Time in seconds to keep warmup orders before auto-closing
 input int    maxTpLevels = 10; // Maximum TP level to consider, at most 10
-input double lotSizeFactor = 1.0; // 1.0 = same lots, ~0.7 = exponential
+input double lotSizeFactor = 1.0; // TP Weighting, 1.0 = same lots, ~0.7 = exponential
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
