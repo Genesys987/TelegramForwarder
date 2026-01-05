@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 // Formatting style: K&R, 2 spaces
 #property strict
-#property version "2.11.1"
+#property version "2.12.0"
 
 //+------------------------------------------------------------------+
 //|--- Input Parameters (EA Configuration)                         |
@@ -18,7 +18,8 @@ input double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0
 input double marginBufferPercentage             = 70.0;   // Amount of free margin to use maximum
 input int    warmupTimeoutSeconds = 120; // Time in seconds to keep warmup orders before auto-closing
 input int    maxTpLevels = 10; // Maximum TP level to consider, at most 10
-input double lotSizeFactor = 1.0; // TP Weighting, 1.0 = same lots, ~0.7 = exponential
+input string lotSizeFactorConfig = ""; // Format: "channel1:factor1,channel2:factor2"
+input double defaultLotSizeFactor = 1.0; // Default TP Weighting, 1.0 = same lots, ~0.7 = exponential
 input int    limitOrderExpirationMinutes = 30; // Limit order expiration in minutes
 
 //+------------------------------------------------------------------+
@@ -122,6 +123,7 @@ bool    IsValidDouble(string s);
 string  CleanChannelName(string channelName);
 string  FormatMT4Comment(int groupId, string channelName, int tpLevel);
 int     GetMagic(string channelName);
+double  GetLotSizeFactorForChannel(string channelName);
 void    SetSignalLotSizes(Signal &signal);
 
 //+------------------------------------------------------------------+
@@ -1559,6 +1561,42 @@ void SetWarmupLevels(Signal &signal)
 //+------------------------------------------------------------------+
 //| SetSignalLotSizes: Calculate position size based on risk management|
 //+------------------------------------------------------------------+
+double GetLotSizeFactorForChannel(string channelName)
+{
+// If config string is empty, return default
+  if(StringLen(lotSizeFactorConfig) == 0) {
+    return defaultLotSizeFactor;
+  }
+
+// Parse the configuration string
+// Format: "channel1:factor1,channel2:factor2,..."
+  string pairs[];
+  int pairCount = StringSplit(lotSizeFactorConfig, ',', pairs);
+
+  for(int i = 0; i < pairCount; i++) {
+    string keyValue[];
+    if(StringSplit(pairs[i], ':', keyValue) == 2) {
+      string configChannel = StringTrimLeft(StringTrimRight(keyValue[0]));
+      if(configChannel == channelName) {
+        double factor = StringToDouble(StringTrimLeft(StringTrimRight(keyValue[1])));
+        if(debugMode) {
+          PrintLog(": Found lot size factor " + DoubleToString(factor, 2) + " for channel '" + channelName + "'");
+        }
+        return factor;
+      }
+    }
+  }
+
+// If channel not found in config, return default
+  if(debugMode) {
+    PrintLog(": Using default lot size factor " + DoubleToString(defaultLotSizeFactor, 2) + " for channel '" + channelName + "'");
+  }
+  return defaultLotSizeFactor;
+}
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 void SetSignalLotSizes(Signal &signal)
 {
   if(!signal.isValid || signal.tpCount <= 0) {
@@ -1609,8 +1647,9 @@ void SetSignalLotSizes(Signal &signal)
 
   double weights[10];
   double weightSum = 0.0;
+  double channelLotSizeFactor = GetLotSizeFactorForChannel(signal.channelName);
   for(int i = 0; i < signal.tpCount; i++) {
-    weights[i] = MathPow(lotSizeFactor, i);
+    weights[i] = MathPow(channelLotSizeFactor, i);
     weightSum += weights[i];
   }
 
