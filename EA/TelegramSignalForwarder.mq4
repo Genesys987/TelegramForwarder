@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 // Formatting style: K&R, 2 spaces
 #property strict
-#property version "2.12.0"
+#property version "2.12.1"
 
 //+------------------------------------------------------------------+
 //|--- Input Parameters (EA Configuration)                         |
@@ -1217,6 +1217,10 @@ void ProcessDynamicTrailingStop()
 // Iterate through all open orders
   for(int o = 0; o < OrdersTotal(); o++) {
     if(!OrderSelect(o, SELECT_BY_POS, MODE_TRADES))
+      continue;
+
+    // Only consider buy & sell orders
+    if(OrderType() != OP_BUY && OrderType() != OP_SELL)
       continue;
 
     // Parse order comment to get GID and channel name
