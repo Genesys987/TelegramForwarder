@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 // Formatting style: K&R, 2 spaces
 #property strict
-#property version "2.11.0"
+#property version "2.11.1"
 
 //+------------------------------------------------------------------+
 //|--- Input Parameters (EA Configuration)                         |
@@ -19,6 +19,7 @@ input double marginBufferPercentage             = 70.0;   // Amount of free marg
 input int    warmupTimeoutSeconds = 120; // Time in seconds to keep warmup orders before auto-closing
 input int    maxTpLevels = 10; // Maximum TP level to consider, at most 10
 input double lotSizeFactor = 1.0; // TP Weighting, 1.0 = same lots, ~0.7 = exponential
+input int    limitOrderExpirationMinutes = 30; // Limit order expiration in minutes
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -691,7 +692,7 @@ void UpdateExistingOrdersSL(Signal &signal)
 }
 
 //+------------------------------------------------------------------+
-//| SendOrders: Place up to four market orders with SL & TP        |
+//| SendOrders: Place market orders with SL & TP        |
 //+------------------------------------------------------------------+
 void SendOrders(Signal &signal)
 {
@@ -795,8 +796,7 @@ void SendOrders(Signal &signal)
     int orderType = shouldBuy ? (shouldUseLimitOrder ? OP_BUYLIMIT : OP_BUY) : (shouldUseLimitOrder ? OP_SELLLIMIT : OP_SELL);
     string comment = FormatMT4Comment(signal.groupId, signal.channelName, k + 1);
     int magicNumber = GetMagic(signal.channelName);
-    int EXPIRATION_MINUTES = 15;
-    datetime expiration = shouldUseLimitOrder ? (TimeCurrent() + EXPIRATION_MINUTES * 60) : 0;
+    datetime expiration = shouldUseLimitOrder ? (TimeCurrent() + limitOrderExpirationMinutes * 60) : 0;
     PrintLog(": Order[" + IntegerToString(k) + "] parameters: " +
              "Symbol=" + signal.symbol +
              " Type=" + IntegerToString(orderType) +
