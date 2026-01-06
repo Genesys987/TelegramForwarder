@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 // Formatting style: K&R, 2 spaces
 #property strict
-#property version "2.12.1"
+#property version "2.12.2"
 
 //+------------------------------------------------------------------+
 //|--- Input Parameters (EA Configuration)                         |
@@ -18,9 +18,10 @@ input double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0
 input double marginBufferPercentage             = 70.0;   // Amount of free margin to use maximum
 input int    warmupTimeoutSeconds = 120; // Time in seconds to keep warmup orders before auto-closing
 input int    maxTpLevels = 10; // Maximum TP level to consider, at most 10
-input string lotSizeFactorConfig = ""; // Format: "channel1:factor1,channel2:factor2"
+input string lotSizeFactorConfig = ""; // Lot size factor. Format: "channel1:factor1,channel2:factor2"
 input double defaultLotSizeFactor = 1.0; // Default TP Weighting, 1.0 = same lots, ~0.7 = exponential
 input int    limitOrderExpirationMinutes = 30; // Limit order expiration in minutes
+input string channelAllowList = ""; // Channel allowlist. If unfilled, allow all groups. Ex. "THEA,FXPL"
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -33,6 +34,8 @@ const string gSignalFile     = "signals.txt";       // Incoming signal file
 const int SLIPPAGE = 20;  // maximum allowed slippage during order creation/modification
 
 const int TRAILING_SCAN_PERIOD_SECONDS = 2;
+
+string allowedChannels[];
 
 /*
  * Represents a signal coming from the forwarder.
@@ -117,6 +120,7 @@ bool SetCurrentOrderStopLoss(Signal &signal);
 void SaveSignalToFile(Signal &signal);
 
 // Utility functions
+bool    IsChannelAllowed(string channelName);
 bool    IsSignalTooOld(long signalTimestampMs, int maxAgeSeconds);
 bool    FileExists(string filename);
 bool    IsValidDouble(string s);
@@ -138,6 +142,11 @@ void OnInit()
 
   if(debugMode)
     PrintLog(": Initialized");
+
+  StringSplit(channelAllowList, ',', allowedChannels);
+  for(int i = 0; i < ArraySize(allowedChannels); i++) {
+    StringTrimLeft(StringTrimRight(allowedChannels[i]));
+  }
 
 // Use event timer for events
   EventSetTimer(TRAILING_SCAN_PERIOD_SECONDS);
@@ -187,6 +196,11 @@ void OnTimer()
 // Check if we have a valid signal
   if(!signal.isValid) {
     return; // No valid signal
+  }
+
+  if(!IsChannelAllowed(signal.channelName)) {
+    PrintLog("Channel not allowed: " + signal.channelName);
+    return; // Channel not allowed
   }
 
 // Handle different signal types
@@ -318,7 +332,7 @@ Signal ReadSignalLine(string line, bool isStored)
   }
 
   for(int i = 0; i < ArraySize(parts); i++) {
-    parts[i] = StringTrimLeft(StringTrimRight(parts[i]));
+    StringTrimLeft(StringTrimRight(parts[i]));
   }
 
 // 0) Extract and validate timestamp (first part, no prefix)
@@ -1067,6 +1081,25 @@ OrderCommentInfo ParseOrderComment()
 
   info.isValid = true;
   return(info);
+}
+
+//+-------------------------------------------------------------------------+
+//| Determines whether a channel is allowed based on the channel allowlist. |
+//+-------------------------------------------------------------------------+
+bool IsChannelAllowed(string channelName)
+{
+  if(StringLen(channelName) != 4)
+    return(false);
+
+// if array is not set, then we allow all channels
+  if(ArraySize(allowedChannels) == 0)
+    return(true);
+
+  for(int i = 0; i < ArraySize(allowedChannels); i++) {
+    if(StringCompare(channelName, allowedChannels[i], false) == 0)
+      return(true);
+  }
+  return(false);
 }
 
 //+------------------------------------------------------------------+
