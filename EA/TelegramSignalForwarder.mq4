@@ -4,7 +4,9 @@
 //+------------------------------------------------------------------+
 // Formatting style: K&R, 2 spaces
 #property strict
-#property version "2.12.2"
+#property version "2.13.0"
+
+#define MAX_TP_LEVELS 10
 
 //+------------------------------------------------------------------+
 //|--- Input Parameters (EA Configuration)                         |
@@ -17,7 +19,6 @@ input double accountRiskPercentage = 1.0; // Risk percentage per trade
 input double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0.0 = entry, 1.0 = keep original SL
 input double marginBufferPercentage             = 70.0;   // Amount of free margin to use maximum
 input int    warmupTimeoutSeconds = 120; // Time in seconds to keep warmup orders before auto-closing
-input int    maxTpLevels = 10; // Maximum TP level to consider, at most 10
 input string lotSizeFactorConfig = ""; // Lot size factor. Format: "channel1:factor1,channel2:factor2"
 input double defaultLotSizeFactor = 1.0; // Default TP Weighting, 1.0 = same lots, ~0.7 = exponential
 input int    limitOrderExpirationMinutes = 30; // Limit order expiration in minutes
@@ -46,8 +47,8 @@ struct Signal {
   string             type;
   string             symbol;
   double             entry;
-  double             tpLevels[10];
-  double             lotSizes[10];
+  double             tpLevels[MAX_TP_LEVELS];
+  double             lotSizes[MAX_TP_LEVELS];
   int                tpCount;
   double             stopLoss;
   int                groupId;
@@ -420,14 +421,6 @@ Signal ParseBuySellSignal(string &parts[], string line, bool isStored)
     if (isLive)
       PrintLog(": Invalid TP levels '" + parts[4] + "', skipping");
     return signal;
-  }
-
-// Enforce maximum TP count limit (array size is 10)
-  int allowedTpLevels = MathMin(maxTpLevels, 10);
-  if(signal.tpCount > allowedTpLevels) {
-    if (isLive)
-      PrintLog(": Warning: TP count " + IntegerToString(signal.tpCount) + " exceeds maximum " + IntegerToString(allowedTpLevels) + ", truncating");
-    signal.tpCount = allowedTpLevels;
   }
 
 // Resize array to hold all TPs (up to maximum)
@@ -1283,7 +1276,7 @@ void ProcessDynamicTrailingStop()
     if(signal.entry == 0.0)
       signal.entry = OrderOpenPrice(); // Use current open price if not set
 
-    double tpLevels[10];
+    double tpLevels[MAX_TP_LEVELS];
 
     // get TP hit level based on current price
     int priceTpHitLevel = 0;
@@ -1631,6 +1624,39 @@ double GetLotSizeFactorForChannel(string channelName)
   return defaultLotSizeFactor;
 }
 
+//+--------------------------------------------------------------------+
+//| SelectTPIndices: Select which TP indices to keep when reducing TPs |
+//| Strategy: Keep first, last, and evenly distribute middle ones      |
+//+--------------------------------------------------------------------+
+int SelectTPIndices(int totalTPs, int maxPositions, int &selectedIndices[])
+{
+  if(maxPositions <= 0) return 0;
+  if(maxPositions >= totalTPs) {
+    // Keep all
+    for(int i = 0; i < totalTPs; i++) {
+      selectedIndices[i] = i;
+    }
+    return totalTPs;
+  }
+
+  if (maxPositions == 1) {
+    // Keep biggest TP
+    selectedIndices[0] = totalTPs - 1;
+    return 1;
+  }
+
+// Distribute positions evenly
+  int positions = maxPositions;
+  for(int i = 0; i < positions; i++) {
+    // Calculate evenly spaced indices between 0 and totalTPs-1
+    double position = (double)i * (totalTPs - 1) / (maxPositions - 1);
+    selectedIndices[i] = (int)MathRound(position);
+  }
+
+  ArraySort(selectedIndices, maxPositions);
+  return maxPositions;
+}
+
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
@@ -1682,7 +1708,29 @@ void SetSignalLotSizes(Signal &signal)
   if(adjustedPositionSize != originalPositionSize)
     PrintLog(": Adjusted position size for " + symbol + " from " + DoubleToString(originalPositionSize, 2) + " to " + DoubleToString(adjustedPositionSize, 2));
 
-  double weights[10];
+// Calculate maximum number of positions we can afford at minimum lot size
+  int maxPositions = MathFloor(adjustedPositionSize / minLot);
+  int originalTPCount = signal.tpCount;
+
+// If we have more TPs than we can afford at minimum lot size, reduce TPs
+  if(maxPositions < signal.tpCount && maxPositions > 0) {
+    int selectedIndices[MAX_TP_LEVELS];
+    int selectedCount = SelectTPIndices(signal.tpCount, maxPositions, selectedIndices);
+
+    // Compact the TP arrays to only include selected TPs
+    double tempTPLevels[MAX_TP_LEVELS];
+    for(int i = 0; i < selectedCount; i++) {
+      tempTPLevels[i] = signal.tpLevels[selectedIndices[i]];
+    }
+    ArrayFill(signal.tpLevels, 0, MAX_TP_LEVELS, 0.0);
+    ArrayCopy(signal.tpLevels, tempTPLevels);
+
+    signal.tpCount = selectedCount;
+    PrintLog(": Reduced TPs from " + IntegerToString(originalTPCount) + " to " + IntegerToString(selectedCount) +
+             " due to risk constraints.");
+  }
+
+  double weights[MAX_TP_LEVELS];
   double weightSum = 0.0;
   double channelLotSizeFactor = GetLotSizeFactorForChannel(signal.channelName);
   for(int i = 0; i < signal.tpCount; i++) {
@@ -1699,10 +1747,12 @@ void SetSignalLotSizes(Signal &signal)
     if (i != 0) lotSizesLog += ", ";
     if (allocatedPositionSize + nextLotSize > adjustedPositionSize) {
       double remainder = adjustedPositionSize - allocatedPositionSize;
-      remainder = MathFloor(remainder / lotStep) * lotStep;
-      if (remainder > minLot) {
+      // using MathRound - MathFloor resulted in weird rounding errors
+      remainder = MathRound(remainder / lotStep) * lotStep;
+      if (remainder >= minLot) {
         signal.lotSizes[i] = remainder;
         lotSizesLog += DoubleToString(remainder, 2);
+        allocatedPositionSize += remainder;
       }
       break;
     }
