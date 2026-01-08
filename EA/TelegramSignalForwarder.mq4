@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 // Formatting style: K&R, 2 spaces
 #property strict
-#property version "2.13.0"
+#property version "2.13.1"
 
 #define MAX_TP_LEVELS 10
 
@@ -1345,45 +1345,22 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
 
 // Special rules for specific channel+symbol combinations
   double dynamicStopLossMultiplier = stopLossMultiplier;
-  bool stopTrailingAfterTP2 = false;
+  bool reducedTrailingAfterTP2 = false;
 
+// WARNING: Trailing stop logic exceptions
 // FXPL + BTCUSD: always use 0.5 multiplier
   if(channelName == "FXPL" && (StringFind(symbolUpper, "BTCUSD") >= 0 || StringFind(symbolUpper, "BTC") >= 0)) {
     dynamicStopLossMultiplier = 0.5;
     if(debugMode)
       PrintLog(": Using FXPL+BTCUSD rule: multiplier=0.5");
   }
-// THEA + XAUUSD: use 0.2 multiplier and stop trailing after TP2
+
+// THEA + XAUUSD: use 0.2 multiplier and lag trailing after TP2
   else if(channelName == "THEA" && (StringFind(symbolUpper, "XAUUSD") >= 0 || StringFind(symbolUpper, "GOLD") >= 0)) {
     dynamicStopLossMultiplier = 0.2;
-    stopTrailingAfterTP2 = true;
+    reducedTrailingAfterTP2 = true;
     if(debugMode)
       PrintLog(": Using THEA+XAUUSD rule: multiplier=0.2, stop after TP2");
-  }
-
-// THEA special rule: if TP2+ hit and symbol is XAUUSD, move to breakeven and stop trailing
-  if(stopTrailingAfterTP2 && tpHitLevel >= 2) {
-    double breakevenSL = OrderOpenPrice();
-    double normalizedBreakeven = NormalizeDouble(breakevenSL, digits);
-
-    // Only move to breakeven if it's more favorable than current SL
-    bool shouldMoveToBreakeven = false;
-    if(isBuy && normalizedBreakeven > currentStop) {
-      shouldMoveToBreakeven = true;
-    } else if(!isBuy && normalizedBreakeven < currentStop) {
-      shouldMoveToBreakeven = true;
-    }
-
-    if(shouldMoveToBreakeven) {
-      if(debugMode)
-        PrintLog(": THEA+XAUUSD TP2+ hit - moving to breakeven and stopping trailing: " +
-                 DoubleToString(normalizedBreakeven, digits));
-      return normalizedBreakeven;
-    } else {
-      if(debugMode)
-        PrintLog(": THEA+XAUUSD TP2+ hit - breakeven would be worse, keeping current SL");
-      return currentStop;
-    }
   }
 
   if(dynamicStopLossMultiplier < 0) {
@@ -1394,6 +1371,9 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
     // Use OrderOpenPrice and not signal.entry, because of slippage, actual open price might differ slightly
     double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * dynamicStopLossMultiplier;
     newSL = isBuy ? OrderOpenPrice() - diff : OrderOpenPrice() + diff;
+  } else if(reducedTrailingAfterTP2 && tpHitLevel > 2) {
+    PrintLog(": THEA+XAUUSD TP2+ hit - reduced trailing to TP" + (tpHitLevel - 1));
+    newSL = signal.tpLevels[tpHitLevel - 3]; // If TP3 is hit (tpHitLevel is 3), use TP1 as new SL (array index 0) etc.
   } else {
     if (signal.tpCount < tpHitLevel) {
       PrintLog(": Invalid TP hit level " + IntegerToString(tpHitLevel) +
