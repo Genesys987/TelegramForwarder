@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 // Formatting style: K&R, 2 spaces
 #property strict
-#property version "2.13.1"
+#property version "2.13.2"
 
 #define MAX_TP_LEVELS 10
 
@@ -146,7 +146,8 @@ void OnInit()
 
   StringSplit(channelAllowList, ',', allowedChannels);
   for(int i = 0; i < ArraySize(allowedChannels); i++) {
-    StringTrimLeft(StringTrimRight(allowedChannels[i]));
+    StringTrimRight(allowedChannels[i]);
+    StringTrimLeft(allowedChannels[i]);
   }
 
 // Use event timer for events
@@ -333,7 +334,8 @@ Signal ReadSignalLine(string line, bool isStored)
   }
 
   for(int i = 0; i < ArraySize(parts); i++) {
-    StringTrimLeft(StringTrimRight(parts[i]));
+    StringTrimRight(parts[i]);
+    StringTrimLeft(parts[i]);
   }
 
 // 0) Extract and validate timestamp (first part, no prefix)
@@ -1586,9 +1588,13 @@ double GetLotSizeFactorForChannel(string channelName)
   for(int i = 0; i < pairCount; i++) {
     string keyValue[];
     if(StringSplit(pairs[i], ':', keyValue) == 2) {
-      string configChannel = StringTrimLeft(StringTrimRight(keyValue[0]));
+      StringTrimRight(keyValue[0]);
+      StringTrimLeft(keyValue[0]);
+      string configChannel = keyValue[0];
       if(configChannel == channelName) {
-        double factor = StringToDouble(StringTrimLeft(StringTrimRight(keyValue[1])));
+        StringTrimRight(keyValue[1]);
+        StringTrimLeft(keyValue[1]);
+        double factor = StringToDouble(keyValue[1]);
         if(debugMode) {
           PrintLog(": Found lot size factor " + DoubleToString(factor, 2) + " for channel '" + channelName + "'");
         }
