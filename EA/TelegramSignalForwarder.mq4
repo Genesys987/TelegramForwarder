@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 // Formatting style: K&R, 2 spaces
 #property strict
-#property version "2.13.2"
+#property version "2.13.3"
 
 #define MAX_TP_LEVELS 10
 
@@ -703,7 +703,7 @@ void UpdateExistingOrdersSL(Signal &signal)
 }
 
 //+------------------------------------------------------------------+
-//| SendOrders: Place market orders with SL & TP        |
+//| SendOrders: Place market or limit orders with SL & TP        |
 //+------------------------------------------------------------------+
 void SendOrders(Signal &signal)
 {
@@ -719,8 +719,8 @@ void SendOrders(Signal &signal)
 
 // if the signal entry is 0, we always enter with market order
 // otherwise, if there's an entry price, we treat it as an entry limit
-  bool isRangeOrder = signal.entry != 0.0;
-  if(!isRangeOrder) {
+  bool isImmediateOrder = signal.entry == 0.0;
+  if(isImmediateOrder) {
     // using market entry
     RefreshRates();
     double currentAsk = MarketInfo(signal.symbol, MODE_ASK);
@@ -741,25 +741,19 @@ void SendOrders(Signal &signal)
   double ask = MarketInfo(signal.symbol, MODE_ASK);
   double bid = MarketInfo(signal.symbol, MODE_BID);
   bool shouldBuy = signal.type == "BUY";
+// we save the orginial TP1 before modifying lot sizes/TP levels
   double tp1 = signal.tpLevels[0];
 
   double price = shouldBuy ? ask : bid;
   price = NormalizeDouble(price, digits);
 
   bool isPriceBeyondTp1 = shouldBuy ? price > tp1 : price < tp1;
-  if(isPriceBeyondTp1) {
-    if(isRangeOrder) {
-      PrintLog(": Entry price for range order " + DoubleToString(price, digits) +
-               " is beyond TP1 " + DoubleToString(tp1, digits) +
-               " for GID=" + IntegerToString(signal.groupId) +
-               ", creating limit order");
-    } else {
-      PrintLog(": Entry price for immediate order " + DoubleToString(price, digits) +
-               " is beyond TP1 " + DoubleToString(tp1, digits) +
-               " for GID=" + IntegerToString(signal.groupId) +
-               ", skipping order creation");
-      return;
-    }
+  if(isPriceBeyondTp1 && isImmediateOrder) {
+    PrintLog(": Entry price for immediate order " + DoubleToString(price, digits) +
+             " is beyond TP1 " + DoubleToString(tp1, digits) +
+             " for GID=" + IntegerToString(signal.groupId) +
+             ", skipping order creation");
+    return;
   }
 
 // Always use the original stop loss from signal
@@ -790,6 +784,9 @@ void SendOrders(Signal &signal)
   color cols[6] = { clrBlue, clrGreen, clrRed, clrYellow, clrMagenta, clrCyan };
   SetSignalLotSizes(signal);
 
+// We allow entering halfway until TP1
+  double allowedEntryLevel = (signal.entry + tp1) / 2;
+
 // Create orders for each TP level
   for(int k=0; k < signal.tpCount; k++) {
     double lotSize = signal.lotSizes[k];
@@ -802,8 +799,11 @@ void SendOrders(Signal &signal)
     RefreshRates();
     ask = MarketInfo(signal.symbol, MODE_ASK);
     bid = MarketInfo(signal.symbol, MODE_BID);
-    bool shouldUseLimitOrder = isRangeOrder && (shouldBuy ? (signal.entry <= bid) : (ask <= signal.entry));
-    price = shouldUseLimitOrder ? signal.entry : (shouldBuy ? ask : bid);
+    bool shouldUseLimitOrder = !isImmediateOrder && (shouldBuy ? (allowedEntryLevel <= bid) : (ask <= allowedEntryLevel));
+    if (shouldUseLimitOrder) {
+      PrintLog("Using limit order for TP level " + IntegerToString(k + 1));
+    }
+    price = shouldUseLimitOrder ? allowedEntryLevel : (shouldBuy ? ask : bid);
     int orderType = shouldBuy ? (shouldUseLimitOrder ? OP_BUYLIMIT : OP_BUY) : (shouldUseLimitOrder ? OP_SELLLIMIT : OP_SELL);
     string comment = FormatMT4Comment(signal.groupId, signal.channelName, k + 1);
     int magicNumber = GetMagic(signal.channelName);
@@ -1048,7 +1048,7 @@ OrderCommentInfo ParseOrderComment()
   OrderCommentInfo info;
   string parts[];
   int partCount = StringSplit(comment, '|', parts);
-  if(partCount < 3) {
+  if(partCount < 3 && debugMode) {
     PrintLog(": Invalid comment format, expected at least 2 parts but got " + IntegerToString(partCount));
     info.isValid = false;
     return(info);
@@ -1571,7 +1571,7 @@ void SetWarmupLevels(Signal &signal)
 }
 
 //+------------------------------------------------------------------+
-//| SetSignalLotSizes: Calculate position size based on risk management|
+//| GetLotSizeFactorForChannel: Calculate lot size factor based on channel|
 //+------------------------------------------------------------------+
 double GetLotSizeFactorForChannel(string channelName)
 {
