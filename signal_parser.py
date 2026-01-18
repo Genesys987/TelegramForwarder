@@ -233,6 +233,8 @@ def parse_single_line_signal(text) -> SignalData | None:
             # New NOW patterns with optional ranges
             r"([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s+([\d\s\-\.]+)",  # GOLD Sell Now 4086 - 4090
             r"#([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW",  # #EURAUD SELL NOW
+            # NEW: Buy here around pattern for single line parsing  
+            r"([\w\.\/\-]+)\s+(BUY|SELL)\s+here\s+around\s+([\d\.]+)",  # XAUUSD Buy here around 4485
             # Regular patterns (existing + new @ and - range formats)
             r"([\w\.\/\-]+)\s+(BUY|SELL)\s+FROM\s+([\d\/\.\-@]+)",  # GOLD SELL FROM 3313/3315.3
             r"([\w\.\/\-]+)\s+(BUY|SELL)\s+@([\d\-]+)",  # Sell Gold @3339-3344
@@ -416,6 +418,17 @@ def parse_signal(text: str) -> SignalData | None:
 
         # Signal Type and Symbol parsing - handle multiple formats
         if not signal.signal_type:
+            # Format 0a: "XAUUSD Buy here around 4485" - HIGHEST PRIORITY for 'here around' format
+            match_here_around = re.match(
+                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+here\s+around\s+([\d\.]+)", line, re.IGNORECASE
+            )
+            if match_here_around:
+                raw_symbol = match_here_around.group(1).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_here_around.group(2).upper()
+                signal.entry = float(match_here_around.group(3))
+                continue
+
             # Format 0: "#XAUUSD SELL" - hash prefix with symbol and action
             match_hash_symbol = re.match(
                 r"^#([\w\.\/\-]+)\s+(BUY|SELL)", line, re.IGNORECASE
@@ -644,7 +657,26 @@ def parse_signal(text: str) -> SignalData | None:
 
         # Entry Price parsing
         if signal.entry is None:
-            # Look for ENTRY keyword with optional colon (support unicode dashes)
+            # Enhanced entry patterns - order matters for specificity  
+            entry_patterns = [
+                r"ENTRY\s*:?\s*(?:at\s+)?([\d\/\.\-@–—\s]+)",  # ENTRY: 4229–4232 (with unicode dash)
+                r"Entered\s+at\s+([\d\.]+)",  # NEW: Entered at 4588
+                r"Enter\s+([\d\.]+)",  # NEW: Enter 4585
+            ]
+            
+            entry_found = False
+            for entry_pattern in entry_patterns:
+                entry_match = re.search(entry_pattern, line, re.IGNORECASE)
+                if entry_match:
+                    entry_text = entry_match.group(1)
+                    signal.entry = parse_entry_price(entry_text, signal.signal_type)
+                    entry_found = True
+                    break
+            
+            if entry_found:
+                continue
+
+            # Look for ENTRY keyword with optional colon (support unicode dashes) - LEGACY
             m = re.search(
                 r"ENTRY\s*:?\s*(?:at\s+)?([\d\/\.\-@–—\s]+)", line, re.IGNORECASE
             )
@@ -774,6 +806,7 @@ def parse_signal(text: str) -> SignalData | None:
         if not signal.stop_loss:
             sl_patterns = [
                 r"[🔴❌🛑]\s*(?:SL|Stop\s*Loss|STOP\s*LOSS)\s*:?\s*([\d\.]+)",  # Emoji SL formats
+                r"SL\s+at\s+([\d\.]+)",  # NEW: SL at 4560
                 r"(?:STOP\s*LOSS|SL|S\.L)\s*:?\s*(?:at\s+)?([\d\.]+)(?:\s*\([^)]*\))?",  # Regular SL with optional parentheses, including S.L format
                 r"SL\s*:\s*([\d\.]+)",  # "SL: 3298.8"
                 r"S\.L\s+([\d\.]+)",  # "S.L   115900" (S.L format)
