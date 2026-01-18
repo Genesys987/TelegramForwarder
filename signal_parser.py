@@ -505,9 +505,9 @@ def parse_signal(text: str) -> SignalData | None:
                 continue
 
             # Format 3: "SYMBOL SIGNAL_TYPE" or "SYMBOL SIGNAL_TYPE entry_range" (e.g., "GOLD SELL 3334/3337", "Gold Sell 3341-3346", "GOLD BUY 4207/04")
-            # Note: Exclude colon format which is handled separately
+            # Note: Exclude colon format which is handled separately and "here around" which is handled later
             match_symbol_type_alt = re.match(
-                r"^([\w\.\/\-]+)\s+(BUY|SELL)(?!\s*:)\s*([\d\/\.\-@]*)",
+                r"^([\w\.\/\-]+)\s+(BUY|SELL)(?!\s*:)(?!\s+here\s+around)\s*([\d\/\.\-@]*)",
                 line,
                 re.IGNORECASE,
             )
@@ -537,9 +537,9 @@ def parse_signal(text: str) -> SignalData | None:
                     signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
 
-            # Format 4: "EURUSD BUY" or "XAUUSD BUY" or "XAUUSD BUY 3417" or "XAUUSD / GOLD SELL" (symbol first, then type, optional price)
+            # Format 4: "EURUSD BUY" or "XAUUSD BUY" or "XAUUSD BUY 3417" or "XAUUSD / GOLD SELL" or "XAUUSD Buy here around 4485" (symbol first, then type, optional price)
             match_symbol_type_simple = re.match(
-                r"^([\w\.\/\-]+(?:\s*/\s*[\w\.\/\-]+)?)\s+(BUY|SELL)(?:\s+([\d\/\.\-@]+))?",
+                r"^([\w\.\/\-]+(?:\s*/\s*[\w\.\/\-]+)?)\s+(BUY|SELL)(?:\s+([\d\/\.\-@]+)|\s+here\s+around\s+([\d\.]+))?",
                 line,
                 re.IGNORECASE,
             )
@@ -566,10 +566,17 @@ def parse_signal(text: str) -> SignalData | None:
 
                 signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                 signal.signal_type = match_symbol_type_simple.group(2).upper()
-                # Check if there's an entry price in the same line
-                entry_text = match_symbol_type_simple.group(3)
-                if entry_text:
-                    signal.entry = parse_entry_price(entry_text, signal.signal_type)
+                
+                # Check for different price formats
+                regular_entry = match_symbol_type_simple.group(3)
+                here_around_entry = match_symbol_type_simple.group(4)
+                
+                if here_around_entry:
+                    # "here around" format
+                    signal.entry = float(here_around_entry)
+                elif regular_entry:
+                    # Regular entry format
+                    signal.entry = parse_entry_price(regular_entry, signal.signal_type)
                 continue
 
             # Format 5: "BTCUSD | BUY 109500" (symbol | type price)
@@ -648,6 +655,33 @@ def parse_signal(text: str) -> SignalData | None:
                 signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
 
+            # Pattern: "Entered at 4588" format
+            entered_at_match = re.search(r"Entered\s+at\s+([\d\.]+)", line, re.IGNORECASE)
+            if entered_at_match:
+                try:
+                    signal.entry = float(entered_at_match.group(1))
+                    continue
+                except ValueError:
+                    pass
+
+            # Pattern: "Enter 4585" format  
+            enter_match = re.search(r"^Enter\s+([\d\.]+)", line, re.IGNORECASE)
+            if enter_match:
+                try:
+                    signal.entry = float(enter_match.group(1))
+                    continue
+                except ValueError:
+                    pass
+
+            # Pattern: "Buy here around 4485" format
+            here_around_match = re.search(r"here\s+around\s+([\d\.]+)", line, re.IGNORECASE)
+            if here_around_match:
+                try:
+                    signal.entry = float(here_around_match.group(1))
+                    continue
+                except ValueError:
+                    pass
+
             # NEW: Check for standalone entry price line (just numbers with optional slash or dash range)
             # This should be a line that looks like an entry price but not TPs
             entry_standalone_pattern = r"^([\d\.]+(?:[/\-\s]+[\d\.]+)?)$"
@@ -671,6 +705,8 @@ def parse_signal(text: str) -> SignalData | None:
             r"[🤑💰✅]\s*TP\d*\s*:\s*([\d\.]+(?:/[\d\.]+)*|open)",  # Emoji TP formats like "💰TP1: 3289.0", "💰TP2: 3331" (with colon)
             r"[🤑💰✅]\s*TP\d+\s+([\d\.]+(?:/[\d\.]+)*|open)",  # Emoji TP formats like "✅TP1 109700" (without colon)
             r"T\.P\d+\s+([\d\.]+|open)",  # "T.P1 114600", "T.P2 114500" (T.P format)
+            r"TP(\d+)\s+([\d\.]+)",  # "TP1 4595", "TP2 4601" format (numbered)
+            r"Tp(\d+)\s+([\d\.]+)",  # "Tp2 157.130" format (mixed case)
             r"TP\s*\d+\s*:\s*([\d\.]+|open)",  # "TP1: 3289.0", "TP 2 : open", "Tp 1 : 3346" (with colon)
             r"TP\s+(\d+)\s+([\d\.]+)",  # "TP 1 4081", "TP 2 4078" (numbered format with space)
             r"TP\d+\s+([\d\.]+|open)",  # "TP1 3420", "TP2 3423" (without colon, with number)
@@ -685,9 +721,9 @@ def parse_signal(text: str) -> SignalData | None:
             m = re.search(tp_pattern, line, re.IGNORECASE)
             if m:
                 try:
-                    # Handle special numbered TP format "TP 1 4081"
-                    if tp_pattern == r"TP\s+(\d+)\s+([\d\.]+)":
-                        # For numbered format, use the second group (the price)
+                    # Handle different pattern formats
+                    if tp_pattern in [r"TP(\d+)\s+([\d\.]+)", r"Tp(\d+)\s+([\d\.]+)", r"TP\s+(\d+)\s+([\d\.]+)"]:
+                        # For numbered format patterns, use the second group (the price)
                         tp_value = float(m.group(2))
                         if tp_value > 0.1:
                             take_profits.append(tp_value)
@@ -769,6 +805,7 @@ def parse_signal(text: str) -> SignalData | None:
         if not signal.stop_loss:
             sl_patterns = [
                 r"[🔴❌🛑]\s*(?:SL|Stop\s*Loss|STOP\s*LOSS)\s*:?\s*([\d\.]+)",  # Emoji SL formats
+                r"SL\s+at\s+([\d\.]+)",  # "SL at 4560" format
                 r"(?:STOP\s*LOSS|SL|S\.L)\s*:?\s*(?:at\s+)?([\d\.]+)(?:\s*\([^)]*\))?",  # Regular SL with optional parentheses, including S.L format
                 r"SL\s*:\s*([\d\.]+)",  # "SL: 3298.8"
                 r"S\.L\s+([\d\.]+)",  # "S.L   115900" (S.L format)
