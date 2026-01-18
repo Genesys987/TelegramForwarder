@@ -1757,9 +1757,9 @@ void SetSignalLotSizes(Signal &signal)
 }
 //+------------------------------------------------------------------+
 
-//+------------------------------------------------------------------+
-//|                                                                  |
-//+------------------------------------------------------------------+
+//+--------------------------------------------------------------------------+
+//| DecreaseSignalStopLoss: Decreases the stop loss of a signal by a factor. |
+//+--------------------------------------------------------------------------+
 void DecreaseSignalStopLoss(Signal &signal, bool isStored)
 {
   if (stopLossDecreaseFactor <= 0.0 || stopLossDecreaseFactor >= 1.0) return;
@@ -1773,4 +1773,4 @@ void DecreaseSignalStopLoss(Signal &signal, bool isStored)
              " from " + DoubleToString(originalStopLoss, 2) +
              " to " + DoubleToString(signal.stopLoss, 2));
 }
-//+------------------------------------------------------------------+
+//+--------------------------------------------------------------------------+
