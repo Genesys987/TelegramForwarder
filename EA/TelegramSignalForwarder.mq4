@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 // Formatting style: K&R, 2 spaces
 #property strict
-#property version "2.13.3"
+#property version "2.14.0"
 
 #define MAX_TP_LEVELS 10
 
@@ -23,6 +23,7 @@ input string lotSizeFactorConfig = ""; // Lot size factor. Format: "channel1:fac
 input double defaultLotSizeFactor = 1.0; // Default TP Weighting, 1.0 = same lots, ~0.7 = exponential
 input int    limitOrderExpirationMinutes = 30; // Limit order expiration in minutes
 input string channelAllowList = ""; // Channel allowlist. If unfilled, allow all groups. Ex. "THEA,FXPL"
+input double stopLossReductionFactor = 0.0; // Factor to reduce original SL - 0.0 no change, 0.2 reduce by 20% etc.
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -130,6 +131,7 @@ string  FormatMT4Comment(int groupId, string channelName, int tpLevel);
 int     GetMagic(string channelName);
 double  GetLotSizeFactorForChannel(string channelName);
 void    SetSignalLotSizes(Signal &signal);
+void    ReduceStopLossDistance(Signal &signal, bool isStored);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -472,14 +474,17 @@ Signal ParseBuySellSignal(string &parts[], string line, bool isStored)
   }
 
   signal.stopLoss = NormalizeDouble(StrToDouble(rawSL), MarketInfo(signal.symbol, MODE_DIGITS));
+  ReduceStopLossDistance(signal, isStored);
 // Validate SL position relative to entry price (if not market entry)
   if(signal.entry != 0.0) {
     if(shouldBuy && signal.stopLoss >= signal.entry && !isStored) {
       PrintLog(": Warning: SL " + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
                " should be below entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
+      return signal;
     } else if(!shouldBuy && signal.stopLoss <= signal.entry && !isStored) {
       PrintLog(": Warning: SL " + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
                " should be above entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
+      return signal;
     }
   }
 
@@ -551,6 +556,8 @@ Signal ParseActionSignal(string &parts[], string line, bool isStored)
 
       // Parse SL
       signal.stopLoss = StrToDouble(parts[5]);
+      // We adjust the SL based on the "official" entry in the signal
+      ReduceStopLossDistance(signal, isStored);
 
       // Parse GID
       string gidPart = parts[6];
@@ -575,6 +582,7 @@ Signal ParseActionSignal(string &parts[], string line, bool isStored)
         return signal;
       }
       signal.stopLoss = StrToDouble(slPart);
+      // ReduceStopLossDistance is not called for regular SL modify
 
       // Parse GID
       string gidPart = parts[3];
@@ -1346,32 +1354,22 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
   StringToUpper(symbolUpper);
 
 // Special rules for specific channel+symbol combinations
-  double dynamicStopLossMultiplier = stopLossMultiplier;
   bool reducedTrailingAfterTP2 = false;
 
-// WARNING: Trailing stop logic exceptions
-// FXPL + BTCUSD: always use 0.5 multiplier
-  if(channelName == "FXPL" && (StringFind(symbolUpper, "BTCUSD") >= 0 || StringFind(symbolUpper, "BTC") >= 0)) {
-    dynamicStopLossMultiplier = 0.5;
-    if(debugMode)
-      PrintLog(": Using FXPL+BTCUSD rule: multiplier=0.5");
-  }
-
 // THEA + XAUUSD: use 0.2 multiplier and lag trailing after TP2
-  else if(channelName == "THEA" && (StringFind(symbolUpper, "XAUUSD") >= 0 || StringFind(symbolUpper, "GOLD") >= 0)) {
-    dynamicStopLossMultiplier = 0.2;
+  if(channelName == "THEA" && (StringFind(symbolUpper, "XAUUSD") >= 0 || StringFind(symbolUpper, "GOLD") >= 0)) {
     reducedTrailingAfterTP2 = true;
     if(debugMode)
       PrintLog(": Using THEA+XAUUSD rule: multiplier=0.2, stop after TP2");
   }
 
-  if(dynamicStopLossMultiplier < 0) {
+  if(stopLossMultiplier < 0) {
     return NormalizeDouble(currentStop, digits); // No multiplier set, return original SL
   }
 
   if (tpHitLevel == 1) {
     // Use OrderOpenPrice and not signal.entry, because of slippage, actual open price might differ slightly
-    double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * dynamicStopLossMultiplier;
+    double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * stopLossMultiplier;
     newSL = isBuy ? OrderOpenPrice() - diff : OrderOpenPrice() + diff;
   } else if(reducedTrailingAfterTP2 && tpHitLevel > 2) {
     PrintLog(": THEA+XAUUSD TP2+ hit - reduced trailing to TP" + (tpHitLevel - 1));
@@ -1408,7 +1406,7 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
   if(debugMode)
     PrintLog(": SL calculation successful - Channel:" + channelName +
              " Symbol:" + symbolUpper + " Level:" + IntegerToString(tpHitLevel) +
-             " Multiplier:" + DoubleToString(dynamicStopLossMultiplier, 2) +
+             " Multiplier:" + DoubleToString(stopLossMultiplier, 2) +
              " Original:" + DoubleToString(currentStop, digits) +
              " New:" + DoubleToString(newSL, digits) +
              " Direction:" + (isBuy ? "BUY" : "SELL"));
@@ -1759,3 +1757,22 @@ void SetSignalLotSizes(Signal &signal)
            " TPCount=" + IntegerToString(signal.tpCount));
 }
 //+------------------------------------------------------------------+
+
+//+--------------------------------------------------------------------------+
+//| ReduceStopLossDistance: Decreases the stop loss of a signal by a factor. |
+//+--------------------------------------------------------------------------+
+void ReduceStopLossDistance(Signal &signal, bool isStored)
+{
+  if (stopLossReductionFactor <= 0.0 || stopLossReductionFactor >= 1.0 || signal.entry == 0.0) return;
+  double originalStopLoss = signal.stopLoss;
+// for BUY, (entry - SL) is positive and we add this to the SL to reduce its distance from entry
+// for SELL, (entry - SL) is negative and we subtract this from the SL to reduce its distance from entry
+  double distance = (signal.entry - signal.stopLoss) * stopLossReductionFactor;
+  signal.stopLoss += distance;
+
+  if (signal.stopLoss != originalStopLoss && !isStored)
+    PrintLog(": Stop loss distance reduced by factor of " + DoubleToString(stopLossReductionFactor, 2) +
+             " from " + DoubleToString(originalStopLoss, 2) +
+             " to " + DoubleToString(signal.stopLoss, 2));
+}
+//+--------------------------------------------------------------------------+
