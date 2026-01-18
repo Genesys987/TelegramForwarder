@@ -23,7 +23,7 @@ input string lotSizeFactorConfig = ""; // Lot size factor. Format: "channel1:fac
 input double defaultLotSizeFactor = 1.0; // Default TP Weighting, 1.0 = same lots, ~0.7 = exponential
 input int    limitOrderExpirationMinutes = 30; // Limit order expiration in minutes
 input string channelAllowList = ""; // Channel allowlist. If unfilled, allow all groups. Ex. "THEA,FXPL"
-input double stopLossDecreaseFactor = 0.0; // Factor to decrease original SL - 0.0 no decrease, 0.2 decrease by 20% etc.
+input double stopLossReductionFactor = 0.0; // Factor to reduce original SL - 0.0 no change, 0.2 reduce by 20% etc.
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -131,7 +131,7 @@ string  FormatMT4Comment(int groupId, string channelName, int tpLevel);
 int     GetMagic(string channelName);
 double  GetLotSizeFactorForChannel(string channelName);
 void    SetSignalLotSizes(Signal &signal);
-void    DecreaseSignalStopLoss(Signal &signal, bool isStored);
+void    ReduceStopLossDistance(Signal &signal, bool isStored);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -474,7 +474,7 @@ Signal ParseBuySellSignal(string &parts[], string line, bool isStored)
   }
 
   signal.stopLoss = NormalizeDouble(StrToDouble(rawSL), MarketInfo(signal.symbol, MODE_DIGITS));
-  DecreaseSignalStopLoss(signal, isStored);
+  ReduceStopLossDistance(signal, isStored);
 // Validate SL position relative to entry price (if not market entry)
   if(signal.entry != 0.0) {
     if(shouldBuy && signal.stopLoss >= signal.entry && !isStored) {
@@ -556,7 +556,8 @@ Signal ParseActionSignal(string &parts[], string line, bool isStored)
 
       // Parse SL
       signal.stopLoss = StrToDouble(parts[5]);
-      DecreaseSignalStopLoss(signal, isStored);
+      // We adjust the SL based on the "official" entry in the signal
+      ReduceStopLossDistance(signal, isStored);
 
       // Parse GID
       string gidPart = parts[6];
@@ -581,7 +582,7 @@ Signal ParseActionSignal(string &parts[], string line, bool isStored)
         return signal;
       }
       signal.stopLoss = StrToDouble(slPart);
-      DecreaseSignalStopLoss(signal, isStored);
+      // ReduceStopLossDistance is not called for regular SL modify
 
       // Parse GID
       string gidPart = parts[3];
@@ -1758,18 +1759,19 @@ void SetSignalLotSizes(Signal &signal)
 //+------------------------------------------------------------------+
 
 //+--------------------------------------------------------------------------+
-//| DecreaseSignalStopLoss: Decreases the stop loss of a signal by a factor. |
+//| ReduceStopLossDistance: Decreases the stop loss of a signal by a factor. |
 //+--------------------------------------------------------------------------+
-void DecreaseSignalStopLoss(Signal &signal, bool isStored)
+void ReduceStopLossDistance(Signal &signal, bool isStored)
 {
-  if (stopLossDecreaseFactor <= 0.0 || stopLossDecreaseFactor >= 1.0) return;
+  if (stopLossReductionFactor <= 0.0 || stopLossReductionFactor >= 1.0 || signal.entry == 0.0) return;
   double originalStopLoss = signal.stopLoss;
-// e.g. for BUY, entry - SL is positive and we add this to the SL to decrease it
-  double distance = (signal.entry - signal.stopLoss) * stopLossDecreaseFactor;
+// for BUY, (entry - SL) is positive and we add this to the SL to reduce its distance from entry
+// for SELL, (entry - SL) is negative and we subtract this from the SL to reduce its distance from entry
+  double distance = (signal.entry - signal.stopLoss) * stopLossReductionFactor;
   signal.stopLoss += distance;
 
   if (signal.stopLoss != originalStopLoss && !isStored)
-    PrintLog(": Stop loss decreased by factor of " + DoubleToString(stopLossDecreaseFactor, 2) +
+    PrintLog(": Stop loss distance reduced by factor of " + DoubleToString(stopLossReductionFactor, 2) +
              " from " + DoubleToString(originalStopLoss, 2) +
              " to " + DoubleToString(signal.stopLoss, 2));
 }
