@@ -305,6 +305,12 @@ def parse_single_line_signal(text) -> SignalData | None:
                     signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                     signal.signal_type = match.group(2).upper()
                     signal.entry = parse_entry_price(match.group(3), signal.signal_type)
+                elif "here" in pattern and "around" in pattern:
+                    # "Buy here around" format: XAUUSD Buy here around 4485
+                    raw_symbol = match.group(1).upper()
+                    signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                    signal.signal_type = match.group(2).upper()
+                    signal.entry = parse_entry_price(match.group(3), signal.signal_type)
                 else:
                     # Regular format: BUY/SELL SYMBOL price
                     signal.signal_type = match.group(1).upper()
@@ -659,7 +665,6 @@ def parse_signal(text: str) -> SignalData | None:
         if signal.entry is None:
             # Enhanced entry patterns - order matters for specificity  
             entry_patterns = [
-                r"ENTRY\s*:?\s*(?:at\s+)?([\d\/\.\-@–—\s]+)",  # ENTRY: 4229–4232 (with unicode dash)
                 r"Entered\s+at\s+([\d\.]+)",  # NEW: Entered at 4588
                 r"Enter\s+([\d\.]+)",  # NEW: Enter 4585
             ]
