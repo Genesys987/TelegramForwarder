@@ -477,9 +477,11 @@ Signal ParseBuySellSignal(string &parts[], string line, bool isStored)
     if(shouldBuy && signal.stopLoss >= signal.entry && !isStored) {
       PrintLog(": Warning: SL " + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
                " should be below entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for BUY");
+      return signal;
     } else if(!shouldBuy && signal.stopLoss <= signal.entry && !isStored) {
       PrintLog(": Warning: SL " + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
                " should be above entry " + DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) + " for SELL");
+      return signal;
     }
   }
 
