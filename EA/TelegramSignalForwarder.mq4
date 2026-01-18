@@ -1348,32 +1348,22 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
   StringToUpper(symbolUpper);
 
 // Special rules for specific channel+symbol combinations
-  double dynamicStopLossMultiplier = stopLossMultiplier;
   bool reducedTrailingAfterTP2 = false;
 
-// WARNING: Trailing stop logic exceptions
-// FXPL + BTCUSD: always use 0.5 multiplier
-  if(channelName == "FXPL" && (StringFind(symbolUpper, "BTCUSD") >= 0 || StringFind(symbolUpper, "BTC") >= 0)) {
-    dynamicStopLossMultiplier = 0.5;
-    if(debugMode)
-      PrintLog(": Using FXPL+BTCUSD rule: multiplier=0.5");
-  }
-
 // THEA + XAUUSD: use 0.2 multiplier and lag trailing after TP2
-  else if(channelName == "THEA" && (StringFind(symbolUpper, "XAUUSD") >= 0 || StringFind(symbolUpper, "GOLD") >= 0)) {
-    dynamicStopLossMultiplier = 0.2;
+  if(channelName == "THEA" && (StringFind(symbolUpper, "XAUUSD") >= 0 || StringFind(symbolUpper, "GOLD") >= 0)) {
     reducedTrailingAfterTP2 = true;
     if(debugMode)
       PrintLog(": Using THEA+XAUUSD rule: multiplier=0.2, stop after TP2");
   }
 
-  if(dynamicStopLossMultiplier < 0) {
+  if(stopLossMultiplier < 0) {
     return NormalizeDouble(currentStop, digits); // No multiplier set, return original SL
   }
 
   if (tpHitLevel == 1) {
     // Use OrderOpenPrice and not signal.entry, because of slippage, actual open price might differ slightly
-    double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * dynamicStopLossMultiplier;
+    double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * stopLossMultiplier;
     newSL = isBuy ? OrderOpenPrice() - diff : OrderOpenPrice() + diff;
   } else if(reducedTrailingAfterTP2 && tpHitLevel > 2) {
     PrintLog(": THEA+XAUUSD TP2+ hit - reduced trailing to TP" + (tpHitLevel - 1));
@@ -1410,7 +1400,7 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
   if(debugMode)
     PrintLog(": SL calculation successful - Channel:" + channelName +
              " Symbol:" + symbolUpper + " Level:" + IntegerToString(tpHitLevel) +
-             " Multiplier:" + DoubleToString(dynamicStopLossMultiplier, 2) +
+             " Multiplier:" + DoubleToString(stopLossMultiplier, 2) +
              " Original:" + DoubleToString(currentStop, digits) +
              " New:" + DoubleToString(newSL, digits) +
              " Direction:" + (isBuy ? "BUY" : "SELL"));
