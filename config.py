@@ -1,4 +1,3 @@
-# --- config.py (Updated) ---
 import hashlib
 import os
 import sys

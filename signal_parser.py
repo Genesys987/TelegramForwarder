@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 # Dictionary of common symbol mappings
 symbol_mappings = {
     "GOLD": "XAUUSD",
-    "GODL": "XAUUSD", 
+    "GODL": "XAUUSD",
     "BTC/USDT": "BTCUSD",
 }
 
@@ -234,7 +234,7 @@ def parse_single_line_signal(text) -> SignalData | None:
             # New NOW patterns with optional ranges
             r"([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s+([\d\s\-\.]+)",  # GOLD Sell Now 4086 - 4090
             r"#([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW",  # #EURAUD SELL NOW
-            # NEW: Buy here around pattern for single line parsing  
+            # NEW: Buy here around pattern for single line parsing
             r"([\w\.\/\-]+)\s+(BUY|SELL)\s+here\s+around\s+([\d\.]+)",  # XAUUSD Buy here around 4485
             # Regular patterns (existing + new @ and - range formats)
             r"([\w\.\/\-]+)\s+(BUY|SELL)\s+FROM\s+([\d\/\.\-@]+)",  # GOLD SELL FROM 3313/3315.3
@@ -427,7 +427,9 @@ def parse_signal(text: str) -> SignalData | None:
         if not signal.signal_type:
             # Format 0a: "XAUUSD Buy here around 4485" - HIGHEST PRIORITY for 'here around' format
             match_here_around = re.match(
-                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+here\s+around\s+([\d\.]+)", line, re.IGNORECASE
+                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+here\s+around\s+([\d\.]+)",
+                line,
+                re.IGNORECASE,
             )
             if match_here_around:
                 raw_symbol = match_here_around.group(1).upper()
@@ -664,13 +666,13 @@ def parse_signal(text: str) -> SignalData | None:
 
         # Entry Price parsing
         if signal.entry is None:
-            # Enhanced entry patterns - order matters for specificity  
+            # Enhanced entry patterns - order matters for specificity
             entry_patterns = [
                 r"Entry\s*:\s*\$?\s*([\d\.]+)",  # NEW: Entry : $ 95033
                 r"Entered\s+at\s+([\d\.]+)",  # NEW: Entered at 4588
                 r"Enter\s+([\d\.]+)",  # NEW: Enter 4585
             ]
-            
+
             entry_found = False
             for entry_pattern in entry_patterns:
                 entry_match = re.search(entry_pattern, line, re.IGNORECASE)
@@ -679,7 +681,7 @@ def parse_signal(text: str) -> SignalData | None:
                     signal.entry = parse_entry_price(entry_text, signal.signal_type)
                     entry_found = True
                     break
-            
+
             if entry_found:
                 continue
 
@@ -730,7 +732,7 @@ def parse_signal(text: str) -> SignalData | None:
             m = re.search(tp_pattern, line, re.IGNORECASE)
             if m:
                 try:
-                    # Handle special numbered TP format "TP 1 4081" 
+                    # Handle special numbered TP format "TP 1 4081"
                     if tp_pattern == r"TP\s+(\d+)\s+([\d\.]+)":
                         # For numbered format, use the second group (the price)
                         tp_value = float(m.group(2))
