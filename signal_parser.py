@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 symbol_mappings = {
     "GOLD": "XAUUSD",
     "GODL": "XAUUSD",
+    "BTC/USDT": "BTCUSD",
 }
 
 
@@ -233,6 +234,8 @@ def parse_single_line_signal(text) -> SignalData | None:
             # New NOW patterns with optional ranges
             r"([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s+([\d\s\-\.]+)",  # GOLD Sell Now 4086 - 4090
             r"#([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW",  # #EURAUD SELL NOW
+            # NEW: Buy here around pattern for single line parsing
+            r"([\w\.\/\-]+)\s+(BUY|SELL)\s+here\s+around\s+([\d\.]+)",  # XAUUSD Buy here around 4485
             # Regular patterns (existing + new @ and - range formats)
             r"([\w\.\/\-]+)\s+(BUY|SELL)\s+FROM\s+([\d\/\.\-@]+)",  # GOLD SELL FROM 3313/3315.3
             r"([\w\.\/\-]+)\s+(BUY|SELL)\s+@([\d\-]+)",  # Sell Gold @3339-3344
@@ -299,6 +302,12 @@ def parse_single_line_signal(text) -> SignalData | None:
                     signal.entry = parse_entry_price(match.group(3), signal.signal_type)
                 elif pattern == r"([\w\.\/\-]+)\s+(BUY|SELL)\s+([\d\/\.]+)":
                     # SYMBOL BUY/SELL price format: XAUUSD BUY 3417
+                    raw_symbol = match.group(1).upper()
+                    signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                    signal.signal_type = match.group(2).upper()
+                    signal.entry = parse_entry_price(match.group(3), signal.signal_type)
+                elif "here" in pattern and "around" in pattern:
+                    # "Buy here around" format: XAUUSD Buy here around 4485
                     raw_symbol = match.group(1).upper()
                     signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                     signal.signal_type = match.group(2).upper()
@@ -416,6 +425,19 @@ def parse_signal(text: str) -> SignalData | None:
 
         # Signal Type and Symbol parsing - handle multiple formats
         if not signal.signal_type:
+            # Format 0a: "XAUUSD Buy here around 4485" - HIGHEST PRIORITY for 'here around' format
+            match_here_around = re.match(
+                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+here\s+around\s+([\d\.]+)",
+                line,
+                re.IGNORECASE,
+            )
+            if match_here_around:
+                raw_symbol = match_here_around.group(1).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_here_around.group(2).upper()
+                signal.entry = float(match_here_around.group(3))
+                continue
+
             # Format 0: "#XAUUSD SELL" - hash prefix with symbol and action
             match_hash_symbol = re.match(
                 r"^#([\w\.\/\-]+)\s+(BUY|SELL)", line, re.IGNORECASE
@@ -644,7 +666,26 @@ def parse_signal(text: str) -> SignalData | None:
 
         # Entry Price parsing
         if signal.entry is None:
-            # Look for ENTRY keyword with optional colon (support unicode dashes)
+            # Enhanced entry patterns - order matters for specificity
+            entry_patterns = [
+                r"Entry\s*:\s*\$?\s*([\d\.]+)",  # NEW: Entry : $ 95033
+                r"Entered\s+at\s+([\d\.]+)",  # NEW: Entered at 4588
+                r"Enter\s+([\d\.]+)",  # NEW: Enter 4585
+            ]
+
+            entry_found = False
+            for entry_pattern in entry_patterns:
+                entry_match = re.search(entry_pattern, line, re.IGNORECASE)
+                if entry_match:
+                    entry_text = entry_match.group(1)
+                    signal.entry = parse_entry_price(entry_text, signal.signal_type)
+                    entry_found = True
+                    break
+
+            if entry_found:
+                continue
+
+            # Look for ENTRY keyword with optional colon (support unicode dashes) - LEGACY
             m = re.search(
                 r"ENTRY\s*:?\s*(?:at\s+)?([\d\/\.\-@–—\s]+)", line, re.IGNORECASE
             )
@@ -676,7 +717,8 @@ def parse_signal(text: str) -> SignalData | None:
             r"[🤑💰✅]\s*TP\d*\s*:\s*([\d\.]+(?:/[\d\.]+)*|open)",  # Emoji TP formats like "💰TP1: 3289.0", "💰TP2: 3331" (with colon)
             r"[🤑💰✅]\s*TP\d+\s+([\d\.]+(?:/[\d\.]+)*|open)",  # Emoji TP formats like "✅TP1 109700" (without colon)
             r"T\.P\d+\s+([\d\.]+|open)",  # "T.P1 114600", "T.P2 114500" (T.P format)
-            r"TP\s*\d+\s*:\s*([\d\.]+|open)",  # "TP1: 3289.0", "TP 2 : open", "Tp 1 : 3346" (with colon)
+            r"Target\d+\s*:\s*\$?\s*([\d\.]+)",  # NEW: "Target1: $ 94800", "Target2: $94300"
+            r"TP\s*(\d+)\s*:\s*([\d\.]+|open)",  # "TP 1 : 4604", "TP1: 3289.0", "TP 2 : open" (with colon and number)
             r"TP\s+(\d+)\s+([\d\.]+)",  # "TP 1 4081", "TP 2 4078" (numbered format with space)
             r"TP\d+\s+([\d\.]+|open)",  # "TP1 3420", "TP2 3423" (without colon, with number)
             r"TP\s*:\s*([\d\.]+|open)",  # "TP: 1.1455", "TP: open"
@@ -696,6 +738,22 @@ def parse_signal(text: str) -> SignalData | None:
                         tp_value = float(m.group(2))
                         if tp_value > 0.1:
                             take_profits.append(tp_value)
+                        tp_found = True
+                    # Handle Target format "Target1: $ 94800"
+                    elif tp_pattern == r"Target\d+\s*:\s*\$?\s*([\d\.]+)":
+                        tp_value = float(m.group(1))
+                        if tp_value > 0.1:
+                            take_profits.append(tp_value)
+                        tp_found = True
+                    # Handle TP with number format "TP 1 : 4604"
+                    elif tp_pattern == r"TP\s*(\d+)\s*:\s*([\d\.]+|open)":
+                        tp_values_text = m.group(2)
+                        if tp_values_text.lower() == "open":
+                            take_profits.append("open")
+                        else:
+                            tp_value = float(tp_values_text)
+                            if tp_value > 0.1:
+                                take_profits.append(tp_value)
                         tp_found = True
                     else:
                         tp_values_text = m.group(1)
@@ -774,8 +832,9 @@ def parse_signal(text: str) -> SignalData | None:
         if not signal.stop_loss:
             sl_patterns = [
                 r"[🔴❌🛑]\s*(?:SL|Stop\s*Loss|STOP\s*LOSS)\s*:?\s*([\d\.]+)",  # Emoji SL formats
+                r"SL\s+at\s+([\d\.]+)",  # NEW: SL at 4560
+                r"SL\s*:\s*\$?\s*([\d\.]+)(?:\s*\([^)]*\))?",  # SL : $ 95300 or SL 4575 (150) - handle dollar sign and parentheses
                 r"(?:STOP\s*LOSS|SL|S\.L)\s*:?\s*(?:at\s+)?([\d\.]+)(?:\s*\([^)]*\))?",  # Regular SL with optional parentheses, including S.L format
-                r"SL\s*:\s*([\d\.]+)",  # "SL: 3298.8"
                 r"S\.L\s+([\d\.]+)",  # "S.L   115900" (S.L format)
             ]
 

@@ -12,8 +12,8 @@ from signal_parser import parse_signal
 
 
 class TestSignalParser(unittest.TestCase):
-    def test_all_34_user_signals(self):
-        """Test all 34 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
+    def test_all_43_user_signals(self):
+        """Test all 43 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
 
         signals = [
             # Signal 1: Standard BUY format
@@ -332,6 +332,87 @@ class TestSignalParser(unittest.TestCase):
                 ],
                 4225.0,
             ),
+            # Signal 35: NEW - "Entered at" format
+            (
+                "XAUUSD buy\nEntered at 4588\nSL at 4560\nTP1 4595\nTP2 4601\nTP3 4627\nTP4 4701",
+                "BUY",
+                "XAUUSD",
+                4588.0,
+                [4595.0, 4601.0, 4627.0, 4701.0],
+                4560.0,
+            ),
+            # Signal 36: NEW - "Enter" with "Buy now" format
+            (
+                "XAUUSD Buy now\nEnter 4585\nSL 4570\nTP1 4588\nTP2 4593\nTP3 4600\nTP4 4627\n\nSL entry at TP1",
+                "BUY",
+                "XAUUSD",
+                4585.0,
+                [4588.0, 4593.0, 4600.0, 4627.0],
+                4570.0,
+            ),
+            # Signal 37: NEW - "Enter" with additional text to ignore
+            (
+                "XAUUSD buy now\nEnter 4582\nSL 4569\nTP1 4585\nTP2 4592\nTP3 4600\nTP4 4612\n\nHalf risk\n\nSL entry at TP1",
+                "BUY",
+                "XAUUSD",
+                4582.0,
+                [4585.0, 4592.0, 4600.0, 4612.0],
+                4569.0,
+            ),
+            # Signal 38: NEW - SL with parentheses (ignore numbers in parentheses)
+            (
+                "XAUUSD buy now\nEnter 4590\nSL 4575 (150)\nTP1 4595\nTP2 4601\nTP3 4617\nTP4 4625\n\nHalf risk\n\nFor those looking to hold a bit longer into a swinger TP5 4701",
+                "BUY",
+                "XAUUSD",
+                4590.0,
+                [4595.0, 4601.0, 4617.0, 4625.0, 4701.0],
+                4575.0,
+            ),
+            # Signal 39: NEW - USDJPY SELL format with "Enter"
+            (
+                "Usdjpy sell now\nEnter 157.630\nSL 158.630\nTP1 157.400\nTp2 157.130\nTp3 156.130\nTP4 152.130\n\nHalf risk\n\nThis is a very risk swing\n\nSL entry at TP1",
+                "SELL",
+                "USDJPY",
+                157.630,
+                [157.400, 157.130, 156.130, 152.130],
+                158.630,
+            ),
+            # Signal 40: NEW - "Buy here around" format
+            (
+                "XAUUSD Buy here around 4485\nSL 4467\nTP1 4490\nTP2 4497\nTP3 4503\nTP4 4517",
+                "BUY",
+                "XAUUSD",
+                4485.0,
+                [4490.0, 4497.0, 4503.0, 4517.0],
+                4467.0,
+            ),
+            # Signal 41: NEW - "Enter" format with additional ignored text
+            (
+                "XAUUSD Buy now\nEnter 4468\nSL 4457\nTP1 4471\nTP2 4474\nTP3 4480\nTP4 4490\n\nSL entry TP1\n\nNFP day so go half risk",
+                "BUY",
+                "XAUUSD",
+                4468.0,
+                [4471.0, 4474.0, 4480.0, 4490.0],
+                4457.0,
+            ),
+            # Signal 42: NEW - BTC/USDT format with dollar signs and Target pattern
+            (
+                "BTC/USDT SELL NOW ✅\n\nEntry : $ 95033\n\nTarget1: $ 94800\nTarget2: $94300\n\nSL : $ 95300",
+                "SELL",
+                "BTCUSD",
+                95033.0,
+                [94800.0, 94300.0],
+                95300.0,
+            ),
+            # Signal 43: NEW - XAUUSD format with decimal entry and spaced TP format
+            (
+                "XAUUSD BUY 4597.015\n\nTP 1 : 4604\nTP 2 : 4621\n\nSL : 4589.697",
+                "BUY",
+                "XAUUSD",
+                4597.015,
+                [4604.0, 4621.0],
+                4589.697,
+            ),
         ]
 
         for i, (
@@ -374,7 +455,7 @@ class TestSignalParser(unittest.TestCase):
 
                 # Note: Open-only TP signals have take_profits = [0] which is now valid
 
-        print("✅ All 34 user-provided signal formats passed!")
+        print("✅ All 43 user-provided signal formats passed!")
 
     def test_invisible_characters(self):
         """Test signal parsing with invisible/hidden characters like non-breaking spaces, zero-width spaces, etc."""
