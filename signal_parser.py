@@ -659,6 +659,47 @@ def parse_signal(text: str) -> SignalData | None:
                 raw_symbol = match_now_range.group(1).upper()
                 signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                 signal.signal_type = match_now_range.group(2).upper()
+                range_text = match_now_range.group(3).strip()
+                signal.entry = parse_entry_price(range_text, signal.signal_type)
+                continue
+
+            # Format 10: "I've entered" format like "I've entered a gold buy at 4778 with SL 4725 and a TP 4800 and TP 4825"
+            match_entered = re.search(
+                r"I['’]?ve\s+entered\s+a\s+([\w\.\/\-]+)\s+(buy|sell)(?:\s+at\s+([\d\.]+))?\s+with\s+SL\s+([\d\.]+)\s+and\s+(?:a\s+single\s+TP|a\s+TP|TP)\s+([\d\.]+(?:\s+and\s+TP\s+[\d\.]+)*)",
+                line,
+                re.IGNORECASE,
+            )
+            if match_entered:
+                raw_symbol = match_entered.group(1).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_entered.group(2).upper()
+                
+                # Parse entry price (optional - if not present, use 0 for immediate entry)
+                entry_text = match_entered.group(3)
+                if entry_text:
+                    signal.entry = float(entry_text)
+                else:
+                    signal.entry = 0
+                
+                # Parse stop loss
+                signal.stop_loss = float(match_entered.group(4))
+                
+                # Parse take profits (can be multiple)
+                tp_text = match_entered.group(5)
+                tp_values = re.findall(r'([\d\.]+)', tp_text)
+                signal.take_profits = [float(tp) for tp in tp_values if tp]
+                
+                # Sort TPs based on signal type
+                if signal.take_profits:
+                    if signal.signal_type == "BUY":
+                        signal.take_profits.sort()
+                    else:
+                        signal.take_profits.sort(reverse=True)
+                
+                continue
+                raw_symbol = match_now_range.group(1).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_now_range.group(2).upper()
                 # Extract range and use as entry price
                 range_text = match_now_range.group(3).strip()
                 signal.entry = parse_entry_price(range_text, signal.signal_type)
