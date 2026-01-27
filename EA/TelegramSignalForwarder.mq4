@@ -1363,7 +1363,7 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
     double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * stopLossMultiplier;
     newSL = isBuy ? OrderOpenPrice() - diff : OrderOpenPrice() + diff;
     if(debugMode)
-      PrintLog(": TP1 hit - partial trailing with multiplier: " + DoubleToString(newSL, digits));
+      PrintLog(": TP" + IntegerToString(tpHitLevel) + " hit - partial trailing with multiplier: " + DoubleToString(newSL, digits));
   } else {
     // TP2+ hit: Trail to previous TP level
     // Aggressive: 1 TP behind, conservative: 2 TP behind
