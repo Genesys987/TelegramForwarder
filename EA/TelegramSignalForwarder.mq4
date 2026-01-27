@@ -1358,10 +1358,10 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
     return NormalizeDouble(currentStop, digits); // No multiplier set, return original SL
   }
 
-  // implication: when conservative, we don't do anything at all for TP1
+// implication: when conservative, we don't do anything at all for TP1
   if (!aggressiveTrailingStopStrategy && tpHitLevel == 1) {
     // do nothing
-  }  else if(tpHitLevel == (aggressiveTrailingStopStrategy ? 1 : 2)){
+  }  else if(tpHitLevel == (aggressiveTrailingStopStrategy ? 1 : 2)) {
     double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * stopLossMultiplier;
     newSL = isBuy ? OrderOpenPrice() - diff : OrderOpenPrice() + diff;
     if(debugMode)
@@ -1375,11 +1375,28 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
                ", using original SL");
       return currentStop;
     }
+
+    int indexOffset = aggressiveTrailingStopStrategy ? 2 : 3;
+    int idx = tpHitLevel - indexOffset;
+    if (idx < 0 || idx >= signal.tpCount) {
+      if (debugMode)
+        PrintLog(": Invalid trailing index " + IntegerToString(idx) +
+                 " for TP hit level " + IntegerToString(tpHitLevel) +
+                 ", tpCount=" + IntegerToString(signal.tpCount) +
+                 ", using original SL");
+      return currentStop;
+    }
+
     // aggressive:   TP2 hit (level 2) -> TP1 (index 0), TP3 hit (level 3) -> TP2 (index 1)
     // conservative: TP3 hit (level 3) -> TP1 (index 0), TP4 hit (level 4) -> TP2 (index 1)
-    newSL = signal.tpLevels[tpHitLevel - (aggressiveTrailingStopStrategy ? 2 : 3)];
-    if(debugMode)
-      PrintLog(": TP" + IntegerToString(tpHitLevel) + " hit - trailing to TP" + IntegerToString(tpHitLevel - 1) +
+    newSL = signal.tpLevels[idx];
+
+    if(debugMode) {
+      int behind = aggressiveTrailingStopStrategy ? 1 : 2;
+      int targetTpLevel = tpHitLevel - behind;
+      string modeLabel = aggressiveTrailingStopStrategy ? "Aggressive" : "Conservative";
+      PrintLog(":" + modeLabel + ": TP" + IntegerToString(tpHitLevel) +
+               " hit - trailing to TP" + IntegerToString(targetTpLevel) +
                ": " + DoubleToString(newSL, digits));
     }
   }
