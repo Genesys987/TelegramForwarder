@@ -24,6 +24,7 @@ input double defaultLotSizeFactor = 1.0; // Default TP Weighting, 1.0 = same lot
 input int    limitOrderExpirationMinutes = 30; // Limit order expiration in minutes
 input string channelAllowList = ""; // Channel allowlist. If unfilled, allow all groups. Ex. "THEA,FXPL"
 input double stopLossReductionFactor = 0.0; // Factor to reduce original SL - 0.0 no change, 0.2 reduce by 20% etc.
+input int trailingStopStrategy = 0; // 0=Aggressive (TP1->BE, TP2->TP1), 1=Conservative (TP1->nothing, TP2->BE, TP3->TP2)
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -1341,6 +1342,8 @@ void ProcessDynamicTrailingStop()
 
 //+------------------------------------------------------------------+
 //| CalculateNewSL: Calculate new SL based on TP hit level         |
+//| Strategy 0 (Aggressive): TP1->BE, TP2->TP1, TP3->TP2, etc.    |
+//| Strategy 1 (Conservative): TP1->nothing, TP2->BE, TP3->TP2    |
 //+------------------------------------------------------------------+
 double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string channelName)
 {
@@ -1350,38 +1353,58 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
     return currentStop;
 
   int digits = MarketInfo(signal.symbol, MODE_DIGITS);
-  string symbolUpper = signal.symbol;
-  StringToUpper(symbolUpper);
-
-// Special rules for specific channel+symbol combinations
-  bool reducedTrailingAfterTP2 = false;
-
-// THEA + XAUUSD: use 0.2 multiplier and lag trailing after TP2
-  if(channelName == "THEA" && (StringFind(symbolUpper, "XAUUSD") >= 0 || StringFind(symbolUpper, "GOLD") >= 0)) {
-    reducedTrailingAfterTP2 = true;
-    if(debugMode)
-      PrintLog(": Using THEA+XAUUSD rule: multiplier=0.2, stop after TP2");
-  }
 
   if(stopLossMultiplier < 0) {
     return NormalizeDouble(currentStop, digits); // No multiplier set, return original SL
   }
 
-  if (tpHitLevel == 1) {
-    // Use OrderOpenPrice and not signal.entry, because of slippage, actual open price might differ slightly
-    double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * stopLossMultiplier;
-    newSL = isBuy ? OrderOpenPrice() - diff : OrderOpenPrice() + diff;
-  } else if(reducedTrailingAfterTP2 && tpHitLevel > 2) {
-    PrintLog(": THEA+XAUUSD TP2+ hit - reduced trailing to TP" + (tpHitLevel - 1));
-    newSL = signal.tpLevels[tpHitLevel - 3]; // If TP3 is hit (tpHitLevel is 3), use TP1 as new SL (array index 0) etc.
-  } else {
-    if (signal.tpCount < tpHitLevel) {
-      PrintLog(": Invalid TP hit level " + IntegerToString(tpHitLevel) +
-               " for GID=" + IntegerToString(signal.groupId) +
-               ", using original SL");
-      return currentStop;
+  // Strategy selection based on input parameter
+  if (trailingStopStrategy == 0) {
+    // Aggressive strategy: TP1->BE, TP2->TP1, TP3->TP2, etc.
+    if (tpHitLevel == 1) {
+      // TP1 hit: Trail to breakeven (entry price)
+      newSL = OrderOpenPrice();
+      if(debugMode)
+        PrintLog(": Aggressive: TP1 hit - trailing to breakeven: " + DoubleToString(newSL, digits));
+    } else {
+      // TP2+ hit: Trail to previous TP level (TP2->TP1, TP3->TP2, etc.)
+      if (signal.tpCount < tpHitLevel) {
+        PrintLog(": Invalid TP hit level " + IntegerToString(tpHitLevel) +
+                 " for GID=" + IntegerToString(signal.groupId) +
+                 ", using original SL");
+        return currentStop;
+      }
+      newSL = signal.tpLevels[tpHitLevel - 2]; // TP2 hit (level 2) -> TP1 (index 0), TP3 hit (level 3) -> TP2 (index 1)
+      if(debugMode)
+        PrintLog(": Aggressive: TP" + IntegerToString(tpHitLevel) + " hit - trailing to TP" + IntegerToString(tpHitLevel - 1) +
+                 ": " + DoubleToString(newSL, digits));
     }
-    newSL = signal.tpLevels[tpHitLevel - 2]; // If TP2 is hit (tpHitLevel is 2), use TP1 as new SL (array index 0)
+  } else {
+    // Conservative strategy: TP1->nothing, TP2->BE, TP3->TP2, etc.
+    if (tpHitLevel == 1) {
+      // TP1 hit: Use standard multiplier logic (partial trailing)
+      double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * stopLossMultiplier;
+      newSL = isBuy ? OrderOpenPrice() - diff : OrderOpenPrice() + diff;
+      if(debugMode)
+        PrintLog(": Conservative: TP1 hit - partial trailing with multiplier: " + DoubleToString(newSL, digits));
+    } else if (tpHitLevel == 2) {
+      // TP2 hit: Trail to breakeven (entry price)
+      newSL = OrderOpenPrice();
+      if(debugMode)
+        PrintLog(": Conservative: TP2 hit - trailing to breakeven: " + DoubleToString(newSL, digits));
+    } else {
+      // TP3+ hit: Trail to previous TP level (TP3->TP2, TP4->TP3, etc.)
+      if (signal.tpCount < tpHitLevel) {
+        PrintLog(": Invalid TP hit level " + IntegerToString(tpHitLevel) +
+                 " for GID=" + IntegerToString(signal.groupId) +
+                 ", using original SL");
+        return currentStop;
+      }
+      newSL = signal.tpLevels[tpHitLevel - 2]; // TP3 hit (level 3) -> TP2 (index 1), TP4 hit (level 4) -> TP3 (index 2)
+      if(debugMode)
+        PrintLog(": Conservative: TP" + IntegerToString(tpHitLevel) + " hit - trailing to TP" + IntegerToString(tpHitLevel - 1) +
+                 ": " + DoubleToString(newSL, digits));
+    }
   }
 
 // Validate SL direction for BUY/SELL - ensure it moves in favorable direction only
@@ -1404,8 +1427,9 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
   }
 
   if(debugMode)
-    PrintLog(": SL calculation successful - Channel:" + channelName +
-             " Symbol:" + symbolUpper + " Level:" + IntegerToString(tpHitLevel) +
+    PrintLog(": SL calculation successful - Strategy:" + IntegerToString(trailingStopStrategy) +
+             " Channel:" + channelName +
+             " Symbol:" + signal.symbol + " Level:" + IntegerToString(tpHitLevel) +
              " Multiplier:" + DoubleToString(stopLossMultiplier, 2) +
              " Original:" + DoubleToString(currentStop, digits) +
              " New:" + DoubleToString(newSL, digits) +
@@ -1760,10 +1784,14 @@ void SetSignalLotSizes(Signal &signal)
 
 //+--------------------------------------------------------------------------+
 //| ReduceStopLossDistance: Decreases the stop loss of a signal by a factor. |
+//| Only applies to XAUUSD, other instruments keep original stop loss        |
 //+--------------------------------------------------------------------------+
 void ReduceStopLossDistance(Signal &signal, bool isStored)
 {
   if (stopLossReductionFactor <= 0.0 || stopLossReductionFactor >= 1.0 || signal.entry == 0.0) return;
+  
+  // Only apply stop loss reduction to XAUUSD
+  if (StringFind(signal.symbol, "XAUUSD") == -1) return;
   double originalStopLoss = signal.stopLoss;
 // for BUY, (entry - SL) is positive and we add this to the SL to reduce its distance from entry
 // for SELL, (entry - SL) is negative and we subtract this from the SL to reduce its distance from entry
