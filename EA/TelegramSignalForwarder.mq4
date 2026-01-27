@@ -1374,7 +1374,7 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
       return currentStop;
     }
     // aggressive:   TP2 hit (level 2) -> TP1 (index 0), TP3 hit (level 3) -> TP2 (index 1)
-    // conservative: TP3 hit (level 3) -> TP2 (index 1), TP4 hit (level 4) -> TP3 (index 2)
+    // conservative: TP3 hit (level 3) -> TP1 (index 0), TP4 hit (level 4) -> TP2 (index 1)
     newSL = signal.tpLevels[tpHitLevel - (aggressiveTrailingStopStrategy ? 2 : 3)];
     if(debugMode) {
       string strategyLabel = aggressiveTrailingStopStrategy ? "Aggressive" : "Conservative";
