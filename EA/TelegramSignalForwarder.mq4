@@ -23,7 +23,7 @@ input string lotSizeFactorConfig = ""; // Lot size factor. Format: "channel1:fac
 input double defaultLotSizeFactor = 1.0; // Default TP Weighting, 1.0 = same lots, ~0.7 = exponential
 input int    limitOrderExpirationMinutes = 30; // Limit order expiration in minutes
 input string channelAllowList = ""; // Channel allowlist. If unfilled, allow all groups. Ex. "THEA,FXPL"
-input double stopLossReductionFactor = 0.0; // Factor to reduce original SL for GOLD - 0.0 no change, 0.2 reduce by 20% etc.
+input double stopLossReductionFactor = 0.0; // Factor to reduce original SL for XAUUSD - 0.0 no change, 0.2 reduce by 20% etc.
 input bool   aggressiveTrailingStopStrategy = true; // true=Aggressive (TP1->BE, TP2->TP1), false=Conservative (TP1->nothing, TP2->BE, TP3->TP1)
 
 //+------------------------------------------------------------------+
@@ -1342,8 +1342,8 @@ void ProcessDynamicTrailingStop()
 
 //+------------------------------------------------------------------+
 //| CalculateNewSL: Calculate new SL based on TP hit level         |
-//| Strategy 0 (Aggressive): TP1->BE, TP2->TP1, TP3->TP2, etc.    |
-//| Strategy 1 (Conservative): TP1->nothing, TP2->BE, TP3->TP2    |
+//| Aggressive strategy: TP1->BE, TP2->TP1, TP3->TP2, etc.        |
+//| Conservative strategy: TP1->nothing, TP2->BE, TP3->TP2        |
 //+------------------------------------------------------------------+
 double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string channelName)
 {
@@ -1367,7 +1367,7 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
     if(debugMode)
       PrintLog(": breakeven TP hit - partial trailing with multiplier: " + DoubleToString(newSL, digits));
   } else {
-    // TP2+ hit: Trail to previous TP level
+    // TP2+ (aggressive) or TP3+ (conservative) hit: Trail to previous TP level
     // Aggressive: 1 TP behind, conservative: 2 TP behind
     if (signal.tpCount < tpHitLevel) {
       PrintLog(": Invalid TP hit level " + IntegerToString(tpHitLevel) +
@@ -1783,8 +1783,10 @@ void ReduceStopLossDistance(Signal &signal, bool isStored)
 {
   if (stopLossReductionFactor <= 0.0 || stopLossReductionFactor >= 1.0 || signal.entry == 0.0) return;
 
-// Only apply stop loss reduction to XAUUSD
-  if (StringFind(signal.symbol, "XAUUSD") == -1) return;
+// Only apply stop loss reduction to XAUUSD (case-insensitive)
+  string symbolUpper = signal.symbol;
+  StringToUpper(symbolUpper);
+  if (StringFind(symbolUpper, "XAUUSD") == -1) return;
   double originalStopLoss = signal.stopLoss;
 // for BUY, (entry - SL) is positive and we add this to the SL to reduce its distance from entry
 // for SELL, (entry - SL) is negative and we subtract this from the SL to reduce its distance from entry
