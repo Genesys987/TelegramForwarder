@@ -134,7 +134,7 @@ int     GetMagic(string channelName);
 double  GetLotSizeFactorForChannel(string channelName);
 void    SetSignalLotSizes(Signal &signal);
 void    ReduceStopLossDistance(Signal &signal, bool isStored);
-bool IsTradeAllowed(Signal &signal);
+bool    IsSignalAllowed(Signal &signal);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -205,7 +205,7 @@ void OnTimer()
     return; // No valid signal
   }
 
-  if(!IsTradeAllowed(signal)) {
+  if(!IsSignalAllowed(signal)) {
     PrintLog("Trade not allowed: " + signal.type + " signal from channel '" + signal.channelName + "' - GID=" + IntegerToString(signal.groupId) + " with " + IntegerToString(signal.tpCount) + " TP levels");
     return;
   }
@@ -1811,10 +1811,10 @@ void ReduceStopLossDistance(Signal &signal, bool isStored)
 //+------------------------------------------------------------------+
 //| Disallows a trade if it's over the single-channel exposure limit.|
 //+------------------------------------------------------------------+
-bool IsTradeAllowed(Signal &signal)
+bool IsSignalAllowed(Signal &signal)
 {
   string symbolUpper = signal.symbol;
-  StringUpper(symbolUpper);
+  StringToUpper(symbolUpper);
 // Gold (XAUUSD) is always allowed, no exposure limit
 // If exposureLimit is 0, feature is turned off
   if (StringFind(symbolUpper, "XAUUSD") != -1 || exposureLimit == 0) {
@@ -1826,7 +1826,8 @@ bool IsTradeAllowed(Signal &signal)
   for (int i = 0; i < OrdersTotal(); i++) {
     if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
       string sym = OrderSymbol();
-      if (StringFind(symbolUpper, "XAUUSD") == -1) {  // Exclude gold
+      StringToUpper(sym);
+      if (StringFind(sym, "XAUUSD") == -1) {  // Exclude gold
         OrderCommentInfo info = ParseOrderComment();
         if (info.isValid && info.channelName == signal.channelName) {
           openPositionsCount++;
