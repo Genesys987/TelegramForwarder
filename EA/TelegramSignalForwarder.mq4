@@ -1376,9 +1376,11 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
     // aggressive:   TP2 hit (level 2) -> TP1 (index 0), TP3 hit (level 3) -> TP2 (index 1)
     // conservative: TP3 hit (level 3) -> TP2 (index 1), TP4 hit (level 4) -> TP3 (index 2)
     newSL = signal.tpLevels[tpHitLevel - (aggressiveTrailingStopStrategy ? 2 : 3)];
-    if(debugMode)
-      PrintLog(": Aggressive: TP" + IntegerToString(tpHitLevel) + " hit - trailing to TP" + IntegerToString(tpHitLevel - 1) +
+    if(debugMode) {
+      string strategyLabel = aggressiveTrailingStopStrategy ? "Aggressive" : "Conservative";
+      PrintLog(": " + strategyLabel + ": TP" + IntegerToString(tpHitLevel) + " hit - trailing to TP" + IntegerToString(tpHitLevel - 1) +
                ": " + DoubleToString(newSL, digits));
+    }
   }
 
 // Validate SL direction for BUY/SELL - ensure it moves in favorable direction only
