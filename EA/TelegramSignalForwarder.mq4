@@ -1359,11 +1359,13 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
   }
 
   // implication: when conservative, we don't do anything at all for TP1
-  if (tpHitLevel >= (aggressiveTrailingStopStrategy ? 1 : 2)) {
+  if (!aggressiveTrailingStopStrategy && tpHitLevel == 1) {
+    // do nothing
+  }  else if(tpHitLevel == (aggressiveTrailingStopStrategy ? 1 : 2)){
     double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * stopLossMultiplier;
     newSL = isBuy ? OrderOpenPrice() - diff : OrderOpenPrice() + diff;
     if(debugMode)
-      PrintLog(": TP" + IntegerToString(tpHitLevel) + " hit - partial trailing with multiplier: " + DoubleToString(newSL, digits));
+      PrintLog(": breakeven TP hit - partial trailing with multiplier: " + DoubleToString(newSL, digits));
   } else {
     // TP2+ hit: Trail to previous TP level
     // Aggressive: 1 TP behind, conservative: 2 TP behind
@@ -1376,9 +1378,8 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
     // aggressive:   TP2 hit (level 2) -> TP1 (index 0), TP3 hit (level 3) -> TP2 (index 1)
     // conservative: TP3 hit (level 3) -> TP1 (index 0), TP4 hit (level 4) -> TP2 (index 1)
     newSL = signal.tpLevels[tpHitLevel - (aggressiveTrailingStopStrategy ? 2 : 3)];
-    if(debugMode) {
-      string strategyLabel = aggressiveTrailingStopStrategy ? "Aggressive" : "Conservative";
-      PrintLog(": " + strategyLabel + ": TP" + IntegerToString(tpHitLevel) + " hit - trailing to TP" + IntegerToString(tpHitLevel - 1) +
+    if(debugMode)
+      PrintLog(": TP" + IntegerToString(tpHitLevel) + " hit - trailing to TP" + IntegerToString(tpHitLevel - 1) +
                ": " + DoubleToString(newSL, digits));
     }
   }
