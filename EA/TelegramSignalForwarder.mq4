@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 // Formatting style: K&R, 2 spaces
 #property strict
-#property version "2.14.1"
+#property version "2.15.0"
 
 #define MAX_TP_LEVELS 10
 
@@ -25,6 +25,7 @@ input int    limitOrderExpirationMinutes = 30; // Limit order expiration in minu
 input string channelAllowList = ""; // Channel allowlist. If unfilled, allow all groups. Ex. "THEA,FXPL"
 input double stopLossReductionFactor = 0.0; // Factor to reduce original SL for XAUUSD - 0.0 no change, 0.2 reduce by 20% etc.
 input bool   aggressiveTrailingStopStrategy = true; // true=Aggressive (TP1->BE, TP2->TP1), false=Conservative (TP1->nothing, TP2->BE, TP3->TP1)
+input int    exposureLimit = 0; // maximum amount of simultaneously open trades per channel, 0 = all allowed
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -133,6 +134,7 @@ int     GetMagic(string channelName);
 double  GetLotSizeFactorForChannel(string channelName);
 void    SetSignalLotSizes(Signal &signal);
 void    ReduceStopLossDistance(Signal &signal, bool isStored);
+bool    IsSignalAllowed(Signal &signal);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -201,6 +203,11 @@ void OnTimer()
 // Check if we have a valid signal
   if(!signal.isValid) {
     return; // No valid signal
+  }
+
+  if(!IsSignalAllowed(signal)) {
+    PrintLog("Trade not allowed: " + signal.type + " signal from channel '" + signal.channelName + "' - GID=" + IntegerToString(signal.groupId) + " with " + IntegerToString(signal.tpCount) + " TP levels");
+    return;
   }
 
   if(!IsChannelAllowed(signal.channelName)) {
@@ -1799,3 +1806,37 @@ void ReduceStopLossDistance(Signal &signal, bool isStored)
              " to " + DoubleToString(signal.stopLoss, 2));
 }
 //+--------------------------------------------------------------------------+
+
+
+//+------------------------------------------------------------------+
+//| Disallows a trade if it's over the single-channel exposure limit.|
+//+------------------------------------------------------------------+
+bool IsSignalAllowed(Signal &signal)
+{
+  string symbolUpper = signal.symbol;
+  StringToUpper(symbolUpper);
+// Gold (XAUUSD) is always allowed, no exposure limit
+// If exposureLimit is 0, feature is turned off
+  if (StringFind(symbolUpper, "XAUUSD") != -1 || exposureLimit == 0) {
+    return true;
+  }
+
+// Count open forex positions for the same channel
+  int openPositionsCount = 0;
+  for (int i = 0; i < OrdersTotal(); i++) {
+    if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+      string sym = OrderSymbol();
+      StringToUpper(sym);
+      if (StringFind(sym, "XAUUSD") == -1) {  // Exclude gold
+        OrderCommentInfo info = ParseOrderComment();
+        if (info.isValid && info.channelName == signal.channelName) {
+          openPositionsCount++;
+        }
+      }
+    }
+  }
+
+// Allow if count is less than limit
+  return openPositionsCount < exposureLimit;
+}
+//+------------------------------------------------------------------+
