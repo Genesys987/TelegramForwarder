@@ -172,7 +172,17 @@ async def handle_new_message(event):
                         f"Nincs GID találat (ID: {reply_to_msg_id}). A kereskedési utasítás nem lett feldolgozva!"
                     )
             else:
-                logger.info("Ismeretlen kereskedési utasítás.")
+                # Check if reply contains a new signal instead of just logging unknown
+                signal_data = parse_signal(message_text)
+                if signal_data:
+                    logger.info("Reply üzenetben új szignál felismerve!")
+                    group_id = await process_new_standard_signal(
+                        message_text, message_id, message.date, chat_title
+                    )
+                    if group_id is not None:
+                        await forward_to_archive(message, chat_title, group_id)
+                else:
+                    logger.info("Ismeretlen kereskedési utasítás.")
 
         else:
             logger.error(
