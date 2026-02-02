@@ -235,6 +235,8 @@ def parse_single_line_signal(text) -> SignalData | None:
             r"I[\'’]?M\s+(SELLING|BUYING)\s+([\w\.\/\-]+)\s+NOW\s*\(([\d\-\s@\.]+)\)",  # I'M SELLING XAUUSD NOW (3337 - 3340)
             # New NOW patterns with optional ranges
             r"([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s+([\d\s\-\.]+)",  # GOLD Sell Now 4086 - 4090
+            r"🔽([\w\.\/\-]+)\s+(BUY|SELL)\s+([\d\.]+)",  # 🔽GOLD SELL 4766.00
+            r"([🤑💰✅]\s*TP\d*\s*:?\s*[\d\.]+)",  # Emoji TP formats like "✅TP1 4763"
             r"#([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW",  # #EURAUD SELL NOW
             # NEW: Buy here around pattern for single line parsing
             r"([\w\.\/\-]+)\s+(BUY|SELL)\s+here\s+around\s+([\d\.]+)",  # XAUUSD Buy here around 4485
@@ -314,6 +316,12 @@ def parse_single_line_signal(text) -> SignalData | None:
                     signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                     signal.signal_type = match.group(2).upper()
                     signal.entry = parse_entry_price(match.group(3), signal.signal_type)
+                elif pattern == r"🔽([\w\.\/\-]+)\s+(BUY|SELL)\s+([\d\.]+)":
+                    # 🔽SYMBOL BUY/SELL price
+                    raw_symbol = match.group(1).upper()
+                    signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                    signal.signal_type = match.group(2).upper()
+                    signal.entry = float(match.group(3))
                 elif "here" in pattern and "around" in pattern:
                     # "Buy here around" format: XAUUSD Buy here around 4485
                     raw_symbol = match.group(1).upper()
@@ -473,6 +481,17 @@ def parse_signal(text: str) -> SignalData | None:
                 signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                 signal.signal_type = match_infinity_at.group(2).upper()
                 signal.entry = float(match_infinity_at.group(3))
+                continue
+
+            # Format 0d: NEW - 🔽SYMBOL BUY/SELL price format  
+            match_down_arrow = re.match(
+                r"^🔽([\w\.\/\-]+)\s+(BUY|SELL)\s+([\d\.]+)", line, re.IGNORECASE
+            )
+            if match_down_arrow:
+                raw_symbol = match_down_arrow.group(1).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_down_arrow.group(2).upper()
+                signal.entry = float(match_down_arrow.group(3))
                 continue
 
             # Format 0: "#XAUUSD SELL" - hash prefix with symbol and action
@@ -816,12 +835,6 @@ def parse_signal(text: str) -> SignalData | None:
                     if tp_pattern == r"TP\s+(\d+)\s+([\d\.]+)":
                         # For numbered format, use the second group (the price)
                         tp_value = float(m.group(2))
-                        if tp_value > 0.1:
-                            take_profits.append(tp_value)
-                        tp_found = True
-                    # Handle TP dots format "TP. 5220"
-                    elif tp_pattern == r"TP\.\s*([\d\.]+)":
-                        tp_value = float(m.group(1))
                         if tp_value > 0.1:
                             take_profits.append(tp_value)
                         tp_found = True

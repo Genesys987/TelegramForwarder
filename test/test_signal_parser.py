@@ -12,8 +12,8 @@ from signal_parser import parse_signal
 
 
 class TestSignalParser(unittest.TestCase):
-    def test_all_50_user_signals(self):
-        """Test all 50 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
+    def test_all_51_user_signals(self):
+        """Test all 51 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
 
         signals = [
             # Signal 1: Standard BUY format
@@ -476,6 +476,15 @@ class TestSignalParser(unittest.TestCase):
                 [4486.3, 4487.8, 4490.8],
                 4379.8,
             ),
+            # Signal 51: NEW - 🔽GOLD SELL format with direct entry price and multiple TPs
+            (
+                "🔽GOLD SELL 4766.00\n\n✅TP1 4763\n✅TP2 4756\n✅TP3 4750\n✅TP4 4745\n✅TP5 4740\n✅TP6 4736\n✅TP7 4730\n✅TP8 4700\n❌SL   4780",
+                "SELL",
+                "XAUUSD",
+                4766.0,
+                [4763.0, 4756.0, 4750.0, 4745.0, 4740.0, 4736.0, 4730.0, 4700.0],
+                4780.0,
+            ),
         ]
 
         for i, (
@@ -518,7 +527,7 @@ class TestSignalParser(unittest.TestCase):
 
                 # Note: Open-only TP signals have take_profits = [0] which is now valid
 
-        print("✅ All 50 user-provided signal formats passed!")
+        print("✅ All 51 user-provided signal formats passed!")
 
     def test_invisible_characters(self):
         """Test signal parsing with invisible/hidden characters like non-breaking spaces, zero-width spaces, etc."""
