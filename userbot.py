@@ -303,7 +303,7 @@ async def handle_new_message(event):
 # --- Fő Feldolgozó Függvények ---
 sl_clause = "(sl|stoploss|stop loss)?"
 stoploss_regexp = (
-    rf"{sl_clause}.*(level|change|move|moving|adjust|set|update).*{sl_clause}.*\d+"
+    rf"{sl_clause}.*(change|move|moving|adjust|set|update).*{sl_clause}.*\d+"
 )
 
 
