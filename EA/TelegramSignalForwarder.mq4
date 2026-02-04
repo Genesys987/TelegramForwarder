@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 // Formatting style: K&R, 2 spaces
 #property strict
-#property version "2.15.1"
+#property version "2.15.2"
 
 #define MAX_TP_LEVELS 10
 
@@ -800,8 +800,8 @@ void SendOrders(Signal &signal)
   color cols[6] = { clrBlue, clrGreen, clrRed, clrYellow, clrMagenta, clrCyan };
   SetSignalLotSizes(signal);
 
-// We allow entering halfway until TP1
-  double allowedEntryLevel = (signal.entry + tp1) / 2;
+// We allow entering until TP1
+  double allowedEntryLevel = tp1;
 
 // Create orders for each TP level
   for(int k=0; k < signal.tpCount; k++) {
@@ -1815,14 +1815,14 @@ bool IsSignalAllowed(Signal &signal)
 {
   string symbolUpper = signal.symbol;
   StringToUpper(symbolUpper);
-  // Gold (XAUUSD) is always allowed, no exposure limit
-  // If exposureLimit is 0, feature is turned off
+// Gold (XAUUSD) is always allowed, no exposure limit
+// If exposureLimit is 0, feature is turned off
   if (StringFind(symbolUpper, "XAUUSD") != -1 || exposureLimit == 0) {
     return true;
   }
 
-  // Count unique open forex group IDs for the same channel.
-  // We treat each groupId as one exposure unit regardless of how many orders belong to it.
+// Count unique open forex group IDs for the same channel.
+// We treat each groupId as one exposure unit regardless of how many orders belong to it.
   int seenGroupIds[];
   int seenCount = 0;
   ArrayResize(seenGroupIds, 0);
@@ -1840,7 +1840,10 @@ bool IsSignalAllowed(Signal &signal)
           // Check whether this gid is already counted
           bool found = false;
           for (int j = 0; j < seenCount; j++) {
-            if (seenGroupIds[j] == gid) { found = true; break; }
+            if (seenGroupIds[j] == gid) {
+              found = true;
+              break;
+            }
           }
 
           // If new gid, remember it and increase unique count
@@ -1858,7 +1861,7 @@ bool IsSignalAllowed(Signal &signal)
     }
   }
 
-  // Allow if unique group count is less than the configured limit
+// Allow if unique group count is less than the configured limit
   return seenCount < exposureLimit;
 }
 //+------------------------------------------------------------------+
