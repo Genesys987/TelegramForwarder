@@ -228,7 +228,7 @@ def parse_single_line_signal(text) -> SignalData | None:
             # Enhanced patterns for NOW signals with emojis
             r"🚨?\s*([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*🚨?",  # 🚨 GOLD SELL NOW 🚨
             r"📣([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*📣",  # 📣XAUUSD BUY NOW 📣
-            r"♾([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*@\s*([\d\.]+)",  # ♾GOLD BUY NOW @ 4484.8
+            r"♾️?([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*@\s*([\d\.]+)",  # ♾GOLD BUY NOW @ 4484.8
             r"(BUY|SELL)\s+([\w\.\/\-]+)\s+NOW",  # BUY GOLD NOW
             r"([\w\.\/\-]+)\s+NOW\s+(BUY|SELL)",  # GOLD NOW SELL
             r"NOW\s+(BUY|SELL)\s+([\w\.\/\-]+)",  # NOW BUY BTCUSD
@@ -274,7 +274,7 @@ def parse_single_line_signal(text) -> SignalData | None:
                         raw_symbol = match.group(1).upper()
                         signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                         signal.signal_type = match.group(2).upper()
-                    elif pattern == r"♾([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*@\s*([\d\.]+)":
+                    elif pattern == r"♾️?([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*@\s*([\d\.]+)":
                         # ♾SYMBOL BUY/SELL NOW @ price
                         raw_symbol = match.group(1).upper()
                         signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
@@ -474,7 +474,7 @@ def parse_signal(text: str) -> SignalData | None:
 
             # Format 0c: NEW - ♾GOLD BUY NOW @ price format
             match_infinity_at = re.match(
-                r"^♾([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*@\s*([\d\.]+)", line, re.IGNORECASE
+                r"^♾️?([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*@\s*([\d\.]+)", line, re.IGNORECASE
             )
             if match_infinity_at:
                 raw_symbol = match_infinity_at.group(1).upper()
