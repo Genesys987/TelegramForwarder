@@ -6,7 +6,7 @@
 #property strict
 #property version "2.15.0"
 
-#define MAX_TP_LEVELS 10
+#define MAX_TP_LEVELS 15
 
 //+------------------------------------------------------------------+
 //|--- Input Parameters (EA Configuration)                         |
