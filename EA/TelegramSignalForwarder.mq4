@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 // Formatting style: K&R, 2 spaces
 #property strict
-#property version "2.15.0"
+#property version "2.15.2"
 
 #define MAX_TP_LEVELS 15
 
@@ -800,8 +800,8 @@ void SendOrders(Signal &signal)
   color cols[6] = { clrBlue, clrGreen, clrRed, clrYellow, clrMagenta, clrCyan };
   SetSignalLotSizes(signal);
 
-// We allow entering halfway until TP1
-  double allowedEntryLevel = (signal.entry + tp1) / 2;
+// We allow entering until TP1
+  double allowedEntryLevel = tp1;
 
 // Create orders for each TP level
   for(int k=0; k < signal.tpCount; k++) {
@@ -1821,8 +1821,12 @@ bool IsSignalAllowed(Signal &signal)
     return true;
   }
 
-// Count open forex positions for the same channel
-  int openPositionsCount = 0;
+// Count unique open forex group IDs for the same channel.
+// We treat each groupId as one exposure unit regardless of how many orders belong to it.
+  int seenGroupIds[];
+  int seenCount = 0;
+  ArrayResize(seenGroupIds, 0);
+
   for (int i = 0; i < OrdersTotal(); i++) {
     if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
       string sym = OrderSymbol();
@@ -1830,13 +1834,34 @@ bool IsSignalAllowed(Signal &signal)
       if (StringFind(sym, "XAUUSD") == -1) {  // Exclude gold
         OrderCommentInfo info = ParseOrderComment();
         if (info.isValid && info.channelName == signal.channelName) {
-          openPositionsCount++;
+          int gid = info.groupId;
+          if (gid == 0) continue; // ignore orders without a valid group id
+
+          // Check whether this gid is already counted
+          bool found = false;
+          for (int j = 0; j < seenCount; j++) {
+            if (seenGroupIds[j] == gid) {
+              found = true;
+              break;
+            }
+          }
+
+          // If new gid, remember it and increase unique count
+          if (!found) {
+            ArrayResize(seenGroupIds, seenCount + 1);
+            seenGroupIds[seenCount++] = gid;
+
+            // Early exit: if we've reached the exposure limit, disallow immediately
+            if (exposureLimit > 0 && seenCount >= exposureLimit) {
+              return false;
+            }
+          }
         }
       }
     }
   }
 
-// Allow if count is less than limit
-  return openPositionsCount < exposureLimit;
+// Allow if unique group count is less than the configured limit
+  return seenCount < exposureLimit;
 }
 //+------------------------------------------------------------------+
