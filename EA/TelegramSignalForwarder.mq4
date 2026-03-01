@@ -819,7 +819,7 @@ void SendOrders(Signal &signal)
     if (shouldUseLimitOrder) {
       PrintLog("Using limit order for TP level " + IntegerToString(k + 1));
     }
-    price = shouldUseLimitOrder ? allowedEntryLevel : (shouldBuy ? ask : bid);
+    price = shouldUseLimitOrder ? signal.entry : (shouldBuy ? ask : bid);
     int orderType = shouldBuy ? (shouldUseLimitOrder ? OP_BUYLIMIT : OP_BUY) : (shouldUseLimitOrder ? OP_SELLLIMIT : OP_SELL);
     string comment = FormatMT4Comment(signal.groupId, signal.channelName, k + 1);
     int magicNumber = GetMagic(signal.channelName);
