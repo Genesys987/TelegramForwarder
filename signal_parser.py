@@ -57,8 +57,10 @@ def clean_invisible_chars(text: str) -> str:
 
         # Clean up multiple spaces that might have been introduced
         cleaned_line = re.sub(r" +", " ", cleaned_line)
-        # Remove markdown characters (but preserve '#' used in signal format)
-        cleaned_line = re.sub(r"[*_=+]", "", cleaned_line)
+        # Remove markdown characters (but preserve '#' used in signal format and '+' used as price range separator)
+        cleaned_line = re.sub(r"[*_=]", "", cleaned_line)
+        # Remove '+' only when it's NOT between two digits (preserve "5360+5350" style ranges)
+        cleaned_line = re.sub(r"(?<!\d)\+|\+(?!\d)", "", cleaned_line)
 
         cleaned_lines.append(cleaned_line)
 
@@ -149,6 +151,8 @@ def parse_entry_price(entry_text, signal_type):
     # Handle different range separators (including space-separated like "3340.5 -3338")
     if "/" in entry_text:
         split = entry_text.split("/")
+    elif "+" in entry_text:
+        split = entry_text.split("+")
     elif "-" in entry_text or "–" in entry_text or "—" in entry_text:
         # Handle various dash formats: regular dash (-), en dash (–), em dash (—)
         if " -" in entry_text:
@@ -380,7 +384,7 @@ def parse_single_line_signal(text) -> SignalData | None:
         r"SL\.\s*([\d\.]+)",  # SL. 5208 (dots format)
         r"SL\s*:\s*([\d\.]+)",  # SL: 88600.00 (with colon)
         r"SL\s+([\d\.]+)",  # SL 88600.00 (without colon)
-        r"Stop\s+loss\s+(?:at\s+)?([\d\.]+)",  # Stop loss at 88600.00
+        r"Stop\s+Loss\s*(?:\([^)]*\))?\s*:?\s*(?:at\s+)?([\d\.]+)",  # Stop Loss (SL): 5389.8 or Stop loss at 88600.00
     ]
 
     for sl_pattern in sl_patterns:
@@ -504,6 +508,18 @@ def parse_signal(text: str) -> SignalData | None:
                 signal.signal_type = match_hash_symbol.group(2).upper()
                 continue
 
+            # Format 0e: "XAUUSD: BUY NOW" - colon after symbol, entry on separate line
+            match_symbol_colon_action = re.match(
+                r"^([\w\.\/\-]+):\s*(BUY|SELL)(?:\s+NOW)?",
+                line,
+                re.IGNORECASE,
+            )
+            if match_symbol_colon_action:
+                raw_symbol = match_symbol_colon_action.group(1).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_symbol_colon_action.group(2).upper()
+                continue
+
             # Format 1a: "SELL FROM 4210/4215" - action FROM price without symbol
             match_type_from_no_symbol = re.match(
                 r"^(BUY|SELL)\s+FROM\s+([\d\/\.\-@–—]+)",
@@ -515,6 +531,30 @@ def parse_signal(text: str) -> SignalData | None:
                 # No symbol - will be filled by fill_symbol_if_missing()
                 entry_text = match_type_from_no_symbol.group(2)
                 signal.entry = parse_entry_price(entry_text, signal.signal_type)
+                continue
+
+            # Format 0f: "GOLD BUY NOW @ price" - no prefix, @ separator before price
+            match_symbol_now_at = re.match(
+                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+NOW\s*@\s*([\d\.]+)",
+                line,
+                re.IGNORECASE,
+            )
+            if match_symbol_now_at:
+                raw_symbol = match_symbol_now_at.group(1).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_symbol_now_at.group(2).upper()
+                signal.entry = float(match_symbol_now_at.group(3))
+                # Check for inline SL on same line (e.g., "GOLD SELL NOW @ 5393.3 Stop Loss (SL): 5398.3")
+                if not signal.stop_loss:
+                    inline_sl = re.search(
+                        r"Stop\s+Loss\s*(?:\([^)]*\))?\s*:?\s*(?:at\s+)?([\d\.]+)",
+                        line, re.IGNORECASE
+                    )
+                    if inline_sl:
+                        try:
+                            signal.stop_loss = float(inline_sl.group(1))
+                        except ValueError:
+                            pass
                 continue
 
             # Format 1b: "GOLD SELL FROM 3313/3315" or "SYMBOL BUY FROM price" (check this first, it's more specific)
@@ -530,6 +570,17 @@ def parse_signal(text: str) -> SignalData | None:
                 # Also capture the entry price from the FROM clause
                 entry_text = match_symbol_type_from.group(3)
                 signal.entry = parse_entry_price(entry_text, signal.signal_type)
+                # Check for inline SL on same line (e.g., "GOLD SELL NOW @ 5393.3 Stop Loss (SL): 5398.3")
+                if not signal.stop_loss:
+                    inline_sl = re.search(
+                        r"Stop\s+Loss\s*(?:\([^)]*\))?\s*:?\s*(?:at\s+)?([\d\.]+)",
+                        line, re.IGNORECASE
+                    )
+                    if inline_sl:
+                        try:
+                            signal.stop_loss = float(inline_sl.group(1))
+                        except ValueError:
+                            pass
                 continue
 
             # Format 1.5: "Sell Gold @3339-3344" or similar @ formats including space variations
@@ -785,7 +836,7 @@ def parse_signal(text: str) -> SignalData | None:
 
             # Look for ENTRY keyword with optional colon (support unicode dashes) - LEGACY
             m = re.search(
-                r"ENTRY\s*:?\s*(?:at\s+)?([\d\/\.\-@–—\s]+)", line, re.IGNORECASE
+                r"ENTRY\s*:?\s*(?:at\s+)?([\d\/\.\-@–—\+\s]+)", line, re.IGNORECASE
             )
             if m:
                 entry_text = m.group(1)
@@ -945,6 +996,7 @@ def parse_signal(text: str) -> SignalData | None:
                 r"SL\s+at\s+([\d\.]+)",  # NEW: SL at 4560
                 r"SL\.\s*([\d\.]+)",  # NEW: SL. 5208 (dots format)
                 r"SL\s*:\s*\$?\s*([\d\.]+)(?:\s*\([^)]*\))?",  # SL : $ 95300 or SL 4575 (150) - handle dollar sign and parentheses
+                r"Stop\s+Loss\s*(?:\([^)]*\))?\s*:?\s*(?:at\s+)?([\d\.]+)",  # Stop Loss (SL): 5389.8 or Stop loss at 88600.00
                 r"(?:STOP\s*LOSS|SL|S\.L)\s*:?\s*(?:at\s+)?([\d\.]+)(?:\s*\([^)]*\))?",  # Regular SL with optional parentheses, including S.L format
                 r"S\.L\s+([\d\.]+)",  # "S.L   115900" (S.L format)
             ]
