@@ -12,7 +12,7 @@ from signal_parser import parse_signal
 
 
 class TestSignalParser(unittest.TestCase):
-    def test_all_51_user_signals(self):
+    def test_all_55_user_signals(self):
         """Test all 55 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
 
         signals = [
