@@ -12,8 +12,8 @@ from signal_parser import parse_signal
 
 
 class TestSignalParser(unittest.TestCase):
-    def test_all_51_user_signals(self):
-        """Test all 51 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
+    def test_all_55_user_signals(self):
+        """Test all 55 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
 
         signals = [
             # Signal 1: Standard BUY format
@@ -485,6 +485,42 @@ class TestSignalParser(unittest.TestCase):
                 [4763.0, 4756.0, 4750.0, 4745.0, 4740.0, 4736.0, 4730.0, 4700.0],
                 4780.0,
             ),
+            # Signal 52: NEW - "XAUUSD: BUY NOW" colon-after-symbol format with separate ENTRY line
+            (
+                "XAUUSD: BUY NOW\n\nENTRY: 5338\nSL: 5333\nTP1: 5342\nTP2: 5345\nTP3: 5350\n\nWe recommend a max of 1% risk per trade",
+                "BUY",
+                "XAUUSD",
+                5338.0,
+                [5342.0, 5345.0, 5350.0],
+                5333.0,
+            ),
+            # Signal 53: NEW - "GOLD BUY NOW @ price" with "Stop Loss (SL):" format and "/Open" TP suffix
+            (
+                "GOLD BUY NOW @ 5394.8\nStop Loss (SL): 5389.8\nTP1: 5396.3\nTP2: 5397.8\nTP3:  5400.8/ Open",
+                "BUY",
+                "XAUUSD",
+                5394.8,
+                [5396.3, 5397.8, 5400.8],
+                5389.8,
+            ),
+            # Signal 54: NEW - "GOLD SELL NOW @ price Stop Loss (SL): sl" on one line, TPs on separate lines
+            (
+                "GOLD SELL NOW @ 5393.3 Stop Loss (SL): 5398.3\n\nTP1: 5391.8\nTP2: 5390.3\nTP3: 5387.3/ Open",
+                "SELL",
+                "XAUUSD",
+                5393.3,
+                [5391.8, 5390.3, 5387.3],
+                5398.3,
+            ),
+            # Signal 55: NEW - ENTRY with + range separator (5360+5350, BUY uses higher)
+            (
+                "XAUUSD BUY\n\nENTRY 5360+5350\n\nSL 5340\n\nTP 5365\nTP 5370\nTP 5375\nTP 5380\nTP 5385",
+                "BUY",
+                "XAUUSD",
+                5360.0,
+                [5365.0, 5370.0, 5375.0, 5380.0, 5385.0],
+                5340.0,
+            ),
         ]
 
         for i, (
@@ -527,7 +563,7 @@ class TestSignalParser(unittest.TestCase):
 
                 # Note: Open-only TP signals have take_profits = [0] which is now valid
 
-        print("✅ All 51 user-provided signal formats passed!")
+        print("✅ All 55 user-provided signal formats passed!")
 
     def test_invisible_characters(self):
         """Test signal parsing with invisible/hidden characters like non-breaking spaces, zero-width spaces, etc."""
