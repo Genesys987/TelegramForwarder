@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple test suite for the signal parser - tests all 22 user-provided signal formats
+Simple test suite for the signal parser - tests all 72 user-provided signal formats
 """
 
 import unittest
@@ -12,8 +12,8 @@ from signal_parser import parse_signal
 
 
 class TestSignalParser(unittest.TestCase):
-    def test_all_55_user_signals(self):
-        """Test all 55 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
+    def test_all_72_user_signals(self):
+        """Test all 72 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
 
         signals = [
             # Signal 1: Standard BUY format
@@ -521,6 +521,159 @@ class TestSignalParser(unittest.TestCase):
                 [5365.0, 5370.0, 5375.0, 5380.0, 5385.0],
                 5340.0,
             ),
+            # Signal 56: Format 1 - emoji prefix + GOLD BUY NOW @ price, Stop Loss (SL): sl, TP.. entries
+            (
+                "\U0001f4ca GOLD BUY NOW @ 5189.2\n\u26a0\ufe0f Stop Loss (SL): 5182.2\nTP1: 5192.2\nTP2: 5195.2\nTP3: 5199.2/ Open",
+                "BUY",
+                "XAUUSD",
+                5189.2,
+                [5192.2, 5195.2, 5199.2],
+                5182.2,
+            ),
+            # Signal 57: Format 2 - USDCHF BUY @ price, TP with parenthetical labels, SL:
+            (
+                "USDCHF BUY @ 0.7775\nTP: 0.7795 (scalper)\nTP: 0.7825 (intraday)\nTP: 0.7875 (swing)\nSL: 0.7707",
+                "BUY",
+                "USDCHF",
+                0.7775,
+                [0.7795, 0.7825, 0.7875],
+                0.7707,
+            ),
+            # Signal 58: Format 3a - SELL SYMBOL NOW price, SL.. and TP.. double-dot patterns
+            (
+                "SELL GBPUSD NOW 1.3417\nSL..1.3487\nTP..1.3350\nTP..1.3253",
+                "SELL",
+                "GBPUSD",
+                1.3417,
+                [1.3350, 1.3253],
+                1.3487,
+            ),
+            # Signal 59: Format 3b - SELL SYMBOL price, SL.. and TP.. double-dot
+            (
+                "SELL XAUUSD 5194\nSL..5212\nTP..5167\nTP..5125",
+                "SELL",
+                "XAUUSD",
+                5194.0,
+                [5167.0, 5125.0],
+                5212.0,
+            ),
+            # Signal 60: Format 3c - SELL SYMBOL range__ separator, SL.. TP.. double-dot
+            (
+                "SELL XAUUSD 5185 __ 5196\nSL..5210\nTP..5156\nTP..5092",
+                "SELL",
+                "XAUUSD",
+                5185.0,
+                [5156.0, 5092.0],
+                5210.0,
+            ),
+            # Signal 61: Format 4 - emoji symbol line (XAU/USD), Direction: BUY, Entry Price:
+            (
+                "\U0001f514XAU/USD\U0001f514\n\nDirection: BUY\nEntry Price: 5180.00\n\nTP1 5185.00\nTP2 5190.00\nTP3 5200.00\n\nSL 5160.00",
+                "BUY",
+                "XAUUSD",
+                5180.0,
+                [5185.0, 5190.0, 5200.0],
+                5160.0,
+            ),
+            # Signal 62: Format 5a - emoji GOLD SELL @ range
+            (
+                "\U0001f534 GOLD SELL @ 5199-5204\n\nSL: 5207\n\nTP: 5196\nTP: 5179",
+                "SELL",
+                "XAUUSD",
+                5199.0,
+                [5196.0, 5179.0],
+                5207.0,
+            ),
+            # Signal 63: Format 5b - emoji GOLD BUY @ range
+            (
+                "\U0001f535 GOLD BUY @ 5185-5180\n\nSL: 5177\n\nTP: 5188\nTP: 5205",
+                "BUY",
+                "XAUUSD",
+                5185.0,
+                [5188.0, 5205.0],
+                5177.0,
+            ),
+            # Signal 64: Format 6 - XAUUSD SELL now at price
+            (
+                "XAUUSD SELL now at 5214\nSL 5227\nTP 5160",
+                "SELL",
+                "XAUUSD",
+                5214.0,
+                [5160.0],
+                5227.0,
+            ),
+            # Signal 65: Format 7 - symbol-only first line, then BUY price, TPs, SL
+            (
+                "NZDUSD\n\nBUY 0.5938\n\nTP 0.5958\nTP 0.5988\nTP 0.6030\nSL 0.5868",
+                "BUY",
+                "NZDUSD",
+                0.5938,
+                [0.5958, 0.5988, 0.6030],
+                0.5868,
+            ),
+            # Signal 66: Format 8 - emoji SELL SYMBOL (@ price) with Take profit N at TP
+            (
+                "\U0001f534SELL \U0001f4c9 GBPUSD (@ 1.3366)\nTake profit 1\u27a1\ufe0fat 1.3335\nTake profit 2\u27a1\ufe0fat 1.3280\nTake profit 3\u27a1\ufe0fat 1.3235\nStop loss at 1.3431\n\nSignal chance of success: 87%",
+                "SELL",
+                "GBPUSD",
+                1.3366,
+                [1.3335, 1.3280, 1.3235],
+                1.3431,
+            ),
+            # Signal 67: Format 9 - heavily emoji-wrapped XAUUSD SELL, ENTRY: sl, TP:
+            (
+                "\U0001f525\U0001f43bXAUUSD SELL\U0001f43b\U0001f525\n\U0001f530ENTRY: 5190.08\nSL: 5202.00\nTP: 5170.00\n\nCopyright \u00a9 reserved from Metabear",
+                "SELL",
+                "XAUUSD",
+                5190.08,
+                [5170.0],
+                5202.0,
+            ),
+            # Signal 68: Format 10 - NEW TRADE IDEA preamble, XAUUSD SELL price, TP N, SL @
+            (
+                "NEW TRADE IDEA\n\nXAUUSD SELL 5156\n\nTP 1 5153\nTP 2 5152\nTP 3 5151\nTP 4 5120\n\nSL @ 5190\n\nProfits are NOT guarenteed...",
+                "SELL",
+                "XAUUSD",
+                5156.0,
+                [5153.0, 5152.0, 5151.0, 5120.0],
+                5190.0,
+            ),
+            # Signal 69: Format 11 - GOLD BUY + MORE BUY, superscript TP numbers, SL_
+            (
+                "GOLD BUY 5151\nMORE BUY 5148\n\nTP\u00b9 5154\nTP\u00b2 5157\nTP\u00b3 5160\nTP\u2074 5163\nTP\u2075 5166\nTP\u2076 5169\n\nSL_5140",
+                "BUY",
+                "XAUUSD",
+                5151.0,
+                [5154.0, 5157.0, 5160.0, 5163.0, 5166.0, 5169.0],
+                5140.0,
+            ),
+            # Signal 70: Format 12a - Sell SYMBOL, Entry -, Stop -, Take -
+            (
+                "#GBPCHF: trade idea\n\U0001f534Sell GBPCHF\n\U0001f518Entry - 1.0468\n\U0001f7e3Stop - 1.0475\n\U0001f7e1Take - 1.0456\n\nRisk 1% only",
+                "SELL",
+                "GBPCHF",
+                1.0468,
+                [1.0456],
+                1.0475,
+            ),
+            # Signal 71: Format 12b - Long SYMBOL, Entry Point -, Stop Loss -, Take Profit -
+            (
+                "\U0001f534Long NZDUSD\n\U0001f518Entry Point - 0.5912\n\U0001f7e3Stop Loss - 0.5902\n\U0001f7e1Take Profit - 0.5931\n\nRisk 1% only",
+                "BUY",
+                "NZDUSD",
+                0.5912,
+                [0.5931],
+                0.5902,
+            ),
+            # Signal 72: Format 12c - Buy GOLD, Entry Level -, Sl -, Tp -
+            (
+                "\U0001f534Buy GOLD\n\U0001f518Entry Level - 5191.4\n\U0001f7e3Sl - 5182.4\n\U0001f7e1Tp - 5206.0\n\nManage your risk",
+                "BUY",
+                "XAUUSD",
+                5191.4,
+                [5206.0],
+                5182.4,
+            ),
         ]
 
         for i, (
@@ -563,7 +716,7 @@ class TestSignalParser(unittest.TestCase):
 
                 # Note: Open-only TP signals have take_profits = [0] which is now valid
 
-        print("✅ All 55 user-provided signal formats passed!")
+        print("✅ All 72 user-provided signal formats passed!")
 
     def test_invisible_characters(self):
         """Test signal parsing with invisible/hidden characters like non-breaking spaces, zero-width spaces, etc."""
