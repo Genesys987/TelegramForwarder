@@ -693,8 +693,6 @@ def parse_signal(text: str) -> SignalData | None:
         # Take Profits parsing - consolidated and improved
         # Check for various TP patterns in order of specificity
         tp_patterns = [
-            r"[🤑💰✅]\s*TP\d*\s*:\s*([\d\.]+(?:/[\d\.]+)*(?:/OPEN)?|open)",  # Emoji TP formats like "💰TP1: 3289.0", "💰TP2: 3331" (with colon), includes /OPEN ignore
-            r"[🤑💰✅]\s*TP\d+\s+([\d\.]+(?:/[\d\.]+)*|open)",  # Emoji TP formats like "✅TP1 109700" (without colon)
             r"T\.P\d+\s+([\d\.]+|open)",  # "T.P1 114600", "T.P2 114500" (T.P format)
             r"TP\.(?!\.)\s*([0-9][\d\.]*)",  # NEW: "TP. 5220", "TP. 5222" (single dot format, not double)
             r"Target\d+\s*:\s*\$?\s*([\d\.]+)",  # NEW: "Target1: $ 94800", "Target2: $94300"
