@@ -836,7 +836,7 @@ def parse_signal(text: str) -> SignalData | None:
             ]
 
             for sl_pattern in sl_patterns:
-                m = re.search(sl_pattern, line_clean, re.IGNORECASE)
+                m = re.search(sl_pattern, line, re.IGNORECASE)
                 if m:
                     try:
                         signal.stop_loss = float(m.group(1))
