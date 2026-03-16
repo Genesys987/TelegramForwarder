@@ -654,7 +654,8 @@ def parse_signal(text: str) -> SignalData | None:
 
             entry_found = False
             for entry_pattern in entry_patterns:
-                entry_match = re.search(entry_pattern, line, re.IGNORECASE)
+                search_line = line if entry_pattern.startswith("🔊") else line_clean
+                entry_match = re.search(entry_pattern, search_line, re.IGNORECASE)
                 if entry_match:
                     entry_text = entry_match.group(1)
                     signal.entry = parse_entry_price(entry_text, signal.signal_type)
@@ -666,7 +667,7 @@ def parse_signal(text: str) -> SignalData | None:
 
             # Look for ENTRY keyword with optional colon (support unicode dashes) - LEGACY
             m = re.search(
-                r"ENTRY\s*:?\s*(?:at\s+)?([\d\/\.\-@–—\+\s]+)", line_clean, re.IGNORECASE
+                r"ENTRY\s*:?\s*(?:at\s+)?(\d[\d\/\.\-@–—\+\s]*)", line_clean, re.IGNORECASE
             )
             if m:
                 entry_text = m.group(1)
@@ -836,7 +837,7 @@ def parse_signal(text: str) -> SignalData | None:
             ]
 
             for sl_pattern in sl_patterns:
-                m = re.search(sl_pattern, line, re.IGNORECASE)
+                m = re.search(sl_pattern, line_clean, re.IGNORECASE)
                 if m:
                     try:
                         signal.stop_loss = float(m.group(1))
