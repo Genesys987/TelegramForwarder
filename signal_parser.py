@@ -13,6 +13,12 @@ symbol_mappings = {
     "XAU/USD": "XAUUSD",
 }
 
+# Translation table to normalize superscript digits to regular digits (TP¹ → TP1, etc.)
+SUPERSCRIPT_MAP = str.maketrans(
+    "\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079\u2070",
+    "1234567890",
+)
+
 
 def clean_invisible_chars(text: str) -> str:
     """
@@ -64,9 +70,7 @@ def clean_invisible_chars(text: str) -> str:
         cleaned_line = re.sub(r"(?<!\d)\+|\+(?!\d)", "", cleaned_line)
 
         # Normalize superscript digits to regular digits (TP¹ → TP1, etc.)
-        superscript_map = str.maketrans("\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079\u2070",
-                                        "1234567890")
-        cleaned_line = cleaned_line.translate(superscript_map)
+        cleaned_line = cleaned_line.translate(SUPERSCRIPT_MAP)
 
         cleaned_lines.append(cleaned_line)
 
