@@ -811,6 +811,7 @@ class TestSignalParser(unittest.TestCase):
             )
 
         print("✅ All invisible character signals passed!")
+        print("✅ All tests passed successfully!")
 
 
 if __name__ == "__main__":
