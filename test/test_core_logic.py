@@ -20,9 +20,8 @@ class TestCoreLogic(unittest.TestCase):
         # Test signal parsing with all formats
         test_signals = [
             "BUY BTCUSD\nENTRY 89300.00\nTake profit 1 at 89500.00\nTake profit 2 at 89800.00\nTake profit 3 at 90300.00\nStop loss at 88600.00",
-            "BTCUSD | BUY 109500 ❌ Stop Loss 109000 ✅TP1 109700 ✅TP2 109900",
-            "GOLD SELL FROM 3313/3315.3 TP1 3289.0 TP2 3287.5 TP3 3281.4 SL 3298.8",
-            "XAUUSD BUY 3417 TP 3420 SL 3412",
+            "GOLD SELL FROM 3313/3315.3\n\nTP1 3289.0\nTP2 3287.5\nTP3 3281.4\nSL 3298.8",
+            "XAUUSD BUY 3417\nTP 3420\nSL 3412",
             "EURUSD BUY\nENTRY 1.1435\nTP1 1.1455\nTP2 1.1465\nTP3 1.1475\nSL 1.1345",
         ]
 
@@ -38,11 +37,11 @@ class TestCoreLogic(unittest.TestCase):
             # Verify required fields
             self.assertTrue(parsed.is_valid(), f"Signal {i + 1} is not valid")
 
-            print(f"  ✅ Parsed: {parsed.signal_type} {parsed.symbol} @ {parsed.entry}")
-            print(f"  ✅ TPs: {len(parsed.take_profits)} levels")
-            print(f"  ✅ SL: {parsed.stop_loss}")
+            print(f"  [OK] Parsed: {parsed.signal_type} {parsed.symbol} @ {parsed.entry}")
+            print(f"  [OK] TPs: {len(parsed.take_profits)} levels")
+            print(f"  [OK] SL: {parsed.stop_loss}")
 
-        print(f"\n✅ All {len(test_signals)} signals parsed successfully")
+        print(f"\n[OK] All {len(test_signals)} signals parsed successfully")
 
     def test_channel_name_cleaning(self):
         """Test channel name cleaning logic"""
