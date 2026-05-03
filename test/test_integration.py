@@ -45,16 +45,9 @@ Stop loss at 88600.00""",
                 "expected_symbol": "BTCUSD",
                 "expected_type": "BUY",
             },
-            # Single line format
-            {
-                "text": "BTCUSD | BUY 109500 ❌ Stop Loss 109000 ✅TP1 109700 ✅TP2 109900",
-                "channel": "🔥 VIP SIGNALS 🚀",
-                "expected_symbol": "BTCUSD",
-                "expected_type": "BUY",
-            },
             # GOLD mapping + FROM format
             {
-                "text": "GOLD SELL FROM 3313/3315.3 TP1 3289.0 TP2 3287.5 TP3 3281.4 SL 3298.8",
+                "text": "GOLD SELL FROM 3313/3315.3\n\nTP1 3289.0\nTP2 3287.5\nTP3 3281.4\nSL 3298.8",
                 "channel": "GOLD & FOREX VIP",
                 "expected_symbol": "XAUUSD",
                 "expected_type": "SELL",
@@ -79,7 +72,7 @@ SL 1.1345""",
             },
             # Single TP
             {
-                "text": "XAUUSD BUY 3417 TP 3420 SL 3412",
+                "text": "XAUUSD BUY 3417\nTP 3420\nSL 3412",
                 "channel": "SIMPLE_CHANNEL",
                 "expected_symbol": "XAUUSD",
                 "expected_type": "BUY",

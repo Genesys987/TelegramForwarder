@@ -674,6 +674,15 @@ class TestSignalParser(unittest.TestCase):
                 [5206.0],
                 5182.4,
             ),
+            # Signal 73: "SYMBOL Free Signal!" header + standalone "⭕Sell!" + green-circle SL/TP/Entry
+            (
+                "\U0001f4c9EUR-USD Free Signal!\n\n\u2b55Sell!\n\u2014\n#EURUSD taps into a supply area after a liquidity sweep and shows rejection, signaling smart money distribution. Bearish continuation expected toward the imbalance below as downside pressure builds.\n\U0001f7e2Stop Loss: 1.1755\n\U0001f7e2Take Profit: 1.1697\n\U0001f7e2Entry: 1.1732\n\U0001f7e2Time Frame: 5H",
+                "SELL",
+                "EURUSD",
+                1.1732,
+                [1.1697],
+                1.1755,
+            ),
         ]
 
         for i, (
@@ -716,7 +725,7 @@ class TestSignalParser(unittest.TestCase):
 
                 # Note: Open-only TP signals have take_profits = [0] which is now valid
 
-        print("✅ All 72 user-provided signal formats passed!")
+        print("✅ All 73 user-provided signal formats passed!")
 
     def test_invisible_characters(self):
         """Test signal parsing with invisible/hidden characters like non-breaking spaces, zero-width spaces, etc."""

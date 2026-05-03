@@ -11,13 +11,8 @@ symbol_mappings = {
     "GODL": "XAUUSD",
     "BTC/USDT": "BTCUSD",
     "XAU/USD": "XAUUSD",
+    "EUR-USD": "EURUSD",
 }
-
-# Translation table to normalize superscript digits to regular digits (TP¹ → TP1, etc.)
-SUPERSCRIPT_MAP = str.maketrans(
-    "\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079\u2070",
-    "1234567890",
-)
 
 
 def clean_invisible_chars(text: str) -> str:
@@ -70,7 +65,9 @@ def clean_invisible_chars(text: str) -> str:
         cleaned_line = re.sub(r"(?<!\d)\+|\+(?!\d)", "", cleaned_line)
 
         # Normalize superscript digits to regular digits (TP¹ → TP1, etc.)
-        cleaned_line = cleaned_line.translate(SUPERSCRIPT_MAP)
+        superscript_map = str.maketrans("\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079\u2070",
+                                        "1234567890")
+        cleaned_line = cleaned_line.translate(superscript_map)
 
         cleaned_lines.append(cleaned_line)
 
@@ -631,6 +628,17 @@ def parse_signal(text: str) -> SignalData | None:
 
             # NEW: Standalone symbol-only line (sets symbol for subsequent BUY/SELL line)
             if not signal.symbol:
+                # NEW: "SYMBOL Free Signal!" header (e.g., "📉EUR-USD Free Signal!")
+                match_free_signal_header = re.match(
+                    r"^([\w\-\.\/]+)\s+Free\s+Signal[!]?$",
+                    line_clean,
+                    re.IGNORECASE,
+                )
+                if match_free_signal_header:
+                    raw_symbol = match_free_signal_header.group(1).upper().replace("-", "")
+                    signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                    continue
+
                 symbol_only = re.match(r"^([A-Z][A-Z0-9\.\/]{2,10})$", line_clean)
                 if symbol_only:
                     candidate = symbol_only.group(1).upper()
@@ -640,6 +648,12 @@ def parse_signal(text: str) -> SignalData | None:
                     if candidate not in reserved:
                         signal.symbol = symbol_mappings.get(candidate, candidate)
                         continue
+
+            # NEW: Standalone "Sell!" / "Buy!" action line (with optional exclamation mark)
+            match_action_excl = re.match(r"^(BUY|SELL)[!]?$", line_clean, re.IGNORECASE)
+            if match_action_excl:
+                signal.signal_type = match_action_excl.group(1).upper()
+                continue
 
         # Entry Price parsing
         if signal.entry is None:
@@ -654,8 +668,7 @@ def parse_signal(text: str) -> SignalData | None:
 
             entry_found = False
             for entry_pattern in entry_patterns:
-                search_line = line if entry_pattern.startswith("🔊") else line_clean
-                entry_match = re.search(entry_pattern, search_line, re.IGNORECASE)
+                entry_match = re.search(entry_pattern, line, re.IGNORECASE)
                 if entry_match:
                     entry_text = entry_match.group(1)
                     signal.entry = parse_entry_price(entry_text, signal.signal_type)
@@ -667,7 +680,7 @@ def parse_signal(text: str) -> SignalData | None:
 
             # Look for ENTRY keyword with optional colon (support unicode dashes) - LEGACY
             m = re.search(
-                r"ENTRY\s*:?\s*(?:at\s+)?(\d[\d\/\.\-@–—\+\s]*)", line_clean, re.IGNORECASE
+                r"ENTRY\s*:?\s*(?:at\s+)?([\d\/\.\-@–—\+\s]+)", line_clean, re.IGNORECASE
             )
             if m:
                 entry_text = m.group(1)
@@ -694,6 +707,8 @@ def parse_signal(text: str) -> SignalData | None:
         # Take Profits parsing - consolidated and improved
         # Check for various TP patterns in order of specificity
         tp_patterns = [
+            r"[🤑💰✅]\s*TP\d*\s*:\s*([\d\.]+(?:/[\d\.]+)*(?:/OPEN)?|open)",  # Emoji TP formats like "💰TP1: 3289.0", "💰TP2: 3331" (with colon), includes /OPEN ignore
+            r"[🤑💰✅]\s*TP\d+\s+([\d\.]+(?:/[\d\.]+)*|open)",  # Emoji TP formats like "✅TP1 109700" (without colon)
             r"T\.P\d+\s+([\d\.]+|open)",  # "T.P1 114600", "T.P2 114500" (T.P format)
             r"TP\.(?!\.)\s*([0-9][\d\.]*)",  # NEW: "TP. 5220", "TP. 5222" (single dot format, not double)
             r"Target\d+\s*:\s*\$?\s*([\d\.]+)",  # NEW: "Target1: $ 94800", "Target2: $94300"
@@ -702,6 +717,7 @@ def parse_signal(text: str) -> SignalData | None:
             r"TP\d+\s+([\d\.]+|open)",  # "TP1 3420", "TP2 3423" (without colon, with number)
             r"TP\s*:\s*([\d\.]+|open)",  # "TP: 1.1455", "TP: open"
             r"Target\s+Profit\s*:\s*([\d\.]+)",  # "Target Profit : 4081"
+            r"(?:Take\s+Profit)\s*:\s*([\d\.]+|open)",  # NEW: "Take Profit: 1.1697"
             r"(?:TAKE\s*PROFIT)\s*\d*\s*(?:at\s+)?([\d\.]+|open)",  # "Take profit 1 at 89500.00", "Take profit 2 at open"
             r"TP\s+([\d\.]+(?:/[\d\.]+)*|open)",  # "TP 3364" or "TP 3332/3334/3336/3338/3340" or "TP open" (without colon)
             r"TP\.{1,2}\s*([\d\.]+)",  # TP.. double-dot
