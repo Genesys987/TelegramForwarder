@@ -1696,19 +1696,22 @@ void SetSignalLotSizes(Signal &signal)
 
 // Round down to the nearest valid lot step
   double adjustedPositionSize = MathFloor(totalLots / lotStep) * lotStep;
+  double riskBasedSize = adjustedPositionSize; // captured before any override, used in log
 
 // forceTp1Tp2 safety net: if risk sizing doesn't support at least 2 min-lot
 // positions, override to 2*minLot (capped to available TPs) so TP1 & TP2 are
 // always attempted. If there IS enough margin for 2+ positions already, the
 // normal path handles everything and we don't interfere.
+// tpCount is mutated AFTER the margin loop so that if the loop reduces the
+// position size back (e.g. only 1 min-lot fits), normal TP selection logic
+// still has the full original TP set to work with.
+  int forcedTPCount = 0;
   if(forceTp1Tp2 && adjustedPositionSize < 2 * minLot) {
-    int forcedCount = MathMin(2, signal.tpCount);
-    // This makes the system believe we only have the first 2 TPs
-    signal.tpCount = forcedCount;
-    adjustedPositionSize = forcedCount * minLot;
-    PrintLog(": forceTp1Tp2: risk sizing only supports " + DoubleToString(MathFloor(totalLots / lotStep) * lotStep, 2) +
+    forcedTPCount = MathMin(2, signal.tpCount);
+    adjustedPositionSize = forcedTPCount * minLot;
+    PrintLog(": forceTp1Tp2: risk sizing only supports " + DoubleToString(riskBasedSize, 2) +
              " lots; overriding to " + DoubleToString(adjustedPositionSize, 2) +
-             " for " + IntegerToString(forcedCount) + " TP(s) at minLot");
+             " for " + IntegerToString(forcedTPCount) + " TP(s) at minLot");
   }
 
   double originalPositionSize = adjustedPositionSize;
@@ -1731,6 +1734,13 @@ void SetSignalLotSizes(Signal &signal)
 
   if(adjustedPositionSize != originalPositionSize)
     PrintLog(": Adjusted position size for " + symbol + " from " + DoubleToString(originalPositionSize, 2) + " to " + DoubleToString(adjustedPositionSize, 2));
+
+// Apply forceTp1Tp2 TP count truncation now that we know the margin loop outcome.
+// Only truncate if the account can actually afford all forcedTPCount positions;
+// if the loop walked the size back, leave signal.tpCount intact so the normal
+// SelectTPIndices logic picks from the full original TP set.
+  if(forcedTPCount > 0 && adjustedPositionSize >= forcedTPCount * minLot)
+    signal.tpCount = forcedTPCount;
 
 // Calculate maximum number of positions we can afford at minimum lot size
   int maxPositions = MathFloor(adjustedPositionSize / minLot);
