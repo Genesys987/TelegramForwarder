@@ -313,6 +313,29 @@ def parse_signal(text: str) -> SignalData | None:
                 signal.signal_type = match_hash_symbol.group(2).upper()
                 continue
 
+            # NEW: "Trade Details: #BUY" / "Trade Details: #SELL" format
+            match_trade_details = re.match(
+                r"^Trade\s+Details\s*:.*#(BUY|SELL)", line_clean, re.IGNORECASE
+            )
+            if match_trade_details and signal.symbol:
+                signal.signal_type = match_trade_details.group(1).upper()
+                continue
+
+            # NEW: "BUY #SYMBOL #SYMBOL2 price" - BUY/SELL with hash-prefixed symbols
+            match_action_hash_symbol = re.match(
+                r"^(BUY|SELL)\s+#([\w\.\/\-]+)(?:\s+#[\w\.\/\-]+)?\s*([\.\d\/\-@]*)",
+                line_clean,
+                re.IGNORECASE,
+            )
+            if match_action_hash_symbol:
+                signal.signal_type = match_action_hash_symbol.group(1).upper()
+                raw_symbol = match_action_hash_symbol.group(2).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                entry_text = match_action_hash_symbol.group(3).strip()
+                if entry_text:
+                    signal.entry = parse_entry_price(entry_text, signal.signal_type)
+                continue
+
             # Format 0e: "XAUUSD: BUY NOW" - colon after symbol, entry on separate line
             match_symbol_colon_action = re.match(
                 r"^([\w\.\/\-]+):\s*(BUY|SELL)(?:\s+NOW)?",
@@ -639,6 +662,13 @@ def parse_signal(text: str) -> SignalData | None:
                     signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                     continue
 
+                # NEW: Standalone "#SYMBOL" hash-prefixed symbol line (e.g., "#XAUUSD")
+                match_hash_standalone = re.match(r"^#([A-Z][A-Z0-9\.]{2,10})$", line_clean)
+                if match_hash_standalone:
+                    candidate = match_hash_standalone.group(1).upper()
+                    signal.symbol = symbol_mappings.get(candidate, candidate)
+                    continue
+
                 symbol_only = re.match(r"^([A-Z][A-Z0-9\.\/]{2,10})$", line_clean)
                 if symbol_only:
                     candidate = symbol_only.group(1).upper()
@@ -664,6 +694,7 @@ def parse_signal(text: str) -> SignalData | None:
                 r"Entry\s*:\s*\$?\s*([\d\.]+)",  # Entry : $ 95033
                 r"Entered\s+at\s+([\d\.]+)",  # Entered at 4588
                 r"Enter\s+([\d\.]+)",  # Enter 4585
+                r"Zone\s*:\s*([\d\.]+(?:[\-\/][\d\.]+)?)",  # Zone:4703-4701 or Zone: 4703/4701
             ]
 
             entry_found = False
@@ -709,6 +740,7 @@ def parse_signal(text: str) -> SignalData | None:
         tp_patterns = [
             r"[🤑💰✅]\s*TP\d*\s*:\s*([\d\.]+(?:/[\d\.]+)*(?:/OPEN)?|open)",  # Emoji TP formats like "💰TP1: 3289.0", "💰TP2: 3331" (with colon), includes /OPEN ignore
             r"[🤑💰✅]\s*TP\d+\s+([\d\.]+(?:/[\d\.]+)*|open)",  # Emoji TP formats like "✅TP1 109700" (without colon)
+            r"Take\s+Profit\s+\d+\s*\(TP\d*\)\s*:\s*([\d\.]+)",  # "Take Profit 1 (TP1): 4701"
             r"T\.P\d+\s+([\d\.]+|open)",  # "T.P1 114600", "T.P2 114500" (T.P format)
             r"TP\.(?!\.)\s*([0-9][\d\.]*)",  # NEW: "TP. 5220", "TP. 5222" (single dot format, not double)
             r"Target\d+\s*:\s*\$?\s*([\d\.]+)",  # NEW: "Target1: $ 94800", "Target2: $94300"

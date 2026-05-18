@@ -683,6 +683,60 @@ class TestSignalParser(unittest.TestCase):
                 [1.1697],
                 1.1755,
             ),
+            # Signal 74: NEW - #XAUUSD standalone hash-prefixed symbol + "Trade Details:#BUY" + "Entry Point:" + "Take Profit N (TPN):"
+            (
+                "🚨 SIGNAL ALERT 🚨\n\n🌐 #XAUUSD\n\n📊 Trade Details:📈#BUY\n\n⚪️ Entry Point: 4698\n🔴 Stop Loss (SL): 4689\n\n🟢 Take Profit 1 (TP1): 4701\n🟢 Take Profit 2 (TP2): 4706\n🟢 Take Profit 3 (TP3): 4714\n\n⚠️ Keep in mind to not risk more then 1-2% of your balance on this trade\n\n• Sent via TeleFeed (http://t.me/tg_feedbot?start=atid-DBZDQBFREE)",
+                "BUY",
+                "XAUUSD",
+                4698.0,
+                [4701.0, 4706.0, 4714.0],
+                4689.0,
+            ),
+            # Signal 75: NEW - BUY with hash-prefixed symbols "Buy #XAUUSD #GOLD price-range"
+            (
+                "Buy #XAUUSD #GOLD 4703-4797\n\nSL 4691\n\nTP 4705\nTP 4707\nTP 4711\nTP 4715\nTP 4723\n\nFollow Proper Money Management ‼️",
+                "BUY",
+                "XAUUSD",
+                4797.0,
+                [4705.0, 4707.0, 4711.0, 4715.0, 4723.0],
+                4691.0,
+            ),
+            # Signal 76: NEW - Simple SYMBOL BUY price with SL/TP (US30)
+            (
+                "Today's free signal\n\nUS30 BUY 49560.2\n\nSL: 49450.2\nTP: 49860.2\nUpgrade now www.fxpremiere.com",
+                "BUY",
+                "US30",
+                49560.2,
+                [49860.2],
+                49450.2,
+            ),
+            # Signal 77: NEW - AUDCAD BUY simple format
+            (
+                "AUDCAD BUY 0.986\n\nSL: 0.981\nTP: 1.001",
+                "BUY",
+                "AUDCAD",
+                0.986,
+                [1.001],
+                0.981,
+            ),
+            # Signal 78: NEW - GOLD buy Now with Zone: entry format
+            (
+                "🥇 GOLD buy🔥 ✅ Now\n📊Zone:4703-4701\n❌SL:4698\n✅TP1:4713\n✅TP2:4720\n\nUSE PROPER MONEY MANAGEMENT",
+                "BUY",
+                "XAUUSD",
+                4703.0,
+                [4713.0, 4720.0],
+                4698.0,
+            ),
+            # Signal 79: NEW - SIGNAL ALERT header, SELL XAUUSD price, emoji TP/SL
+            (
+                "SIGNAL ALERT\n\nSELL XAUUSD 4706.2\n\n🤑TP1: 4704.2\n🤑TP2: 4701.2\n🤑TP3: 4692.2\n🔴SL: 4720.2 (1400 pips)",
+                "SELL",
+                "XAUUSD",
+                4706.2,
+                [4704.2, 4701.2, 4692.2],
+                4720.2,
+            ),
         ]
 
         for i, (
@@ -725,7 +779,7 @@ class TestSignalParser(unittest.TestCase):
 
                 # Note: Open-only TP signals have take_profits = [0] which is now valid
 
-        print("✅ All 73 user-provided signal formats passed!")
+        print("✅ All 79 user-provided signal formats passed!")
 
     def test_invisible_characters(self):
         """Test signal parsing with invisible/hidden characters like non-breaking spaces, zero-width spaces, etc."""
