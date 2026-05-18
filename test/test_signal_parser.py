@@ -13,7 +13,7 @@ from signal_parser import parse_signal
 
 class TestSignalParser(unittest.TestCase):
     def test_all_72_user_signals(self):
-        """Test all 72 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
+        """Test all 80 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
 
         signals = [
             # Signal 1: Standard BUY format
@@ -737,6 +737,15 @@ class TestSignalParser(unittest.TestCase):
                 [4704.2, 4701.2, 4692.2],
                 4720.2,
             ),
+            # Signal 80: NEW - "Buy EURUSD at any price between X till Y" range format with "Target N:" TPs
+            (
+                "🔼Forex Signal\n\nBuy EURUSD at any price between 1.1748 till 1.1720\n\n📊 EURUSD Analysis - EURUSD is rebounding from the higher low area of the Ascending Channel\n\nTarget 1: 1.1795\n\nTarget 2: 1.1865\n\nTarget 3: 1.1940\n\nTarget 4: 1.2040\n\nStop loss: 1.1660",
+                "BUY",
+                "EURUSD",
+                1.1748,
+                [1.1795, 1.1865, 1.194, 1.204],
+                1.166,
+            ),
         ]
 
         for i, (
@@ -779,7 +788,7 @@ class TestSignalParser(unittest.TestCase):
 
                 # Note: Open-only TP signals have take_profits = [0] which is now valid
 
-        print("✅ All 79 user-provided signal formats passed!")
+        print("✅ All 80 user-provided signal formats passed!")
 
     def test_invisible_characters(self):
         """Test signal parsing with invisible/hidden characters like non-breaking spaces, zero-width spaces, etc."""

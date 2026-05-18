@@ -371,6 +371,21 @@ def parse_signal(text: str) -> SignalData | None:
                             pass
                 continue
 
+            # NEW: "Buy EURUSD at any price between 1.1748 till 1.1720" - range entry with 'till'
+            match_between_till = re.match(
+                r"^(BUY|SELL)\s+([\w\.\/\-]+)\s+at\s+any\s+price\s+between\s+([\d\.]+)\s+till\s+([\d\.]+)",
+                line_clean,
+                re.IGNORECASE,
+            )
+            if match_between_till:
+                signal.signal_type = match_between_till.group(1).upper()
+                raw_symbol = match_between_till.group(2).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                p1 = float(match_between_till.group(3))
+                p2 = float(match_between_till.group(4))
+                signal.entry = max(p1, p2) if signal.signal_type == "BUY" else min(p1, p2)
+                continue
+
             # Format 1a: "SELL FROM 4210/4215" - action FROM price without symbol
             match_type_from_no_symbol = re.match(
                 r"^(BUY|SELL)\s+FROM\s+([\d\/\.\-@\u2013\u2014]+)",
@@ -743,7 +758,7 @@ def parse_signal(text: str) -> SignalData | None:
             r"Take\s+Profit\s+\d+\s*\(TP\d*\)\s*:\s*([\d\.]+)",  # "Take Profit 1 (TP1): 4701"
             r"T\.P\d+\s+([\d\.]+|open)",  # "T.P1 114600", "T.P2 114500" (T.P format)
             r"TP\.(?!\.)\s*([0-9][\d\.]*)",  # NEW: "TP. 5220", "TP. 5222" (single dot format, not double)
-            r"Target\d+\s*:\s*\$?\s*([\d\.]+)",  # NEW: "Target1: $ 94800", "Target2: $94300"
+            r"Target\s*\d+\s*:\s*\$?\s*([\d\.]+)",  # NEW: "Target1: $ 94800", "Target 1: 1.1795", "Target2: $94300"
             r"TP\s*(\d+)\s*:\s*([\d\.]+|open)",  # "TP 1 : 4604", "TP1: 3289.0", "TP 2 : open" (with colon and number)
             r"TP\s+(\d+)\s+([\d\.]+)",  # "TP 1 4081", "TP 2 4078" (numbered format with space)
             r"TP\d+\s+([\d\.]+|open)",  # "TP1 3420", "TP2 3423" (without colon, with number)
@@ -776,7 +791,7 @@ def parse_signal(text: str) -> SignalData | None:
                             take_profits.append(tp_value)
                         tp_found = True
                     # Handle Target format "Target1: $ 94800"
-                    elif tp_pattern == r"Target\d+\s*:\s*\$?\s*([\d\.]+)":
+                    elif tp_pattern == r"Target\s*\d+\s*:\s*\$?\s*([\d\.]+)":
                         tp_value = float(m.group(1))
                         if tp_value > 0.1:
                             take_profits.append(tp_value)
