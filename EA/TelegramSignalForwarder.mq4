@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 // Formatting style: K&R, 2 spaces
 #property strict
-#property version "2.15.3"
+#property version "2.16"
 
 #define MAX_TP_LEVELS 15
 
@@ -12,21 +12,21 @@
 //|--- Input Parameters (EA Configuration)                         |
 //+------------------------------------------------------------------+
 input bool   debugMode                = true;  // Enable detailed logging
-input int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC in minutes (e.g., UTC+2 = 120)
-input int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
-input string symbolPostfix            = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
+input int    brokerTimeOffsetMinutes  = 120;   // UTC offset in minutes (UTC+2 = 120)
+input int    signalMaxAgeMinutes      = 5;     // Max signal age in minutes
+input string symbolPostfix            = "";     // Symbol postfix (e.g. .m .ecn)
 input double accountRiskPercentage = 1.0; // Risk percentage per trade
-input double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0.0 = entry, 1.0 = keep original SL
-input double marginBufferPercentage             = 70.0;   // Amount of free margin to use maximum
-input int    warmupTimeoutSeconds = 120; // Time in seconds to keep warmup orders before auto-closing
-input string lotSizeFactorConfig = ""; // Lot size factor. Format: "channel1:factor1,channel2:factor2"
-input double defaultLotSizeFactor = 1.0; // Default TP Weighting, 1.0 = same lots, ~0.7 = exponential
+input double stopLossMultiplier       = 0.2;   // SL at TP1: 0.0=entry, 1.0=original
+input double marginBufferPercentage   = 70.0;  // Max free margin usage (%)
+input int    warmupTimeoutSeconds = 120; // Warmup order timeout (seconds)
+input string lotSizeFactorConfig = ""; // Per-channel lot factors: ch:f,...
+input double defaultLotSizeFactor = 1.0; // Default lot factor (1.0=equal lots)
 input int    limitOrderExpirationMinutes = 30; // Limit order expiration in minutes
-input string channelAllowList = ""; // Channel allowlist. If unfilled, allow all groups. Ex. "THEA,FXPL"
-input double stopLossReductionFactor = 0.0; // Factor to reduce original SL for XAUUSD - 0.0 no change, 0.2 reduce by 20% etc.
-input bool   aggressiveTrailingStopStrategy = true; // true=Aggressive (TP1->BE, TP2->TP1), false=Conservative (TP1->nothing, TP2->BE, TP3->TP1)
-input int    exposureLimit = 0; // maximum amount of simultaneously open trades per channel, 0 = all allowed
-input bool   forceTp1Tp2 = false; // Always do TP1 & TP2 orders (with minimum size) regardless of margin calculations
+input string channelAllowList = ""; // Allowed channels, empty=all
+input double stopLossReductionFactor = 0.0; // SL reduction: 0=none, 0.2=20% less
+input bool   aggressiveTrailingStopStrategy = true; // true=TP1>BE+TP2>TP1, false=TP2>BE
+input int    exposureLimit = 0; // Max open trades/channel (0=all)
+input int   forceTpLevel = 0; // Min TP orders forced (0=disable)
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
@@ -1698,20 +1698,24 @@ void SetSignalLotSizes(Signal &signal)
   double adjustedPositionSize = MathFloor(totalLots / lotStep) * lotStep;
   double riskBasedSize = adjustedPositionSize; // captured before any override, used in log
 
-// forceTp1Tp2 safety net: if risk sizing doesn't support at least 2 min-lot
-// positions, override to 2*minLot (capped to available TPs) so TP1 & TP2 are
-// always attempted. If there IS enough margin for 2+ positions already, the
-// normal path handles everything and we don't interfere.
+// forceTpLevel safety net: if risk sizing doesn't support the proper number of min-lot
+// positions, override to the configured forceTpLevel (capped to available TPs) so the
+// configured number of TP orders are always attempted. If there IS enough margin for
+// the configured number of positions already,
+// the normal path handles everything and we don't interfere.
 // tpCount is mutated AFTER the margin loop so that if the loop reduces the
 // position size back (e.g. only 1 min-lot fits), normal TP selection logic
 // still has the full original TP set to work with.
   int forcedTPCount = 0;
-  if(forceTp1Tp2 && adjustedPositionSize < 2 * minLot) {
-    forcedTPCount = MathMin(2, signal.tpCount);
-    adjustedPositionSize = forcedTPCount * minLot;
-    PrintLog(": forceTp1Tp2: risk sizing only supports " + DoubleToString(riskBasedSize, 2) +
-             " lots; overriding to " + DoubleToString(adjustedPositionSize, 2) +
-             " for " + IntegerToString(forcedTPCount) + " TP(s) at minLot");
+  if(forceTpLevel > 0) {
+    int cappedForceTpLevel = MathMin(forceTpLevel, signal.tpCount);
+    if(adjustedPositionSize < cappedForceTpLevel * minLot) {
+      forcedTPCount = cappedForceTpLevel;
+      adjustedPositionSize = forcedTPCount * minLot;
+      PrintLog(": forceTpLevel: risk sizing only supports " + DoubleToString(riskBasedSize, 2) +
+               " lots; overriding to " + DoubleToString(adjustedPositionSize, 2) +
+               " for " + IntegerToString(forcedTPCount) + " TP(s) at minLot");
+    }
   }
 
   double originalPositionSize = adjustedPositionSize;
@@ -1735,7 +1739,7 @@ void SetSignalLotSizes(Signal &signal)
   if(adjustedPositionSize != originalPositionSize)
     PrintLog(": Adjusted position size for " + symbol + " from " + DoubleToString(originalPositionSize, 2) + " to " + DoubleToString(adjustedPositionSize, 2));
 
-// Apply forceTp1Tp2 TP count truncation now that we know the margin loop outcome.
+// Apply forceTpLevel TP count truncation now that we know the margin loop outcome.
 // Only truncate if the account can actually afford all forcedTPCount positions;
 // if the loop walked the size back, leave signal.tpCount intact so the normal
 // SelectTPIndices logic picks from the full original TP set.
