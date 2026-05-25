@@ -12,21 +12,21 @@
 //|--- Input Parameters (EA Configuration)                         |
 //+------------------------------------------------------------------+
 input bool   debugMode                = true;  // Enable detailed logging
-input int    brokerTimeOffsetMinutes  = 120;   // Broker time offset from UTC in minutes (e.g., UTC+2 = 120)
-input int    signalMaxAgeMinutes      = 5;     // Maximum signal age in minutes before rejection
-input string symbolPostfix            = "";     // Broker-specific symbol postfix (e.g., ".m", ".ecn")
+input int    brokerTimeOffsetMinutes  = 120;   // UTC offset in minutes (UTC+2 = 120)
+input int    signalMaxAgeMinutes      = 5;     // Max signal age in minutes
+input string symbolPostfix            = "";     // Symbol postfix (e.g. .m .ecn)
 input double accountRiskPercentage = 1.0; // Risk percentage per trade
-input double stopLossMultiplier       = 0.2;   // Factor to adjust SL at TP1 - 0.0 = entry, 1.0 = keep original SL
-input double marginBufferPercentage             = 70.0;   // Amount of free margin to use maximum
-input int    warmupTimeoutSeconds = 120; // Time in seconds to keep warmup orders before auto-closing
-input string lotSizeFactorConfig = ""; // Lot size factor. Format: "channel1:factor1,channel2:factor2"
-input double defaultLotSizeFactor = 1.0; // Default TP Weighting, 1.0 = same lots, ~0.7 = exponential
+input double stopLossMultiplier       = 0.2;   // SL at TP1: 0.0=entry, 1.0=original
+input double marginBufferPercentage   = 70.0;  // Max free margin usage (%)
+input int    warmupTimeoutSeconds = 120; // Warmup order timeout (seconds)
+input string lotSizeFactorConfig = ""; // Per-channel lot factors: ch:f,...
+input double defaultLotSizeFactor = 1.0; // Default lot factor (1.0=equal lots)
 input int    limitOrderExpirationMinutes = 30; // Limit order expiration in minutes
-input string channelAllowList = ""; // Channel allowlist. If unfilled, allow all groups. Ex. "THEA,FXPL"
-input double stopLossReductionFactor = 0.0; // Factor to reduce original SL for XAUUSD - 0.0 no change, 0.2 reduce by 20% etc.
-input bool   aggressiveTrailingStopStrategy = true; // true=Aggressive (TP1->BE, TP2->TP1), false=Conservative (TP1->nothing, TP2->BE, TP3->TP1)
-input int    exposureLimit = 0; // maximum amount of simultaneously open trades per channel, 0 = all allowed
-input int   forceTpLevel = 0; // Always do the set amount of TP orders (with minimum size) regardless of margin calculations. E.g. if set to 2, always do TP1 and TP2 orders. 0 = disable
+input string channelAllowList = ""; // Allowed channels, empty=all
+input double stopLossReductionFactor = 0.0; // SL reduction: 0=none, 0.2=20% less
+input bool   aggressiveTrailingStopStrategy = true; // true=TP1>BE+TP2>TP1, false=TP2>BE
+input int    exposureLimit = 0; // Max open trades/channel (0=all)
+input int   forceTpLevel = 0; // Min TP orders forced (0=disable)
 
 //+------------------------------------------------------------------+
 //|--- Constants & File Paths                                        |
