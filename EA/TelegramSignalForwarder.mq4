@@ -1707,12 +1707,15 @@ void SetSignalLotSizes(Signal &signal)
 // position size back (e.g. only 1 min-lot fits), normal TP selection logic
 // still has the full original TP set to work with.
   int forcedTPCount = 0;
-  if(forceTpLevel > 0 && adjustedPositionSize < forceTpLevel * minLot) {
-    forcedTPCount = MathMin(forceTpLevel, signal.tpCount);
-    adjustedPositionSize = forcedTPCount * minLot;
-    PrintLog(": forceTpLevel: risk sizing only supports " + DoubleToString(riskBasedSize, 2) +
-             " lots; overriding to " + DoubleToString(adjustedPositionSize, 2) +
-             " for " + IntegerToString(forcedTPCount) + " TP(s) at minLot");
+  if(forceTpLevel > 0) {
+    int cappedForceTpLevel = MathMin(forceTpLevel, signal.tpCount);
+    if(adjustedPositionSize < cappedForceTpLevel * minLot) {
+      forcedTPCount = cappedForceTpLevel;
+      adjustedPositionSize = forcedTPCount * minLot;
+      PrintLog(": forceTpLevel: risk sizing only supports " + DoubleToString(riskBasedSize, 2) +
+               " lots; overriding to " + DoubleToString(adjustedPositionSize, 2) +
+               " for " + IntegerToString(forcedTPCount) + " TP(s) at minLot");
+    }
   }
 
   double originalPositionSize = adjustedPositionSize;
