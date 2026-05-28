@@ -175,12 +175,35 @@ async def handle_new_message(event):
                 # Check if reply contains a new signal instead of just logging unknown
                 signal_data = parse_signal(message_text)
                 if signal_data:
-                    logger.info("Reply üzenetben új szignál felismerve!")
-                    group_id = await process_new_standard_signal(
-                        message_text, message_id, message.date, chat_title
-                    )
-                    if group_id is not None:
-                        await forward_to_archive(message, chat_title, group_id)
+                    # Check if this is a reply to a known warmup signal
+                    if (
+                        retrieved_group_id is not None
+                        and current_warmup_gid is not None
+                        and retrieved_group_id == current_warmup_gid
+                    ):
+                        logger.info(
+                            f"Reply warmup modify felismerve: GID {retrieved_group_id}, TP/SL frissítés"
+                        )
+                        if message.date:
+                            if message.date.tzinfo is None:
+                                message_date = message.date.replace(tzinfo=timezone.utc)
+                            else:
+                                message_date = message.date.astimezone(timezone.utc)
+                            signal_data.timestamp_utc = int(message_date.timestamp())
+                        else:
+                            signal_data.timestamp_utc = int(
+                                datetime.now(timezone.utc).timestamp()
+                            )
+                        warmup_gid = await process_warmup_signal_modify(signal_data)
+                        if warmup_gid:
+                            await forward_to_archive(message, chat_title, warmup_gid)
+                    else:
+                        logger.info("Reply üzenetben új szignál felismerve!")
+                        group_id = await process_new_standard_signal(
+                            message_text, message_id, message.date, chat_title
+                        )
+                        if group_id is not None:
+                            await forward_to_archive(message, chat_title, group_id)
                 else:
                     logger.info("Ismeretlen kereskedési utasítás.")
 
