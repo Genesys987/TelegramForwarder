@@ -6,12 +6,31 @@ Tests the complete workflow from Python signal generation to MT4 parsing
 
 import unittest
 import os
+import tempfile
+import shutil
+import config
 from signal_data import SignalData
 from signal_parser import clean_channel_name, format_mt4_comment
 from queue_manager import add_signal_to_queue
 
 
 class TestPythonMT4Compatibility(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self._orig_queue_paths = list(config.MT4_QUEUE_FILE_PATHS)
+        self._orig_signal_paths = list(config.MT4_SIGNAL_FILE_PATHS)
+        config.MT4_QUEUE_FILE_PATHS.clear()
+        config.MT4_QUEUE_FILE_PATHS.append(os.path.join(self.test_dir, "test_queue.txt"))
+        config.MT4_SIGNAL_FILE_PATHS.clear()
+        config.MT4_SIGNAL_FILE_PATHS.append(os.path.join(self.test_dir, "test_signals.txt"))
+
+    def tearDown(self):
+        config.MT4_QUEUE_FILE_PATHS.clear()
+        config.MT4_QUEUE_FILE_PATHS.extend(self._orig_queue_paths)
+        config.MT4_SIGNAL_FILE_PATHS.clear()
+        config.MT4_SIGNAL_FILE_PATHS.extend(self._orig_signal_paths)
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
     def test_channel_name_python_vs_mt4_logic(self):
         """Test that Python and MT4 channel name cleaning produces compatible results"""
 

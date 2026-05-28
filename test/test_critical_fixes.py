@@ -4,12 +4,32 @@ Test critical fixes for array bounds, TP validation, and channel name uniqueness
 """
 
 import unittest
+import os
+import tempfile
+import shutil
+import config
 from signal_parser import clean_channel_name, format_mt4_comment
 from queue_manager import add_signal_to_queue
 from signal_data import SignalData
 
 
 class TestCriticalFixes(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self._orig_queue_paths = list(config.MT4_QUEUE_FILE_PATHS)
+        self._orig_signal_paths = list(config.MT4_SIGNAL_FILE_PATHS)
+        config.MT4_QUEUE_FILE_PATHS.clear()
+        config.MT4_QUEUE_FILE_PATHS.append(os.path.join(self.test_dir, "test_queue.txt"))
+        config.MT4_SIGNAL_FILE_PATHS.clear()
+        config.MT4_SIGNAL_FILE_PATHS.append(os.path.join(self.test_dir, "test_signals.txt"))
+
+    def tearDown(self):
+        config.MT4_QUEUE_FILE_PATHS.clear()
+        config.MT4_QUEUE_FILE_PATHS.extend(self._orig_queue_paths)
+        config.MT4_SIGNAL_FILE_PATHS.clear()
+        config.MT4_SIGNAL_FILE_PATHS.extend(self._orig_signal_paths)
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
     def test_array_bounds_protection(self):
         """Test that large TP counts are handled safely"""
         # Test signal with many TP levels

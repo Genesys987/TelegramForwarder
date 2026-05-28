@@ -43,7 +43,7 @@ def generate_warmup_signal(signal_type: SignalType | None):
         signal_type=signal_type,
         symbol="XAUUSD",  # Default to XAUUSD for GOLD signals
         entry=0,  # EA will use current market price
-        take_profits=[0, 0],  # EA will calculate based on its logic
+        take_profits=[0, 0, 0, 0],  # EA will calculate based on its logic
         stop_loss=0,  # EA will calculate based on its logic
         channel_name=WARMUP_SIGNAL_CHANNEL,  # Use configured channel name
         is_warmup=True,  # Flag to identify warmup signals
