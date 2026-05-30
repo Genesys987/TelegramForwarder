@@ -19,7 +19,7 @@ def is_warmup_message(text: str) -> tuple[bool, SignalType | None, float | None]
     Returns:
         tuple: (is_ready: bool, signal_type: str or None, current_price: float or None)
     """
-    m = re.match(r"^GOLD\s+(BUY|SELL)\s+[\d.]+\s*$", text.strip(), re.IGNORECASE)
+    m = re.match(r"^GOLD\s+(BUY|SELL)\s+\d+(?:\.\d+)?\s*$", text.strip(), re.IGNORECASE)
     if m:
         signal_type = m.group(1).upper()
         return True, signal_type, None
