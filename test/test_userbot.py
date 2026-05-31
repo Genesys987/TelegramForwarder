@@ -1,7 +1,8 @@
 """
 Unit test for userbot.handle_new_message - specifically verifies that a
-"close" style message triggers processing as a CLOSE signal and that
-the message is forwarded to the archive when processing succeeds.
+"close" style message triggers processing as a BREAKEVEN signal (because
+ENABLE_BREAKEVEN_SIGNALS maps both CLOSE and BREAKEVEN to BREAKEVEN) and
+that the message is forwarded to the archive when processing succeeds.
 
 This test creates a minimal fake event / message object with only the
 attributes accessed by `handle_new_message`.
@@ -61,7 +62,8 @@ class TestHandleNewMessage(unittest.TestCase):
         """
         Simulate a non-reply message that contains a 'close' instruction.
         Expectation:
-         - userbot.process_signal is awaited with "CLOSE" and the mapped group id
+         - userbot.process_signal is called with "BREAKEVEN" and the mapped group id
+           (ENABLE_BREAKEVEN_SIGNALS maps both CLOSE and BREAKEVEN to BREAKEVEN)
          - userbot.forward_to_archive is awaited with the original message, channel title and the same group id
         """
         # The message text to test (should be interpreted as a "close" style message)
@@ -134,11 +136,11 @@ class TestHandleNewMessage(unittest.TestCase):
 
             # Validate the arguments passed to process_signal for the close message
             called_args = proc_mock.call_args[0]  # positional args of the last call
-            # First argument should be the CLOSE SignalType
+            # First argument should be BREAKEVEN (CLOSE is remapped to BREAKEVEN)
             self.assertEqual(
                 called_args[0],
-                "CLOSE",
-                "process_signal was not called with CLOSE signal type",
+                "BREAKEVEN",
+                "process_signal was not called with BREAKEVEN signal type",
             )
             # Second argument should be the mapped group id
             self.assertEqual(
