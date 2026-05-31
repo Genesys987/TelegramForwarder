@@ -86,7 +86,7 @@ class TestWarmupSignalFormats(unittest.TestCase):
         self.assertEqual(signal.signal_type, "SELL")
         self.assertEqual(signal.symbol, "XAUUSD")
         self.assertEqual(signal.entry, 0)
-        self.assertEqual(signal.take_profits, [0, 0])
+        self.assertEqual(signal.take_profits, [0, 0, 0, 0])
         self.assertEqual(signal.stop_loss, 0)
         self.assertEqual(signal.channel_name, WARMUP_SIGNAL_CHANNEL)
         self.assertTrue(signal.is_warmup)
