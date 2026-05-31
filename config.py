@@ -89,3 +89,12 @@ WARMUP_SIGNAL_CHANNEL = config.get("WARMUP_SIGNAL_CHANNEL") or "FXTM"
 NON_REPLY_SL_CHANNEL_ID = config.get("NON_REPLY_SL_CHANNEL_ID") or "FXTM"
 
 SESSION_NAME = config.get("SESSION_NAME") or "userbot_session"
+
+# ----------------------
+# Close/Breakeven Signal Handling
+# ----------------------
+# When True: both CLOSE and BREAKEVEN messages are mapped to BREAKEVEN
+#            (positions are never fully closed, only moved to break-even)
+# When False: close/breakeven messages are ignored entirely
+# Controlled via .env: ENABLE_BREAKEVEN_SIGNALS=true/false
+ENABLE_BREAKEVEN_SIGNALS = (config.get("ENABLE_BREAKEVEN_SIGNALS") or "true").lower() == "true"

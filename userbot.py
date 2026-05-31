@@ -11,6 +11,7 @@ from config import (
     API_HASH,
     API_ID,
     ARCHIVE_CHANNEL,
+    ENABLE_BREAKEVEN_SIGNALS,
     INVITE_LINKS,
     LAST_GID_FILE,
     MESSAGE_GID_MAP_FILE,
@@ -334,12 +335,18 @@ def detect_signal_type(message_text, stoploss_regexp):
     """
     Detect the type of trading signal from message text.
     Returns SignalType enum value or None if no match.
+
+    When ENABLE_BREAKEVEN_SIGNALS is True (default):
+      - BREAKEVEN messages  -> "BREAKEVEN"
+      - CLOSE messages      -> "BREAKEVEN"  (positions moved to BE, never closed)
+    When ENABLE_BREAKEVEN_SIGNALS is False:
+      - BREAKEVEN and CLOSE messages are ignored (returns None)
+    MODIFY (SL adjust) is always active regardless of the toggle.
     """
-    # BREAKEVEN - has higher priority than close
-    if re.search(r"(breakeven|break\s*even)", message_text, re.IGNORECASE):
-        return "BREAKEVEN"
-    # CLOSE
-    elif (
+    is_breakeven = bool(
+        re.search(r"(breakeven|break\s*even)", message_text, re.IGNORECASE)
+    )
+    is_close = bool(
         re.search(r"close.*(profit|half|all).*breakeven", message_text, re.IGNORECASE)
         or re.search(r"close.*half.*hold", message_text, re.IGNORECASE)
         or re.search(r"close.*entries.*breakeven", message_text, re.IGNORECASE)
@@ -349,10 +356,14 @@ def detect_signal_type(message_text, stoploss_regexp):
         or re.search(
             r"(close|exit|entries\s+are\s+closed)", message_text, re.IGNORECASE
         )
-    ):
-        return "CLOSE"
-    # MODIFY (SL adjust)
-    elif re.search(stoploss_regexp, message_text, re.IGNORECASE):
+    )
+
+    # Both CLOSE and BREAKEVEN map to BREAKEVEN when the feature is enabled
+    if ENABLE_BREAKEVEN_SIGNALS and (is_breakeven or is_close):
+        return "BREAKEVEN"
+
+    # MODIFY (SL adjust) – always active
+    if re.search(stoploss_regexp, message_text, re.IGNORECASE):
         return "MODIFY"
 
     return None
