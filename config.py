@@ -97,4 +97,4 @@ SESSION_NAME = config.get("SESSION_NAME") or "userbot_session"
 #            (positions are never fully closed, only moved to break-even)
 # When False: close/breakeven messages are ignored entirely
 # Controlled via .env: ENABLE_BREAKEVEN_SIGNALS=true/false
-ENABLE_BREAKEVEN_SIGNALS = config.get("ENABLE_BREAKEVEN_SIGNALS", "true").lower() == "true"
+ENABLE_BREAKEVEN_SIGNALS = (config.get("ENABLE_BREAKEVEN_SIGNALS") or "true").lower() == "true"
