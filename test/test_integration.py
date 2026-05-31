@@ -6,8 +6,11 @@ This test checks ALL critical aspects of the system in one comprehensive run.
 
 import unittest
 import os
+import tempfile
+import shutil
 from signal_parser import parse_signal, clean_channel_name, format_mt4_comment
 from queue_manager import add_signal_to_queue, process_signal_queue
+import config
 from config import MT4_QUEUE_FILE_PATHS, MT4_SIGNAL_FILE_PATHS
 import time
 from signal_data import SignalData
@@ -15,15 +18,22 @@ from signal_data import SignalData
 
 class TestFinalComprehensive(unittest.TestCase):
     def setUp(self):
-        """Set up test environment"""
-        # Clear existing queue files
-        for queue_path in MT4_QUEUE_FILE_PATHS:
-            if os.path.exists(queue_path):
-                os.remove(queue_path)
+        """Set up test environment with isolated temp files"""
+        self.test_dir = tempfile.mkdtemp()
+        self._orig_queue_paths = list(config.MT4_QUEUE_FILE_PATHS)
+        self._orig_signal_paths = list(config.MT4_SIGNAL_FILE_PATHS)
+        config.MT4_QUEUE_FILE_PATHS.clear()
+        config.MT4_QUEUE_FILE_PATHS.append(os.path.join(self.test_dir, "test_queue.txt"))
+        config.MT4_SIGNAL_FILE_PATHS.clear()
+        config.MT4_SIGNAL_FILE_PATHS.append(os.path.join(self.test_dir, "test_signals.txt"))
 
-        for signal_path in MT4_SIGNAL_FILE_PATHS:
-            if os.path.exists(signal_path):
-                os.remove(signal_path)
+    def tearDown(self):
+        """Restore original file paths and clean up temp dir"""
+        config.MT4_QUEUE_FILE_PATHS.clear()
+        config.MT4_QUEUE_FILE_PATHS.extend(self._orig_queue_paths)
+        config.MT4_SIGNAL_FILE_PATHS.clear()
+        config.MT4_SIGNAL_FILE_PATHS.extend(self._orig_signal_paths)
+        shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_complete_system_integration(self):
         """Test complete system integration with all components"""

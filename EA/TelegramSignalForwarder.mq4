@@ -1570,26 +1570,34 @@ void SetWarmupLevels(Signal &signal)
 // Define warmup TP/SL differences (same as Python used before)
   double tp1Diff = 4.83;  // Average TP1 difference from historical signals
   double tp2Diff = 8.48;  // Average TP2 difference from historical signals
+  double tp3Diff = 10.0;  // Average TP3 difference from historical signals
+  double tp4Diff = 12.0;  // Average TP4 difference from historical signals
   double slDiff = 6.0;    // Average SL difference from historical signals
 
 // Calculate TP and SL based on signal type
   if(signal.type == "BUY") {
     signal.tpLevels[0] = signal.entry + tp1Diff;
     signal.tpLevels[1] = signal.entry + tp2Diff;
+    signal.tpLevels[2] = signal.entry + tp3Diff;
+    signal.tpLevels[3] = signal.entry + tp4Diff;
     signal.stopLoss = signal.entry - slDiff;
   } else { // SELL
     signal.tpLevels[0] = signal.entry - tp1Diff;
     signal.tpLevels[1] = signal.entry - tp2Diff;
+    signal.tpLevels[2] = signal.entry - tp3Diff;
+    signal.tpLevels[3] = signal.entry - tp4Diff;
     signal.stopLoss = signal.entry + slDiff;
   }
 
 // Set TP count for warmup signals
-  signal.tpCount = 2;
+  signal.tpCount = 4;
 
   int digits = MarketInfo(signal.symbol, MODE_DIGITS);
   PrintLog(": Warmup levels calculated - Entry: " + DoubleToString(signal.entry, digits) +
            " TP1: " + DoubleToString(signal.tpLevels[0], digits) +
            " TP2: " + DoubleToString(signal.tpLevels[1], digits) +
+           " TP3: " + DoubleToString(signal.tpLevels[2], digits) +
+           " TP4: " + DoubleToString(signal.tpLevels[3], digits) +
            " SL: " + DoubleToString(signal.stopLoss, digits));
 }
 
