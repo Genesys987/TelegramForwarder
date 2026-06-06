@@ -6,7 +6,7 @@
 #property strict
 #property version "2.17"
 
-#define MAX_TP_LEVELS 15
+#define MAX_TP_LEVELS 9
 
 //+------------------------------------------------------------------+
 //|--- Input Parameters (EA Configuration)                         |
@@ -1228,8 +1228,9 @@ string CleanChannelName(string channelName)
 }
 
 //+------------------------------------------------------------------+
-//| FormatOrderComment: Format comment string within 31 char limit    |
-//| Format: 1234|ABCD|3 (GID|CHANNEL|TP_LEVEL)      |
+//| FormatOrderComment: Format comment string within 31 char limit   |
+//| Format: 1234|ABCD|3 (GID|CHANNEL|TP_LEVEL)                       |
+//| For limit orders: 1234|ABCD|3L (GID|CHANNEL|TP_LEVEL             |
 //+------------------------------------------------------------------+
 string FormatOrderComment(int groupId, string channelName, int tpLevel, bool isLimitOrder)
 {
