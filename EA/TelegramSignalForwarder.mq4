@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 // Formatting style: K&R, 2 spaces
 #property strict
-#property version "2.16"
+#property version "2.17"
 
 #define MAX_TP_LEVELS 15
 
@@ -87,6 +87,7 @@ struct OrderCommentInfo {
   string             channelName;
   int                tpLevel;
   bool               isValid;
+  bool               isLimitOrder;
 
                      OrderCommentInfo()
   {
@@ -94,6 +95,7 @@ struct OrderCommentInfo {
     channelName  = "";
     tpLevel      = 0;
     isValid      = false;
+    isLimitOrder = false;
   }
 };
 
@@ -130,7 +132,7 @@ bool    IsSignalTooOld(long signalTimestampMs, int maxAgeSeconds);
 bool    FileExists(string filename);
 bool    IsValidDouble(string s);
 string  CleanChannelName(string channelName);
-string  FormatMT4Comment(int groupId, string channelName, int tpLevel);
+string  FormatOrderComment(int groupId, string channelName, int tpLevel, bool isLimitOrder);
 int     GetMagic(string channelName);
 double  GetLotSizeFactorForChannel(string channelName);
 void    SetSignalLotSizes(Signal &signal);
@@ -822,7 +824,7 @@ void SendOrders(Signal &signal)
     }
     price = shouldUseLimitOrder ? signal.entry : (shouldBuy ? ask : bid);
     int orderType = shouldBuy ? (shouldUseLimitOrder ? OP_BUYLIMIT : OP_BUY) : (shouldUseLimitOrder ? OP_SELLLIMIT : OP_SELL);
-    string comment = FormatMT4Comment(signal.groupId, signal.channelName, k + 1);
+    string comment = FormatOrderComment(signal.groupId, signal.channelName, k + 1, shouldUseLimitOrder);
     int magicNumber = GetMagic(signal.channelName);
     datetime expiration = shouldUseLimitOrder ? (TimeCurrent() + limitOrderExpirationMinutes * 60) : 0;
     PrintLog(": Order[" + IntegerToString(k) + "] parameters: " +
@@ -1065,8 +1067,9 @@ OrderCommentInfo ParseOrderComment()
   OrderCommentInfo info;
   string parts[];
   int partCount = StringSplit(comment, '|', parts);
-  if(partCount < 3 && debugMode) {
-    PrintLog(": Invalid comment format, expected at least 2 parts but got " + IntegerToString(partCount));
+  if(partCount < 3) {
+    if(debugMode)
+      PrintLog(": Invalid comment format, expected at least 2 parts but got " + IntegerToString(partCount));
     info.isValid = false;
     return(info);
   }
@@ -1090,6 +1093,9 @@ OrderCommentInfo ParseOrderComment()
 
 // may have [sl] or [tp] postfix in closed order comment
   info.tpLevel = StrToInteger(StringSubstr(parts[2], 0, 1));
+
+// we mark limit orders like "1L" etc.
+  info.isLimitOrder = StringCompare(StringSubstr(parts[2], 1, 1), "L") == 0;
 
   info.isValid = true;
   return(info);
@@ -1222,17 +1228,17 @@ string CleanChannelName(string channelName)
 }
 
 //+------------------------------------------------------------------+
-//| FormatMT4Comment: Format comment string within 31 char limit    |
+//| FormatOrderComment: Format comment string within 31 char limit    |
 //| Format: 1234|ABCD|3 (GID|CHANNEL|TP_LEVEL)      |
 //+------------------------------------------------------------------+
-string FormatMT4Comment(int groupId, string channelName, int tpLevel)
+string FormatOrderComment(int groupId, string channelName, int tpLevel, bool isLimitOrder)
 {
   string cleanChannel = CleanChannelName(channelName);
 
   string result[3];
   result[0] = IntegerToString(groupId);
   result[1] = cleanChannel;
-  result[2] = IntegerToString(tpLevel);
+  result[2] = IntegerToString(tpLevel) + (isLimitOrder ? "L" : "");
 
   return StringJoin(result, 3, "|");
 }
