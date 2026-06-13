@@ -11,7 +11,7 @@ last_group_id.txt
 channels*.txt
 
 __pycache__/
-.vscode/settings.json
+.vscode/
 
 *.lock
 !Pipfile.lock

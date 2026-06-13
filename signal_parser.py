@@ -12,6 +12,7 @@ symbol_mappings = {
     "BTC/USDT": "BTCUSD",
     "XAU/USD": "XAUUSD",
     "EUR-USD": "EURUSD",
+    "NQ": "NAS100"
 }
 
 
@@ -159,6 +160,14 @@ def expand_abbreviated_price(price_text):
     return price_text
 
 
+def is_buy_signal(signal_type: str | None) -> bool:
+    return signal_type in {"BUY", "BUYLIMIT"}
+
+
+def is_sell_signal(signal_type: str | None) -> bool:
+    return signal_type in {"SELL", "SELLLIMIT"}
+
+
 def parse_entry_price(entry_text, signal_type):
     """
     Parse entry price from text, handling range formats like '3334/3337', '3339-3344', '@3339-3344', '4207/04'
@@ -221,9 +230,9 @@ def parse_entry_price(entry_text, signal_type):
         if not prices:
             return entry_text
 
-        # For SELL: use lower price as range limit
-        # For BUY: use higher price as range limit
-        if signal_type == "SELL":
+        # For SELL/SELLLIMIT: use lower price as range limit
+        # For BUY/BUYLIMIT: use higher price as range limit
+        if is_sell_signal(signal_type):
             return min(prices)
         else:
             return max(prices)
@@ -280,6 +289,16 @@ def parse_signal(text: str) -> SignalData | None:
                         match_action_price_only.group(2), signal.signal_type
                     )
                     continue
+
+            # e.g. NQ – SELL    
+            match_symbol_action = re.match(
+                r"^([\w\.\/\-]+)\s*[–-]\s*(BUY|SELL)", line_clean, re.IGNORECASE
+            )
+            if match_symbol_action:
+                raw_symbol = match_symbol_action.group(1).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_symbol_action.group(2).upper()
+                continue
 
             # NEW: Direction: BUY/SELL format (e.g. "Direction: BUY")
             match_direction = re.match(
@@ -383,7 +402,7 @@ def parse_signal(text: str) -> SignalData | None:
                 signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                 p1 = float(match_between_till.group(3))
                 p2 = float(match_between_till.group(4))
-                signal.entry = max(p1, p2) if signal.signal_type == "BUY" else min(p1, p2)
+                signal.entry = max(p1, p2) if is_buy_signal(signal.signal_type) else min(p1, p2)
                 continue
 
             # Format 1a: "SELL FROM 4210/4215" - action FROM price without symbol
@@ -657,7 +676,7 @@ def parse_signal(text: str) -> SignalData | None:
                 
                 # Sort TPs based on signal type
                 if signal.take_profits:
-                    if signal.signal_type == "BUY":
+                    if is_buy_signal(signal.signal_type):
                         signal.take_profits.sort()
                     else:
                         signal.take_profits.sort(reverse=True)
@@ -717,6 +736,12 @@ def parse_signal(text: str) -> SignalData | None:
                 entry_match = re.search(entry_pattern, line, re.IGNORECASE)
                 if entry_match:
                     entry_text = entry_match.group(1)
+                    lower_line = line.lower()
+                    if "limit" in lower_line:
+                        if is_buy_signal(signal.signal_type) or "buy" in lower_line:
+                            signal.signal_type = "BUYLIMIT"
+                        elif is_sell_signal(signal.signal_type) or "sell" in lower_line:
+                            signal.signal_type = "SELLLIMIT"
                     signal.entry = parse_entry_price(entry_text, signal.signal_type)
                     entry_found = True
                     break
@@ -927,8 +952,8 @@ def parse_signal(text: str) -> SignalData | None:
                     if i > 0 and isinstance(processed_tps[i - 1], (int, float)):
                         # Case 1: Previous TP exists - use prev_tp ± 4
                         prev_tp = processed_tps[i - 1]
-                        if signal.signal_type == "BUY":
-                            # For BUY: open TP should be higher (prev_tp + 4)
+                        if is_buy_signal(signal.signal_type):
+                            # For BUY/BUYLIMIT: open TP should be higher (prev_tp + 4)
                             calculated_tp = prev_tp + 4
                         else:
                             # For SELL: open TP should be lower (prev_tp - 4)
@@ -937,8 +962,8 @@ def parse_signal(text: str) -> SignalData | None:
                     elif signal.entry is not None and signal.entry != 0:
                         # Case 2: No previous TP but have entry - use entry ± 6
                         entry_price = signal.entry
-                        if signal.signal_type == "BUY":
-                            # For BUY: open TP should be higher (entry + 6)
+                        if is_buy_signal(signal.signal_type):
+                            # For BUY/BUYLIMIT: open TP should be higher (entry + 6)
                             calculated_tp = entry_price + 6
                         else:
                             # For SELL: open TP should be lower (entry - 6)
@@ -956,8 +981,8 @@ def parse_signal(text: str) -> SignalData | None:
             take_profits = processed_tps
 
             # Sort TPs based on signal type
-            if signal.signal_type == "BUY":
-                # For BUY signals, TPs should be in ascending order (higher prices)
+            if is_buy_signal(signal.signal_type):
+                # For BUY/BUYLIMIT signals, TPs should be in ascending order (higher prices)
                 take_profits.sort()
             else:
                 # For SELL signals, TPs should be in descending order (lower prices)

@@ -1,7 +1,7 @@
 from typing import List, Literal, Optional
 
 
-SignalType = Literal["CLOSE", "BREAKEVEN", "MODIFY", "BUY", "SELL"]
+SignalType = Literal["CLOSE", "BREAKEVEN", "MODIFY", "BUY", "SELL", "BUYLIMIT", "SELLLIMIT"]
 
 
 class SignalData:
