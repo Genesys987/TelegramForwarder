@@ -378,10 +378,6 @@ Signal ReadSignalLine(string line, bool isStored)
     return signal;
   }
 
-  if (signal.type == "BUYLIMIT" || signal.type == "SELLLIMIT") {
-    signal.isLimitOrder = true;
-  }
-
 // Handle different signal types with different parsing logic
   if(signal.type == "BUY" || signal.type == "SELL" || signal.type == "BUYLIMIT" || signal.type == "SELLLIMIT") {
     // Full trading signal format: TIMESTAMP|TYPE|SYMBOL|ENTRY|TP1,TP2,...|SL|GID:xxx|CHANNEL
@@ -420,6 +416,11 @@ Signal ParseBuySellSignal(string &parts[], string line, bool isStored)
 // Set basic info
   signal.timestamp = StrToInteger(parts[0]);
   signal.type = parts[1];
+
+  if (signal.type == "BUYLIMIT" || signal.type == "SELLLIMIT") {
+    signal.isLimitOrder = true;
+  }
+
   StringToUpper(signal.type);
 
 // 2) Symbol validation
@@ -829,7 +830,7 @@ void SendOrders(Signal &signal)
     RefreshRates();
     ask = MarketInfo(signal.symbol, MODE_ASK);
     bid = MarketInfo(signal.symbol, MODE_BID);
-    bool shouldUseLimitOrder = !isImmediateOrder && (shouldBuy ? (allowedEntryLevel <= bid) : (ask <= allowedEntryLevel));
+    bool shouldUseLimitOrder = (!isImmediateOrder && (shouldBuy ? (allowedEntryLevel <= bid) : (ask <= allowedEntryLevel))) || signal.isLimitOrder;
     if (shouldUseLimitOrder) {
       PrintLog("Using limit order for TP level " + IntegerToString(k + 1));
     }
