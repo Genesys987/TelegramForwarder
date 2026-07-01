@@ -884,6 +884,38 @@ class TestSignalParser(unittest.TestCase):
 
         print("✅ All invisible character signals passed!")
 
+    def test_limit_order_signal_types(self):
+        """Limit-order entry lines should map SELL/BUY to SELLLIMIT/BUYLIMIT."""
+        sell_signal_text = """NQ – SELL
+
+        • Entry: 1.0870 – 1.0880 (limit sell zone)
+        • SL: 1.0915
+        • TP1: 1.0830
+        • TP2: 1.0785
+        • TP3: 1.0740"""
+
+        result = parse_signal(sell_signal_text)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.symbol, "NAS100")
+        self.assertEqual(result.signal_type, "SELLLIMIT")
+        self.assertEqual(result.entry, 1.0870)
+
+        buy_signal_text = """NQ – BUY
+
+        • Entry: 1.0870 – 1.0880 (limit buy zone)
+        • SL: 1.0915
+        • TP1: 1.0830
+        • TP2: 1.0785
+        • TP3: 1.0740"""
+
+        result = parse_signal(buy_signal_text)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.symbol, "NAS100")
+        self.assertEqual(result.signal_type, "BUYLIMIT")
+        self.assertEqual(result.entry, 1.0870)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

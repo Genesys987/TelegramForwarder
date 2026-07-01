@@ -358,6 +358,9 @@ def detect_signal_type(message_text, stoploss_regexp):
         )
     )
 
+    if re.search("limit order expired", message_text, re.IGNORECASE):
+        return "CLOSE"
+
     # Both CLOSE and BREAKEVEN map to BREAKEVEN when the feature is enabled
     if ENABLE_BREAKEVEN_SIGNALS and (is_breakeven or is_close):
         return "BREAKEVEN"

@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 // Formatting style: K&R, 2 spaces
 #property strict
-#property version "2.17"
+#property version "2.18"
 
 #define MAX_TP_LEVELS 9
 
@@ -59,6 +59,7 @@ struct Signal {
   string             channelName;
   bool               isValid;
   bool               isWarmup;
+  bool               isLimitOrder;
   string             signalLine;
 
                      Signal()
@@ -76,6 +77,7 @@ struct Signal {
     isValid      = false;
     isWarmup     = false;
     signalLine   = "";
+    isLimitOrder  = false;
   }
 };
 
@@ -138,6 +140,7 @@ double  GetLotSizeFactorForChannel(string channelName);
 void    SetSignalLotSizes(Signal &signal);
 void    ReduceStopLossDistance(Signal &signal, bool isStored);
 bool    IsSignalAllowed(Signal &signal);
+bool    IsBuySignal(Signal &signal);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -219,7 +222,7 @@ void OnTimer()
   }
 
 // Handle different signal types
-  if(signal.type == "BUY" || signal.type == "SELL") {
+  if(signal.type == "BUY" || signal.type == "SELL" || signal.type == "BUYLIMIT" || signal.type == "SELLLIMIT") {
     // Process trading signals
     if(debugMode)
       PrintLog(": Processing " + signal.type + " signal from channel '" + signal.channelName + "' - GID=" + IntegerToString(signal.groupId) + " with " + IntegerToString(signal.tpCount) + " TP levels");
@@ -368,13 +371,15 @@ Signal ReadSignalLine(string line, bool isStored)
 // 1) Signal type
   signal.type = parts[1];
   StringToUpper(signal.type);
-  if(signal.type != "BUY" && signal.type != "SELL" && signal.type != "BREAKEVEN" && signal.type != "CLOSE" && signal.type != "MODIFY" && !isStored) {
-    PrintLog(": Invalid signal type '" + signal.type + "', expected BUY, SELL, BREAKEVEN, CLOSE, MODIFY");
+  bool isValidType = (signal.type == "BUY" || signal.type == "SELL" || signal.type == "BUYLIMIT" || signal.type == "SELLLIMIT" ||
+                      signal.type == "BREAKEVEN" || signal.type == "CLOSE" || signal.type == "MODIFY");
+  if(!isValidType && !isStored) {
+    PrintLog(": Invalid signal type '" + signal.type + "', expected BUY, BUYLIMIT, SELL, SELLLIMIT, BREAKEVEN, CLOSE, MODIFY");
     return signal;
   }
 
 // Handle different signal types with different parsing logic
-  if(signal.type == "BUY" || signal.type == "SELL") {
+  if(signal.type == "BUY" || signal.type == "SELL" || signal.type == "BUYLIMIT" || signal.type == "SELLLIMIT") {
     // Full trading signal format: TIMESTAMP|TYPE|SYMBOL|ENTRY|TP1,TP2,...|SL|GID:xxx|CHANNEL
     if(partCount < 8 && isLive) {
       PrintLog(": Invalid BUY/SELL signal format, expected 8 parts but got " + IntegerToString(partCount));
@@ -411,6 +416,11 @@ Signal ParseBuySellSignal(string &parts[], string line, bool isStored)
 // Set basic info
   signal.timestamp = StrToInteger(parts[0]);
   signal.type = parts[1];
+
+  if (signal.type == "BUYLIMIT" || signal.type == "SELLLIMIT") {
+    signal.isLimitOrder = true;
+  }
+
   StringToUpper(signal.type);
 
 // 2) Symbol validation
@@ -451,7 +461,7 @@ Signal ParseBuySellSignal(string &parts[], string line, bool isStored)
   }
 
 // Validate TP order and remove duplicates
-  bool shouldBuy = signal.type == "BUY";
+  bool shouldBuy = IsBuySignal(signal);
   for(int i=0; i<signal.tpCount; i++) {
     // Check TP direction relative to entry
     if (signal.entry != 0.0) {
@@ -646,7 +656,8 @@ Signal ParseActionSignal(string &parts[], string line, bool isStored)
 void UpdateExistingOrdersSL(Signal &signal)
 {
 // Only update SL for trading signals (BUY/SELL)
-  if(signal.type != "BUY" && signal.type != "SELL") {
+  bool isSlUpdateAllowed = IsBuySignal(signal) || signal.type == "SELL" || signal.type == "SELLLIMIT";
+  if(!isSlUpdateAllowed) {
     return;
   }
 
@@ -662,7 +673,7 @@ void UpdateExistingOrdersSL(Signal &signal)
     return;
   }
 
-  bool isBuy = signal.type == "BUY";
+  bool isBuy = IsBuySignal(signal);
 
 // Read digits for the real broker symbol once and reuse it
   int digits = MarketInfo(symbol, MODE_DIGITS);
@@ -727,7 +738,8 @@ void UpdateExistingOrdersSL(Signal &signal)
 void SendOrders(Signal &signal)
 {
 // Only send orders for trading signals (BUY/SELL)
-  if(signal.type != "BUY" && signal.type != "SELL") {
+  bool isSendOrdersAllowed = signal.type == "BUY" || signal.type == "SELL" || signal.type == "BUYLIMIT" || signal.type == "SELLLIMIT";
+  if(!isSendOrdersAllowed) {
     return;
   }
 
@@ -745,7 +757,7 @@ void SendOrders(Signal &signal)
     double currentAsk = MarketInfo(signal.symbol, MODE_ASK);
     double currentBid = MarketInfo(signal.symbol, MODE_BID);
 
-    signal.entry = (signal.type == "BUY") ? currentAsk : currentBid;
+    signal.entry = IsBuySignal(signal) ? currentAsk : currentBid;
 
     PrintLog(": IMMEDIATE ENTRY detected - Using market price: " +
              DoubleToString(signal.entry, MarketInfo(signal.symbol, MODE_DIGITS)) +
@@ -759,7 +771,7 @@ void SendOrders(Signal &signal)
   RefreshRates();
   double ask = MarketInfo(signal.symbol, MODE_ASK);
   double bid = MarketInfo(signal.symbol, MODE_BID);
-  bool shouldBuy = signal.type == "BUY";
+  bool shouldBuy = IsBuySignal(signal);
 // we save the orginial TP1 before modifying lot sizes/TP levels
   double tp1 = signal.tpLevels[0];
 
@@ -818,7 +830,7 @@ void SendOrders(Signal &signal)
     RefreshRates();
     ask = MarketInfo(signal.symbol, MODE_ASK);
     bid = MarketInfo(signal.symbol, MODE_BID);
-    bool shouldUseLimitOrder = !isImmediateOrder && (shouldBuy ? (allowedEntryLevel <= bid) : (ask <= allowedEntryLevel));
+    bool shouldUseLimitOrder = (!isImmediateOrder && (shouldBuy ? (allowedEntryLevel <= bid) : (ask <= allowedEntryLevel))) || signal.isLimitOrder;
     if (shouldUseLimitOrder) {
       PrintLog("Using limit order for TP level " + IntegerToString(k + 1));
     }
@@ -1363,7 +1375,7 @@ void ProcessDynamicTrailingStop()
 double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string channelName)
 {
   double newSL = currentStop;
-  bool isBuy = (signal.type == "BUY");
+  bool isBuy = IsBuySignal(signal);
   if(tpHitLevel <= 0 || signal.tpCount <= 0)
     return currentStop;
 
@@ -1572,7 +1584,7 @@ void SetWarmupLevels(Signal &signal)
   double currentBid = MarketInfo(signal.symbol, MODE_BID);
 
 // Use current market price as entry
-  signal.entry = (signal.type == "BUY") ? currentAsk : currentBid;
+  signal.entry = IsBuySignal(signal) ? currentAsk : currentBid;
 
 // Define warmup TP/SL differences (same as Python used before)
   double tp1Diff = 4.83;  // Average TP1 difference from historical signals
@@ -1582,7 +1594,7 @@ void SetWarmupLevels(Signal &signal)
   double slDiff = 6.0;    // Average SL difference from historical signals
 
 // Calculate TP and SL based on signal type
-  if(signal.type == "BUY") {
+  if(IsBuySignal(signal)) {
     signal.tpLevels[0] = signal.entry + tp1Diff;
     signal.tpLevels[1] = signal.entry + tp2Diff;
     signal.tpLevels[2] = signal.entry + tp3Diff;
@@ -1697,7 +1709,7 @@ void SetSignalLotSizes(Signal &signal)
   double lotStep = MarketInfo(symbol, MODE_LOTSTEP);
   double tickSize = MarketInfo(symbol, MODE_TICKSIZE);
   double tickValue = MarketInfo(symbol, MODE_TICKVALUE);
-  double currentPrice = signal.type == "BUY" ? MarketInfo(symbol, MODE_ASK) : MarketInfo(symbol, MODE_BID);
+  double currentPrice = IsBuySignal(signal) ? MarketInfo(symbol, MODE_ASK) : MarketInfo(symbol, MODE_BID);
 
 // the value of our risk per lot, in the quote currency
   double riskedTicks = MathAbs(currentPrice - signal.stopLoss) / tickSize;
@@ -1738,7 +1750,7 @@ void SetSignalLotSizes(Signal &signal)
 // decrease position size until it fits existing margin
 // e.g. if we want to use up 70% maximum, we need 100%-70% = 30% remaining
   double minimumRemainingMargin = AccountFreeMargin() * (1 - marginBufferPercentage / 100.0);
-  int orderType = (signal.type == "BUY") ? OP_BUY : OP_SELL;
+  int orderType = IsBuySignal(signal) ? OP_BUY : OP_SELL;
   double freeMarginRemaining = 1.0;
   while(adjustedPositionSize >= minLot) {
     freeMarginRemaining = AccountFreeMarginCheck(symbol, orderType, adjustedPositionSize);
@@ -1910,3 +1922,12 @@ bool IsSignalAllowed(Signal &signal)
   return seenCount < exposureLimit;
 }
 //+------------------------------------------------------------------+
+
+
+//+------------------------------------------------------------------+
+//| Returns true if signal is buy or buy limit.
+//+------------------------------------------------------------------+
+bool IsBuySignal(Signal &signal)
+{
+  return signal.type == "BUY" || signal.type == "BUYLIMIT";
+}
