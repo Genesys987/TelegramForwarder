@@ -8,6 +8,13 @@
 
 #define MAX_TP_LEVELS 9
 
+// Broker-specific symbol name for NAS100 (select the one your broker uses)
+enum ENUM_NAS100_SYMBOL {
+  NAS100,
+  USTECH100,
+  US100_M6
+};
+
 //+------------------------------------------------------------------+
 //|--- Input Parameters (EA Configuration)                         |
 //+------------------------------------------------------------------+
@@ -15,6 +22,7 @@ input bool   debugMode                = true;  // Enable detailed logging
 input int    brokerTimeOffsetMinutes  = 120;   // UTC offset in minutes (UTC+2 = 120)
 input int    signalMaxAgeMinutes      = 5;     // Max signal age in minutes
 input string symbolPostfix            = "";     // Symbol postfix (e.g. .m .ecn)
+input ENUM_NAS100_SYMBOL nas100Symbol = NAS100; // NAS100 broker symbol name
 input double accountRiskPercentage = 1.0; // Risk percentage per trade
 input double stopLossMultiplier       = 0.2;   // SL at TP1: 0.0=entry, 1.0=original
 input double marginBufferPercentage   = 70.0;  // Max free margin usage (%)
@@ -135,6 +143,7 @@ bool    FileExists(string filename);
 bool    IsValidDouble(string s);
 string  CleanChannelName(string channelName);
 string  FormatOrderComment(int groupId, string channelName, int tpLevel, bool isLimitOrder);
+string  ResolveSymbol(string rawSymbol);
 int     GetMagic(string channelName);
 double  GetLotSizeFactorForChannel(string channelName);
 void    SetSignalLotSizes(Signal &signal);
@@ -424,7 +433,7 @@ Signal ParseBuySellSignal(string &parts[], string line, bool isStored)
   StringToUpper(signal.type);
 
 // 2) Symbol validation
-  signal.symbol = parts[2] + symbolPostfix;
+  signal.symbol = ResolveSymbol(parts[2]) + symbolPostfix;
   if(MarketInfo(signal.symbol, MODE_TIME) == 0) {
     if (isLive)
       PrintLog(": Invalid symbol '" + signal.symbol + "', skipping");
@@ -564,7 +573,7 @@ Signal ParseActionSignal(string &parts[], string line, bool isStored)
 
     if (partCount == 8) {
       // Warmup finalization format (also sets TP): TIMESTAMP|MODIFY|SYMBOL|ENTRY|TP1,TP2|SL|GID:xxx|CHANNEL
-      signal.symbol = parts[2] + symbolPostfix;
+      signal.symbol = ResolveSymbol(parts[2]) + symbolPostfix;
       signal.entry = StrToDouble(parts[3]);
 
       // Parse TP levels
@@ -1197,6 +1206,21 @@ bool IsValidDouble(string s)
       return(false);
   }
   return(true);
+}
+
+//+------------------------------------------------------------------+
+//| ResolveSymbol: Map normalised signal symbol to broker symbol name|
+//+------------------------------------------------------------------+
+string ResolveSymbol(string rawSymbol)
+{
+  if (rawSymbol == "NAS100") {
+    switch(nas100Symbol) {
+      case USTECH100: return "USTECH100";
+      case US100_M6:  return "US100_M6";
+      default:        return "NAS100";
+    }
+  }
+  return rawSymbol;
 }
 
 //+------------------------------------------------------------------+

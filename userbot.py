@@ -345,6 +345,7 @@ def detect_signal_type(message_text, stoploss_regexp):
     """
     is_breakeven = bool(
         re.search(r"(breakeven|break\s*even)", message_text, re.IGNORECASE)
+        or re.fullmatch(r"\s*Sl\s+entry\s*", message_text, re.IGNORECASE)  # standalone "Sl entry" = move SL to entry (breakeven)
     )
     is_close = bool(
         re.search(r"close.*(profit|half|all).*breakeven", message_text, re.IGNORECASE)
@@ -358,7 +359,12 @@ def detect_signal_type(message_text, stoploss_regexp):
         )
     )
 
-    if re.search("limit order expired", message_text, re.IGNORECASE):
+    # CLOSE: limit order deletion (reply-only in practice, but detected here)
+    if (
+        re.search("limit order expired", message_text, re.IGNORECASE)
+        or re.search(r"delete\s+limit\s+order", message_text, re.IGNORECASE)
+        or re.fullmatch(r"\s*delete\s*", message_text, re.IGNORECASE)
+    ):
         return "CLOSE"
 
     # Both CLOSE and BREAKEVEN map to BREAKEVEN when the feature is enabled
@@ -468,16 +474,16 @@ async def process_warmup_signal(
         f"   Warmup szignál feldolgozása (ID: {message_id}) csatornából: {channel_name or 'UNKNOWN'}..."
     )
 
-    is_ready, signal_type, _ = is_warmup_message(message_text)
+    is_ready, signal_type, warmup_symbol = is_warmup_message(message_text)
     if not is_ready:
         return None
 
     logger.info(
-        f"   Ready üzenet felismerve: {signal_type} (EA számítja ki TP/SL értékeket)"
+        f"   Ready üzenet felismerve: {signal_type} {warmup_symbol} (EA számítja ki TP/SL értékeket)"
     )
 
-    # Generate warmup signal
-    signal_data = generate_warmup_signal(signal_type)
+    # Generate warmup signal with detected symbol
+    signal_data = generate_warmup_signal(signal_type, warmup_symbol)
     if not signal_data:
         logger.error("   Warmup signal generálás sikertelen")
         return None

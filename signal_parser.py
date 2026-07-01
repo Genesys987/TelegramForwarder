@@ -521,6 +521,37 @@ def parse_signal(text: str) -> SignalData | None:
                 signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
 
+            # NEW: "High risk SYMBOL BUY/SELL [LIMIT] [price]" - risk-prefixed signals
+            match_risk_prefix = re.match(
+                r"^(?:very\s+high\s+risk|high\s+risk)\s*[;:,]?\s*([\w\.\/\-]+)\s+(BUY|SELL)(?:\s+(LIMIT))?\s*([\d\/\.\-@]*)",
+                line_clean,
+                re.IGNORECASE,
+            )
+            if match_risk_prefix:
+                raw_symbol = match_risk_prefix.group(1).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                base_type = match_risk_prefix.group(2).upper()
+                signal.signal_type = base_type + "LIMIT" if match_risk_prefix.group(3) else base_type
+                entry_text = match_risk_prefix.group(4).strip()
+                if entry_text:
+                    signal.entry = parse_entry_price(entry_text, signal.signal_type)
+                continue
+
+            # NEW: "SYMBOL BUY/SELL LIMIT [price]" → BUYLIMIT/SELLLIMIT
+            match_symbol_limit = re.match(
+                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+LIMIT\b\s*([\d\/\.\-@]*)",
+                line_clean,
+                re.IGNORECASE,
+            )
+            if match_symbol_limit:
+                raw_symbol = match_symbol_limit.group(1).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                signal.signal_type = match_symbol_limit.group(2).upper() + "LIMIT"
+                entry_text = match_symbol_limit.group(3).strip()
+                if entry_text:
+                    signal.entry = parse_entry_price(entry_text, signal.signal_type)
+                continue
+
             # Format 2: "BUY BTCUSD" or "SELL GOLD" or "BUY CHFJPY 180.430" or "GOLD SELL 3334/3337"
             match_type_symbol = re.match(
                 r"^(BUY|SELL)\s+([\w\.\/\-]+)\s*([\d\/\.\-@]*)", line_clean, re.IGNORECASE
@@ -729,6 +760,7 @@ def parse_signal(text: str) -> SignalData | None:
                 r"Entered\s+at\s+([\d\.]+)",  # Entered at 4588
                 r"Enter\s+([\d\.]+)",  # Enter 4585
                 r"Zone\s*:\s*([\d\.]+(?:[\-\/][\d\.]+)?)",  # Zone:4703-4701 or Zone: 4703/4701
+                r"^(?:very\s+high\s+risk|high\s+risk)\s*[;:,]?\s*([\d\.]+(?:\s*[\-\/]\s*[\d\.]+)?)\s*$",  # "High risk 4018-4021.5"
             ]
 
             entry_found = False
