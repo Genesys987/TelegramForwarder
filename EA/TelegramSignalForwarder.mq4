@@ -1610,12 +1610,18 @@ void SetWarmupLevels(Signal &signal)
 // Use current market price as entry
   signal.entry = IsBuySignal(signal) ? currentAsk : currentBid;
 
-// Define warmup TP/SL differences (same as Python used before)
-  double tp1Diff = 4.83;  // Average TP1 difference from historical signals
-  double tp2Diff = 8.48;  // Average TP2 difference from historical signals
-  double tp3Diff = 10.0;  // Average TP3 difference from historical signals
-  double tp4Diff = 12.0;  // Average TP4 difference from historical signals
-  double slDiff = 6.0;    // Average SL difference from historical signals
+// Detect symbol and set TP/SL diffs accordingly
+  string symUpper = signal.symbol;
+  StringToUpper(symUpper);
+  bool isNas100 = StringFind(symUpper, "NAS100") >= 0 ||
+                  StringFind(symUpper, "USTECH100") >= 0 ||
+                  StringFind(symUpper, "US100") >= 0;
+
+  double tp1Diff = isNas100 ? 25.0 : 4.83;  // NAS100 / XAUUSD avg TP1 distance
+  double tp2Diff = isNas100 ? 42.0 : 8.48;  // NAS100 / XAUUSD avg TP2 distance
+  double tp3Diff = isNas100 ? 64.0 : 10.0;  // NAS100 / XAUUSD avg TP3 distance
+  double tp4Diff = isNas100 ? 86.0 : 12.0;  // NAS100 / XAUUSD avg TP4 distance
+  double slDiff  = isNas100 ? 90.0 : 6.0;   // NAS100 / XAUUSD avg SL distance
 
 // Calculate TP and SL based on signal type
   if(IsBuySignal(signal)) {
