@@ -311,6 +311,8 @@ async def handle_new_message(event):
                         if warmup_gid:
                             await forward_to_archive(message, chat_title, warmup_gid)
                         return  # Don't process as standard signal
+                else:
+                    return  # parse failed (e.g. ✅ marker) – nothing to do
 
             # Process as standard signal if not warmup or warmup modify
             group_id = await process_new_standard_signal(

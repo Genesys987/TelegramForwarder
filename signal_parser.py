@@ -261,6 +261,12 @@ def parse_signal(text: str) -> SignalData | None:
     if not text:
         return None  # Handle empty input
 
+    # If the signal contains a ✅ checkmark it means a TP was already hit on a
+    # previously processed version of this signal - skip it entirely.
+    if "\u2705" in text:
+        logger.info("Signal contains ✅ (TP hit marker) - skipping")
+        return None
+
     # Clean invisible characters from the input text
     text = clean_invisible_chars(text)
 
