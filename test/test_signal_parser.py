@@ -13,7 +13,7 @@ from signal_parser import parse_signal
 
 class TestSignalParser(unittest.TestCase):
     def test_all_72_user_signals(self):
-        """Test all 80 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
+        """Test all 81 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
 
         signals = [
             # Signal 1: Standard BUY format
@@ -63,7 +63,7 @@ class TestSignalParser(unittest.TestCase):
             ),
             # Signal 6: Pipe format with emojis
             (
-                "BTCUSD | BUY 109500\n\n❌ Stop Loss 109000 (500 pips)\n\n✅TP1 109700\n✅TP2 109900\n✅TP3 110500",
+                "BTCUSD | BUY 109500\n\n❌ Stop Loss 109000 (500 pips)\n\nTP1 109700\nTP2 109900\nTP3 110500",
                 "BUY",
                 "BTCUSD",
                 109500.0,
@@ -72,7 +72,7 @@ class TestSignalParser(unittest.TestCase):
             ),
             # Signal 7: Same as Signal 6
             (
-                "BTCUSD | BUY 109500\n\n❌ Stop Loss 109000 (500 pips)\n\n✅TP1 109700\n✅TP2 109900\n✅TP3 110500",
+                "BTCUSD | BUY 109500\n\n❌ Stop Loss 109000 (500 pips)\n\nTP1 109700\nTP2 109900\nTP3 110500",
                 "BUY",
                 "BTCUSD",
                 109500.0,
@@ -397,7 +397,7 @@ class TestSignalParser(unittest.TestCase):
             ),
             # Signal 42: NEW - BTC/USDT format with dollar signs and Target pattern
             (
-                "BTC/USDT SELL NOW ✅\n\nEntry : $ 95033\n\nTarget1: $ 94800\nTarget2: $94300\n\nSL : $ 95300",
+                "BTC/USDT SELL NOW\n\nEntry : $ 95033\n\nTarget1: $ 94800\nTarget2: $94300\n\nSL : $ 95300",
                 "SELL",
                 "BTCUSD",
                 95033.0,
@@ -424,7 +424,7 @@ class TestSignalParser(unittest.TestCase):
             ),
             # Signal 45: NEW - 📣XAUUSD BUY NOW 📣 format with LEVEL entry and TP1-5
             (
-                "📣XAUUSD BUY NOW 📣\n\n🔊LEVEL :2653\n\n✅TP1 : 2655 (+20 PIPS)\n\n✅TP2 2657 (+40 PIPS)\n\n✅TP3 : 2659 (+60 PIPS)\n\n✅TP4 : 2661 (+80 PIPS)\n\n✅TP5 : 2663 (+100 PIPS)\n\n❌SL: 2649 ( 40pips )\n\n🔷Take only 2% risk",
+                "📣XAUUSD BUY NOW 📣\n\n🔊LEVEL :2653\n\nTP1 : 2655 (+20 PIPS)\n\nTP2 2657 (+40 PIPS)\n\nTP3 : 2659 (+60 PIPS)\n\nTP4 : 2661 (+80 PIPS)\n\nTP5 : 2663 (+100 PIPS)\n\n❌SL: 2649 ( 40pips )\n\n🔷Take only 2% risk",
                 "BUY",
                 "XAUUSD",
                 2653.0,
@@ -478,7 +478,7 @@ class TestSignalParser(unittest.TestCase):
             ),
             # Signal 51: NEW - 🔽GOLD SELL format with direct entry price and multiple TPs
             (
-                "🔽GOLD SELL 4766.00\n\n✅TP1 4763\n✅TP2 4756\n✅TP3 4750\n✅TP4 4745\n✅TP5 4740\n✅TP6 4736\n✅TP7 4730\n✅TP8 4700\n❌SL   4780",
+                "🔽GOLD SELL 4766.00\n\nTP1 4763\nTP2 4756\nTP3 4750\nTP4 4745\nTP5 4740\nTP6 4736\nTP7 4730\nTP8 4700\n❌SL   4780",
                 "SELL",
                 "XAUUSD",
                 4766.0,
@@ -721,7 +721,7 @@ class TestSignalParser(unittest.TestCase):
             ),
             # Signal 78: NEW - GOLD buy Now with Zone: entry format
             (
-                "🥇 GOLD buy🔥 ✅ Now\n📊Zone:4703-4701\n❌SL:4698\n✅TP1:4713\n✅TP2:4720\n\nUSE PROPER MONEY MANAGEMENT",
+                "🥇 GOLD buy🔥 Now\n📊Zone:4703-4701\n❌SL:4698\nTP1:4713\nTP2:4720\n\nUSE PROPER MONEY MANAGEMENT",
                 "BUY",
                 "XAUUSD",
                 4703.0,
@@ -745,6 +745,15 @@ class TestSignalParser(unittest.TestCase):
                 1.1748,
                 [1.1795, 1.1865, 1.194, 1.204],
                 1.166,
+            ),
+            # Signal 81: NEW - SELL POSITION SYMBOL format with OPEN: entry range
+            (
+                "SELL POSITION XAUUSD\U0001f6a8\n\nOPEN : 4134-4136\nSL : 4139\nTP1 : 4128\nTP2 : 4120\nTP3 : 4112\nTP4 : 4065",
+                "SELL",
+                "XAUUSD",
+                4134.0,
+                [4128.0, 4120.0, 4112.0, 4065.0],
+                4139.0,
             ),
         ]
 
@@ -788,7 +797,7 @@ class TestSignalParser(unittest.TestCase):
 
                 # Note: Open-only TP signals have take_profits = [0] which is now valid
 
-        print("✅ All 80 user-provided signal formats passed!")
+        print("✅ All 81 user-provided signal formats passed!")
 
     def test_invisible_characters(self):
         """Test signal parsing with invisible/hidden characters like non-breaking spaces, zero-width spaces, etc."""
@@ -915,6 +924,74 @@ class TestSignalParser(unittest.TestCase):
         self.assertEqual(result.symbol, "NAS100")
         self.assertEqual(result.signal_type, "BUYLIMIT")
         self.assertEqual(result.entry, 1.0870)
+
+    def test_new_signal_formats(self):
+        """Test new signal formats from user specification (signals 1-10)."""
+
+        cases = [
+            # Signal 1: High risk prefix + standalone range entry
+            (
+                "High risk xauusd buy\n4034-4030\nSl 4024\nTp-s;\n4040\n4050\n4060\n4070",
+                "BUY", "XAUUSD", 4034.0, [4040.0, 4050.0, 4060.0, 4070.0], 4024.0,
+            ),
+            # Signal 2: Standalone SELL + "High risk PRICE" entry line + explicit SL
+            (
+                "XAUUSD SELL\nHigh risk 4018-4021.5\nSl 4015\nTps:\n4011\n4000\n3970\n3950",
+                "SELL", "XAUUSD", 4018.0, [4011.0, 4000.0, 3970.0, 3950.0], 4015.0,
+            ),
+            # Signal 3: "Very high risk" preamble line – ignored before actual signal
+            (
+                "Very high risk (1/4 of normal lotsize)\n\nXauusd sell 4042-4046\nSl 4055\nTps:\n4037\n4030\n4020\n4010\n4000",
+                "SELL", "XAUUSD", 4042.0, [4037.0, 4030.0, 4020.0, 4010.0, 4000.0], 4055.0,
+            ),
+            # Signal 4: Multiple preamble lines + "Tps-" separator
+            (
+                "Leaving us with current position of:\nHigh risk:\nXauusd sell 4034-4036\nSl 4046\nTps-\n4026\n4020\n4010\n4000",
+                "SELL", "XAUUSD", 4034.0, [4026.0, 4020.0, 4010.0, 4000.0], 4046.0,
+            ),
+            # Signal 5: SYMBOL ACTION on line 1, standalone range on line 2, "Tp-s;" separator
+            (
+                "Nas100 sell\n29505-29525\nSl 29569\nTp-s;\n29469\n29429\n29399\n29359",
+                "SELL", "NAS100", 29505.0, [29469.0, 29429.0, 29399.0, 29359.0], 29569.0,
+            ),
+            # Signal 6: Inline price + "Tp-s:" separator
+            (
+                "Nas100 sell 29655\nSl 29705\nTp-s:\n29580\n29560\n29520",
+                "SELL", "NAS100", 29655.0, [29580.0, 29560.0, 29520.0], 29705.0,
+            ),
+            # Signal 7: "High risk SYMBOL BUY price" format + "Tps:" separator
+            (
+                "High risk nas100 buy 29040\nSl: 28888\nTps:\n29100\n29270\n29400\n29666",
+                "BUY", "NAS100", 29040.0, [29100.0, 29270.0, 29400.0, 29666.0], 28888.0,
+            ),
+            # Signal 8: "Tp-s:" followed by explicit TP1:/TP2:/TP3: labels
+            (
+                "Nas100 sell 29655\nSl 29705\nTp-s:\nTP1: 29580\nTP2: 29560\nTP3: 29520",
+                "SELL", "NAS100", 29655.0, [29580.0, 29560.0, 29520.0], 29705.0,
+            ),
+            # Signal 9: "SYMBOL sell limit" → SELLLIMIT with standalone range entry
+            (
+                "High risk;\n\nNas100 sell limit\n29630-29660\n\nSl 29720\n\nTP-s\n29605\n29587\n29566\n29544",
+                "SELLLIMIT", "NAS100", 29630.0, [29605.0, 29587.0, 29566.0, 29544.0], 29720.0,
+            ),
+            # Signal 10: "SYMBOL Sell Limit" → SELLLIMIT; "Sl entry at X" line is ignored
+            (
+                "Very high risk:\nXauUsd Sell Limit\n4058-4066\nSl 4072\nSl entry at 4055.5\nTp-s:\n4054\n4048\n4042\n4034",
+                "SELLLIMIT", "XAUUSD", 4058.0, [4054.0, 4048.0, 4042.0, 4034.0], 4072.0,
+            ),
+        ]
+
+        for i, (text, exp_type, exp_symbol, exp_entry, exp_tps, exp_sl) in enumerate(cases, 1):
+            with self.subTest(signal=i):
+                result = parse_signal(text)
+                self.assertIsNotNone(result, f"New signal {i} should parse")
+                self.assertEqual(result.signal_type, exp_type, f"Signal {i} type")
+                self.assertEqual(result.symbol, exp_symbol, f"Signal {i} symbol")
+                self.assertEqual(result.entry, exp_entry, f"Signal {i} entry")
+                self.assertEqual(result.take_profits, exp_tps, f"Signal {i} TPs")
+                self.assertEqual(result.stop_loss, exp_sl, f"Signal {i} SL")
+
+        print("✅ All 10 new signal formats passed!")
 
 
 if __name__ == "__main__":

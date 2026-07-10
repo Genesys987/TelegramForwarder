@@ -8,6 +8,13 @@
 
 #define MAX_TP_LEVELS 9
 
+// Broker-specific symbol name for NAS100 (select the one your broker uses)
+enum ENUM_NAS100_SYMBOL {
+  NAS100,
+  USTECH100,
+  US100_M6
+};
+
 //+------------------------------------------------------------------+
 //|--- Input Parameters (EA Configuration)                         |
 //+------------------------------------------------------------------+
@@ -15,6 +22,7 @@ input bool   debugMode                = true;  // Enable detailed logging
 input int    brokerTimeOffsetMinutes  = 120;   // UTC offset in minutes (UTC+2 = 120)
 input int    signalMaxAgeMinutes      = 5;     // Max signal age in minutes
 input string symbolPostfix            = "";     // Symbol postfix (e.g. .m .ecn)
+input ENUM_NAS100_SYMBOL nas100Symbol = NAS100; // NAS100 broker symbol name
 input double accountRiskPercentage = 1.0; // Risk percentage per trade
 input double stopLossMultiplier       = 0.2;   // SL at TP1: 0.0=entry, 1.0=original
 input double marginBufferPercentage   = 70.0;  // Max free margin usage (%)
@@ -135,6 +143,7 @@ bool    FileExists(string filename);
 bool    IsValidDouble(string s);
 string  CleanChannelName(string channelName);
 string  FormatOrderComment(int groupId, string channelName, int tpLevel, bool isLimitOrder);
+string  ResolveSymbol(string rawSymbol);
 int     GetMagic(string channelName);
 double  GetLotSizeFactorForChannel(string channelName);
 void    SetSignalLotSizes(Signal &signal);
@@ -424,7 +433,7 @@ Signal ParseBuySellSignal(string &parts[], string line, bool isStored)
   StringToUpper(signal.type);
 
 // 2) Symbol validation
-  signal.symbol = parts[2] + symbolPostfix;
+  signal.symbol = ResolveSymbol(parts[2]) + symbolPostfix;
   if(MarketInfo(signal.symbol, MODE_TIME) == 0) {
     if (isLive)
       PrintLog(": Invalid symbol '" + signal.symbol + "', skipping");
@@ -564,7 +573,7 @@ Signal ParseActionSignal(string &parts[], string line, bool isStored)
 
     if (partCount == 8) {
       // Warmup finalization format (also sets TP): TIMESTAMP|MODIFY|SYMBOL|ENTRY|TP1,TP2|SL|GID:xxx|CHANNEL
-      signal.symbol = parts[2] + symbolPostfix;
+      signal.symbol = ResolveSymbol(parts[2]) + symbolPostfix;
       signal.entry = StrToDouble(parts[3]);
 
       // Parse TP levels
@@ -1200,6 +1209,21 @@ bool IsValidDouble(string s)
 }
 
 //+------------------------------------------------------------------+
+//| ResolveSymbol: Map normalised signal symbol to broker symbol name|
+//+------------------------------------------------------------------+
+string ResolveSymbol(string rawSymbol)
+{
+  if (rawSymbol == "NAS100") {
+    switch(nas100Symbol) {
+      case USTECH100: return "USTECH100";
+      case US100_M6:  return "US100_M6";
+      default:        return "NAS100";
+    }
+  }
+  return rawSymbol;
+}
+
+//+------------------------------------------------------------------+
 //| CleanChannelName: Clean and truncate channel name to match Python|
 //+------------------------------------------------------------------+
 string CleanChannelName(string channelName)
@@ -1586,12 +1610,18 @@ void SetWarmupLevels(Signal &signal)
 // Use current market price as entry
   signal.entry = IsBuySignal(signal) ? currentAsk : currentBid;
 
-// Define warmup TP/SL differences (same as Python used before)
-  double tp1Diff = 4.83;  // Average TP1 difference from historical signals
-  double tp2Diff = 8.48;  // Average TP2 difference from historical signals
-  double tp3Diff = 10.0;  // Average TP3 difference from historical signals
-  double tp4Diff = 12.0;  // Average TP4 difference from historical signals
-  double slDiff = 6.0;    // Average SL difference from historical signals
+// Detect symbol and set TP/SL diffs accordingly
+  string symUpper = signal.symbol;
+  StringToUpper(symUpper);
+  bool isNas100 = StringFind(symUpper, "NAS100") >= 0 ||
+                  StringFind(symUpper, "USTECH100") >= 0 ||
+                  StringFind(symUpper, "US100") >= 0;
+
+  double tp1Diff = isNas100 ? 25.0 : 4.83;  // NAS100 / XAUUSD avg TP1 distance
+  double tp2Diff = isNas100 ? 42.0 : 8.48;  // NAS100 / XAUUSD avg TP2 distance
+  double tp3Diff = isNas100 ? 64.0 : 10.0;  // NAS100 / XAUUSD avg TP3 distance
+  double tp4Diff = isNas100 ? 86.0 : 12.0;  // NAS100 / XAUUSD avg TP4 distance
+  double slDiff  = isNas100 ? 90.0 : 6.0;   // NAS100 / XAUUSD avg SL distance
 
 // Calculate TP and SL based on signal type
   if(IsBuySignal(signal)) {

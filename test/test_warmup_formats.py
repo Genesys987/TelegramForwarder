@@ -22,10 +22,10 @@ class TestWarmupSignalFormats(unittest.TestCase):
             "GOLD BUY 4509 ",    # trailing space
         ]
         for text in buy_cases:
-            is_ready, signal_type, price = is_warmup_message(text)
+            is_ready, signal_type, symbol = is_warmup_message(text)
             self.assertTrue(is_ready, f"'{text}' should be recognised as warmup")
             self.assertEqual(signal_type, "BUY", f"'{text}' should be BUY")
-            self.assertIsNone(price)
+            self.assertEqual(symbol, "XAUUSD", f"'{text}' should map to XAUUSD")
 
     def test_sell_pattern(self):
         """Test GOLD SELL <price> warmup pattern."""
@@ -36,34 +36,81 @@ class TestWarmupSignalFormats(unittest.TestCase):
             "GOLD SELL 3850.25",
         ]
         for text in sell_cases:
-            is_ready, signal_type, price = is_warmup_message(text)
+            is_ready, signal_type, symbol = is_warmup_message(text)
             self.assertTrue(is_ready, f"'{text}' should be recognised as warmup")
             self.assertEqual(signal_type, "SELL", f"'{text}' should be SELL")
-            self.assertIsNone(price)
+            self.assertEqual(symbol, "XAUUSD", f"'{text}' should map to XAUUSD")
+
+    def test_nas100_warmup_patterns(self):
+        """Test new NAS100 warmup signal patterns."""
+        cases = [
+            ("Nas100 sell 29655", "SELL", "NAS100"),
+            ("Nas100 sell", "SELL", "NAS100"),
+            ("nas100 buy 29040", "BUY", "NAS100"),
+            ("NAS100 SELL 29655", "SELL", "NAS100"),
+            ("NQ sell 29655", "SELL", "NAS100"),
+        ]
+        for text, exp_type, exp_symbol in cases:
+            is_ready, signal_type, symbol = is_warmup_message(text)
+            self.assertTrue(is_ready, f"'{text}' should be recognised as warmup")
+            self.assertEqual(signal_type, exp_type, f"'{text}' type mismatch")
+            self.assertEqual(symbol, exp_symbol, f"'{text}' symbol mismatch")
+
+    def test_xauusd_warmup_patterns(self):
+        """Test new XAUUSD warmup patterns (without GOLD keyword)."""
+        cases = [
+            ("Xauusd sell 4132", "SELL", "XAUUSD"),
+            ("XAUUSD BUY 4132", "BUY", "XAUUSD"),
+        ]
+        for text, exp_type, exp_symbol in cases:
+            is_ready, signal_type, symbol = is_warmup_message(text)
+            self.assertTrue(is_ready, f"'{text}' should be recognised as warmup")
+            self.assertEqual(signal_type, exp_type)
+            self.assertEqual(symbol, exp_symbol)
+
+    def test_warmup_with_risk_prefix(self):
+        """Test warmup patterns with high risk prefix."""
+        cases = [
+            ("High risk nas100 buy 29040", "BUY", "NAS100"),
+            ("high risk xauusd sell 4132", "SELL", "XAUUSD"),
+            ("Very high risk gold sell 4132", "SELL", "XAUUSD"),
+        ]
+        for text, exp_type, exp_symbol in cases:
+            is_ready, signal_type, symbol = is_warmup_message(text)
+            self.assertTrue(is_ready, f"'{text}' should be recognised as warmup")
+            self.assertEqual(signal_type, exp_type)
+            self.assertEqual(symbol, exp_symbol)
+
+    def test_warmup_with_trailing_noise(self):
+        """Test warmup patterns with trailing punctuation or noise."""
+        cases = [
+            ("Nas100 sell!!!", "SELL", "NAS100"),
+            ("Xauusd sell, high risk again:", "SELL", "XAUUSD"),
+            ("GOLD BUY 4509 ", "BUY", "XAUUSD"),
+        ]
+        for text, exp_type, exp_symbol in cases:
+            is_ready, signal_type, symbol = is_warmup_message(text)
+            self.assertTrue(is_ready, f"'{text}' should be recognised as warmup")
+            self.assertEqual(signal_type, exp_type)
+            self.assertEqual(symbol, exp_symbol)
 
     def test_non_warmup_messages(self):
         """Test that non-warmup messages are not recognised."""
         non_warmup = [
-            # old-style ready phrases (no longer valid)
-            "Gold buy now",
-            "I'm buying now",
-            "GOLD SELL READY",
-            "Let's scalping buy gold slowly",
-            # signal with TP/SL (multi-line)
+            # multi-line messages are never warmup
             "GOLD BUY 4509\nTP 4520\nSL 4498",
-            # range entry
-            "GOLD BUY 4509/4506",
+            "Nas100 sell 29655\nSl 29705\nTp-s:\n29580",
+            "XAUUSD SELL\nHigh risk 4018-4021.5\nTps:\n4011",
+            # no symbol+action match
+            "I'm buying now",
+            "Let's scalping buy gold slowly",
             "Buy gold now 4000-4010",
-            # extra words
-            "GOLD BUY 4509 MORE BUY 4506",
-            "GOLD BUY NOW 4509",
-            # unrelated
             "Random message",
             "TP1: 4520",
             "SL: 4498",
         ]
         for text in non_warmup:
-            is_ready, signal_type, price = is_warmup_message(text)
+            is_ready, signal_type, symbol = is_warmup_message(text)
             self.assertFalse(is_ready, f"'{text}' should NOT be recognised as warmup")
             self.assertIsNone(signal_type)
 
@@ -98,23 +145,35 @@ class TestWarmupSignalFormats(unittest.TestCase):
 
     def test_full_warmup_workflow_buy(self):
         """Test complete workflow: recognition → signal generation (BUY)."""
-        is_ready, signal_type, price = is_warmup_message("GOLD BUY 4509")
+        is_ready, signal_type, symbol = is_warmup_message("GOLD BUY 4509")
         self.assertTrue(is_ready)
         self.assertEqual(signal_type, "BUY")
-        self.assertIsNone(price)
-        signal = generate_warmup_signal(signal_type)
+        self.assertEqual(symbol, "XAUUSD")
+        signal = generate_warmup_signal(signal_type, symbol)
         self.assertEqual(signal.signal_type, "BUY")
         self.assertTrue(signal.is_warmup)
         self.assertTrue(signal.is_valid())
 
     def test_full_warmup_workflow_sell(self):
         """Test complete workflow: recognition → signal generation (SELL)."""
-        is_ready, signal_type, price = is_warmup_message("GOLD SELL 3850")
+        is_ready, signal_type, symbol = is_warmup_message("GOLD SELL 3850")
         self.assertTrue(is_ready)
         self.assertEqual(signal_type, "SELL")
-        self.assertIsNone(price)
-        signal = generate_warmup_signal(signal_type)
+        self.assertEqual(symbol, "XAUUSD")
+        signal = generate_warmup_signal(signal_type, symbol)
         self.assertEqual(signal.signal_type, "SELL")
+        self.assertTrue(signal.is_warmup)
+        self.assertTrue(signal.is_valid())
+
+    def test_full_warmup_workflow_nas100(self):
+        """Test complete workflow for NAS100 warmup."""
+        is_ready, signal_type, symbol = is_warmup_message("Nas100 sell 29655")
+        self.assertTrue(is_ready)
+        self.assertEqual(signal_type, "SELL")
+        self.assertEqual(symbol, "NAS100")
+        signal = generate_warmup_signal(signal_type, symbol)
+        self.assertEqual(signal.signal_type, "SELL")
+        self.assertEqual(signal.symbol, "NAS100")
         self.assertTrue(signal.is_warmup)
         self.assertTrue(signal.is_valid())
 
