@@ -558,6 +558,21 @@ def parse_signal(text: str) -> SignalData | None:
                     signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
 
+            # NEW: "SELL POSITION XAUUSD" - action + POSITION keyword + symbol
+            match_type_position_symbol = re.match(
+                r"^(BUY|SELL)\s+POSITION\s+([\w\.\/\-]+)(?:\s+([\d\/\.\-@]+))?",
+                line_clean,
+                re.IGNORECASE,
+            )
+            if match_type_position_symbol:
+                signal.signal_type = match_type_position_symbol.group(1).upper()
+                raw_symbol = match_type_position_symbol.group(2).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                entry_text = match_type_position_symbol.group(3)
+                if entry_text:
+                    signal.entry = parse_entry_price(entry_text, signal.signal_type)
+                continue
+
             # Format 2: "BUY BTCUSD" or "SELL GOLD" or "BUY CHFJPY 180.430" or "GOLD SELL 3334/3337"
             match_type_symbol = re.match(
                 r"^(BUY|SELL)\s+([\w\.\/\-]+)\s*([\d\/\.\-@]*)", line_clean, re.IGNORECASE
@@ -766,6 +781,7 @@ def parse_signal(text: str) -> SignalData | None:
                 r"Entered\s+at\s+([\d\.]+)",  # Entered at 4588
                 r"Enter\s+([\d\.]+)",  # Enter 4585
                 r"Zone\s*:\s*([\d\.]+(?:[\-\/][\d\.]+)?)",  # Zone:4703-4701 or Zone: 4703/4701
+                r"^OPEN\s*:\s*([\d\.]+(?:\s*[\-\/]\s*[\d\.]+)?)",  # "OPEN : 4134-4136"
                 r"^(?:very\s+high\s+risk|high\s+risk)\s*[;:,]?\s*([\d\.]+(?:\s*[\-\/]\s*[\d\.]+)?)\s*$",  # "High risk 4018-4021.5"
             ]
 

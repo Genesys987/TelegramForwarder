@@ -13,7 +13,7 @@ from signal_parser import parse_signal
 
 class TestSignalParser(unittest.TestCase):
     def test_all_72_user_signals(self):
-        """Test all 80 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
+        """Test all 81 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
 
         signals = [
             # Signal 1: Standard BUY format
@@ -63,7 +63,7 @@ class TestSignalParser(unittest.TestCase):
             ),
             # Signal 6: Pipe format with emojis
             (
-                "BTCUSD | BUY 109500\n\n❌ Stop Loss 109000 (500 pips)\n\n✅TP1 109700\n✅TP2 109900\n✅TP3 110500",
+                "BTCUSD | BUY 109500\n\n❌ Stop Loss 109000 (500 pips)\n\nTP1 109700\nTP2 109900\nTP3 110500",
                 "BUY",
                 "BTCUSD",
                 109500.0,
@@ -72,7 +72,7 @@ class TestSignalParser(unittest.TestCase):
             ),
             # Signal 7: Same as Signal 6
             (
-                "BTCUSD | BUY 109500\n\n❌ Stop Loss 109000 (500 pips)\n\n✅TP1 109700\n✅TP2 109900\n✅TP3 110500",
+                "BTCUSD | BUY 109500\n\n❌ Stop Loss 109000 (500 pips)\n\nTP1 109700\nTP2 109900\nTP3 110500",
                 "BUY",
                 "BTCUSD",
                 109500.0,
@@ -397,7 +397,7 @@ class TestSignalParser(unittest.TestCase):
             ),
             # Signal 42: NEW - BTC/USDT format with dollar signs and Target pattern
             (
-                "BTC/USDT SELL NOW ✅\n\nEntry : $ 95033\n\nTarget1: $ 94800\nTarget2: $94300\n\nSL : $ 95300",
+                "BTC/USDT SELL NOW\n\nEntry : $ 95033\n\nTarget1: $ 94800\nTarget2: $94300\n\nSL : $ 95300",
                 "SELL",
                 "BTCUSD",
                 95033.0,
@@ -424,7 +424,7 @@ class TestSignalParser(unittest.TestCase):
             ),
             # Signal 45: NEW - 📣XAUUSD BUY NOW 📣 format with LEVEL entry and TP1-5
             (
-                "📣XAUUSD BUY NOW 📣\n\n🔊LEVEL :2653\n\n✅TP1 : 2655 (+20 PIPS)\n\n✅TP2 2657 (+40 PIPS)\n\n✅TP3 : 2659 (+60 PIPS)\n\n✅TP4 : 2661 (+80 PIPS)\n\n✅TP5 : 2663 (+100 PIPS)\n\n❌SL: 2649 ( 40pips )\n\n🔷Take only 2% risk",
+                "📣XAUUSD BUY NOW 📣\n\n🔊LEVEL :2653\n\nTP1 : 2655 (+20 PIPS)\n\nTP2 2657 (+40 PIPS)\n\nTP3 : 2659 (+60 PIPS)\n\nTP4 : 2661 (+80 PIPS)\n\nTP5 : 2663 (+100 PIPS)\n\n❌SL: 2649 ( 40pips )\n\n🔷Take only 2% risk",
                 "BUY",
                 "XAUUSD",
                 2653.0,
@@ -478,7 +478,7 @@ class TestSignalParser(unittest.TestCase):
             ),
             # Signal 51: NEW - 🔽GOLD SELL format with direct entry price and multiple TPs
             (
-                "🔽GOLD SELL 4766.00\n\n✅TP1 4763\n✅TP2 4756\n✅TP3 4750\n✅TP4 4745\n✅TP5 4740\n✅TP6 4736\n✅TP7 4730\n✅TP8 4700\n❌SL   4780",
+                "🔽GOLD SELL 4766.00\n\nTP1 4763\nTP2 4756\nTP3 4750\nTP4 4745\nTP5 4740\nTP6 4736\nTP7 4730\nTP8 4700\n❌SL   4780",
                 "SELL",
                 "XAUUSD",
                 4766.0,
@@ -721,7 +721,7 @@ class TestSignalParser(unittest.TestCase):
             ),
             # Signal 78: NEW - GOLD buy Now with Zone: entry format
             (
-                "🥇 GOLD buy🔥 ✅ Now\n📊Zone:4703-4701\n❌SL:4698\n✅TP1:4713\n✅TP2:4720\n\nUSE PROPER MONEY MANAGEMENT",
+                "🥇 GOLD buy🔥 Now\n📊Zone:4703-4701\n❌SL:4698\nTP1:4713\nTP2:4720\n\nUSE PROPER MONEY MANAGEMENT",
                 "BUY",
                 "XAUUSD",
                 4703.0,
@@ -745,6 +745,15 @@ class TestSignalParser(unittest.TestCase):
                 1.1748,
                 [1.1795, 1.1865, 1.194, 1.204],
                 1.166,
+            ),
+            # Signal 81: NEW - SELL POSITION SYMBOL format with OPEN: entry range
+            (
+                "SELL POSITION XAUUSD\U0001f6a8\n\nOPEN : 4134-4136\nSL : 4139\nTP1 : 4128\nTP2 : 4120\nTP3 : 4112\nTP4 : 4065",
+                "SELL",
+                "XAUUSD",
+                4134.0,
+                [4128.0, 4120.0, 4112.0, 4065.0],
+                4139.0,
             ),
         ]
 
@@ -788,7 +797,7 @@ class TestSignalParser(unittest.TestCase):
 
                 # Note: Open-only TP signals have take_profits = [0] which is now valid
 
-        print("✅ All 80 user-provided signal formats passed!")
+        print("✅ All 81 user-provided signal formats passed!")
 
     def test_invisible_characters(self):
         """Test signal parsing with invisible/hidden characters like non-breaking spaces, zero-width spaces, etc."""

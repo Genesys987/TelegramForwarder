@@ -47,6 +47,18 @@ def is_warmup_message(text: str) -> tuple[bool, SignalType | None, str | None]:
         symbol = _WARMUP_SYMBOL_MAP.get(raw_symbol, raw_symbol)
         return True, signal_type, symbol
 
+    # Also handle action-first format: "SELL GOLD NOW🚨"
+    m2 = re.match(
+        r"^(buy|sell)\s+(xauusd|gold|nas100|nq)\b",
+        stripped,
+        re.IGNORECASE,
+    )
+    if m2:
+        signal_type = m2.group(1).upper()
+        raw_symbol = m2.group(2).upper()
+        symbol = _WARMUP_SYMBOL_MAP.get(raw_symbol, raw_symbol)
+        return True, signal_type, symbol
+
     logger.info("Signal is not a warmup message.")
     return False, None, None
 
