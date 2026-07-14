@@ -1879,7 +1879,7 @@ void SetSignalLotSizes(Signal &signal)
 void ReduceStopLossDistance(Signal &signal, bool isStored)
 {
   if (stopLossReductionFactor <= 0.0 || stopLossReductionFactor >= 1.0 || signal.entry == 0.0) return;
-  if (signal.channelName == "VIPG") return;  // VIPG channel: SL reduction always 0.0
+  if (signal.channelName == "VIPG") return;  // VIPG channel: skip stop loss reduction
 
 // Only apply stop loss reduction to XAUUSD (case-insensitive)
   string symbolUpper = signal.symbol;
