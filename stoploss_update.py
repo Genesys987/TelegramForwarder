@@ -210,6 +210,8 @@ def find_latest_group_id_for_channel(channel_name: str) -> Optional[int]:
                         if len(parts) >= 8:
                             try:
                                 timestamp = int(parts[0])
+                                if timestamp > 1_000_000_000_000:  # > 1e12 means milliseconds
+                                    timestamp //= 1000
                                 line_channel = parts[
                                     -1
                                 ].strip()  # Last part is channel name
