@@ -1409,10 +1409,13 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
     return NormalizeDouble(currentStop, digits); // No multiplier set, return original SL
   }
 
+  // VIPG channel always uses aggressive trailing (TP1 -> BE, TP2 -> TP1, ...)
+  bool effectiveAggressive = aggressiveTrailingStopStrategy || (channelName == "VIPG");
+
 // implication: when conservative, we don't do anything at all for TP1
-  if (!aggressiveTrailingStopStrategy && tpHitLevel == 1) {
+  if (!effectiveAggressive && tpHitLevel == 1) {
     // do nothing
-  }  else if(tpHitLevel == (aggressiveTrailingStopStrategy ? 1 : 2)) {
+  }  else if(tpHitLevel == (effectiveAggressive ? 1 : 2)) {
     double diff = MathAbs(OrderOpenPrice() - signal.stopLoss) * stopLossMultiplier;
     newSL = isBuy ? OrderOpenPrice() - diff : OrderOpenPrice() + diff;
     if(debugMode)
@@ -1427,7 +1430,7 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
       return currentStop;
     }
 
-    int indexOffset = aggressiveTrailingStopStrategy ? 2 : 3;
+    int indexOffset = effectiveAggressive ? 2 : 3;
     int idx = tpHitLevel - indexOffset;
     if (idx < 0 || idx >= signal.tpCount) {
       if (debugMode)
@@ -1443,9 +1446,9 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
     newSL = signal.tpLevels[idx];
 
     if(debugMode) {
-      int behind = aggressiveTrailingStopStrategy ? 1 : 2;
+      int behind = effectiveAggressive ? 1 : 2;
       int targetTpLevel = tpHitLevel - behind;
-      string modeLabel = aggressiveTrailingStopStrategy ? "Aggressive" : "Conservative";
+      string modeLabel = effectiveAggressive ? "Aggressive" : "Conservative";
       PrintLog(":" + modeLabel + ": TP" + IntegerToString(tpHitLevel) +
                " hit - trailing to TP" + IntegerToString(targetTpLevel) +
                ": " + DoubleToString(newSL, digits));
