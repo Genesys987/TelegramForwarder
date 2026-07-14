@@ -1,6 +1,7 @@
 import logging
 from config import WARMUP_SIGNAL_CHANNEL
 from signal_data import SignalData, SignalType
+from signal_parser import clean_invisible_chars
 
 import re
 
@@ -29,6 +30,7 @@ def is_warmup_message(text: str) -> tuple[bool, SignalType | None, str | None]:
     Returns:
         tuple: (is_ready: bool, signal_type: str or None, symbol: str or None)
     """
+    text = clean_invisible_chars(text)
     stripped = text.strip()
 
     # Multi-line messages are never warmup signals
