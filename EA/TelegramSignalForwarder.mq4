@@ -504,7 +504,6 @@ Signal ParseBuySellSignal(string &parts[], string line, bool isStored)
   }
 
   signal.stopLoss = NormalizeDouble(StrToDouble(rawSL), MarketInfo(signal.symbol, MODE_DIGITS));
-  ReduceStopLossDistance(signal, isStored);
 // Validate SL position relative to entry price (if not market entry)
   if(signal.entry != 0.0) {
     if(shouldBuy && signal.stopLoss >= signal.entry && !isStored) {
@@ -540,6 +539,7 @@ Signal ParseBuySellSignal(string &parts[], string line, bool isStored)
   } else {
     signal.channelName = "LEGC";
   }
+  ReduceStopLossDistance(signal, isStored);
 
   signal.isWarmup = (signal.entry == 0.0 && signal.stopLoss == 0.0 &&
                      signal.tpCount >= 2 && signal.tpLevels[0] == 0.0 && signal.tpLevels[1] == 0.0);
@@ -586,8 +586,6 @@ Signal ParseActionSignal(string &parts[], string line, bool isStored)
 
       // Parse SL
       signal.stopLoss = StrToDouble(parts[5]);
-      // We adjust the SL based on the "official" entry in the signal
-      ReduceStopLossDistance(signal, isStored);
 
       // Parse GID
       string gidPart = parts[6];
@@ -597,6 +595,8 @@ Signal ParseActionSignal(string &parts[], string line, bool isStored)
 
       // Parse channel name
       signal.channelName = CleanChannelName(parts[7]);
+      // We adjust the SL based on the "official" entry in the signal
+      ReduceStopLossDistance(signal, isStored);
 
       if (!isStored)
         PrintLog(": Parsed MODIFY signal GID=" + IntegerToString(signal.groupId) +
