@@ -755,6 +755,15 @@ class TestSignalParser(unittest.TestCase):
                 [4128.0, 4120.0, 4112.0, 4065.0],
                 4139.0,
             ),
+            # Signal 82: NEW - ✅ used decoratively inline with buy action and as ✅TP prefix
+            (
+                "\U0001f947 GOLD buy\U0001f525 \u2705 Now\n\U0001f4ca Zone:4703-4701\n\u274cSL:4698\n\u2705TP1:4713\n\u2705TP2:4720",
+                "BUY",
+                "XAUUSD",
+                4703.0,
+                [4713.0, 4720.0],
+                4698.0,
+            ),
         ]
 
         for i, (
@@ -797,7 +806,7 @@ class TestSignalParser(unittest.TestCase):
 
                 # Note: Open-only TP signals have take_profits = [0] which is now valid
 
-        print("✅ All 81 user-provided signal formats passed!")
+        print("✅ All 82 user-provided signal formats passed!")
 
     def test_invisible_characters(self):
         """Test signal parsing with invisible/hidden characters like non-breaking spaces, zero-width spaces, etc."""
