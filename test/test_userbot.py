@@ -175,5 +175,17 @@ class TestHandleNewMessage(unittest.TestCase):
             )
 
 
+class TestDetectSignalTypeRiskFree(unittest.TestCase):
+    def test_going_risk_free_is_breakeven(self):
+        """Messages containing 'going risk free' should be detected as BREAKEVEN."""
+        result = ub.detect_signal_type("Going risk free 🔒", ub.stoploss_regexp)
+        self.assertEqual(result, "BREAKEVEN")
+
+    def test_go_risk_free_is_breakeven(self):
+        """Messages containing 'go risk free' should be detected as BREAKEVEN."""
+        result = ub.detect_signal_type("Go risk free now!", ub.stoploss_regexp)
+        self.assertEqual(result, "BREAKEVEN")
+
+
 if __name__ == "__main__":
     unittest.main()
