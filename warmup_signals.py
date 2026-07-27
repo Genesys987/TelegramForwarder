@@ -56,6 +56,12 @@ def is_warmup_message(text: str) -> tuple[bool, SignalType | None, str | None]:
         re.IGNORECASE,
     )
     if m2:
+        # Reject if trailing text contains a numeric range like "4000-4010" or "4000/4010"
+        # — that signals a regular trade entry, not a warmup placeholder
+        trailing = stripped[m2.end():].strip()
+        if re.search(r"\d+[-\/]\d+", trailing):
+            logger.info("Signal is not a warmup message.")
+            return False, None, None
         signal_type = m2.group(1).upper()
         raw_symbol = m2.group(2).upper()
         symbol = _WARMUP_SYMBOL_MAP.get(raw_symbol, raw_symbol)

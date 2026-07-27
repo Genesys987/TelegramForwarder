@@ -764,6 +764,26 @@ class TestSignalParser(unittest.TestCase):
                 [4713.0, 4720.0],
                 4698.0,
             ),
+            # Signal 83: NEW - "SELLING GOLD @ MARKET" format - no explicit TPs, auto-generate 3 from R:R
+            # SL distance = 4076 - 4073.1 = 2.9; TP1=-2.9, TP2=-5.8, TP3=-8.7 from entry
+            (
+                "SELLING GOLD @ MARKET\n\nENTRY 4073.1\nSL 4076",
+                "SELL",
+                "XAUUSD",
+                4073.1,
+                [round(4073.1 - 2.9, 2), round(4073.1 - 5.8, 2), round(4073.1 - 8.7, 2)],
+                4076.0,
+            ),
+            # Signal 84: NEW - "BUYING GOLD @ MARKET" format - no explicit TPs, auto-generate 3 from R:R
+            # SL distance = 4149.87 - 4146.87 = 3.0; TP1=+3, TP2=+6, TP3=+9 from entry
+            (
+                "BUYING GOLD @ MARKET\n\nENTRY 4149.87\nSL 4146.87",
+                "BUY",
+                "XAUUSD",
+                4149.87,
+                [4152.87, 4155.87, 4158.87],
+                4146.87,
+            ),
         ]
 
         for i, (
@@ -806,7 +826,7 @@ class TestSignalParser(unittest.TestCase):
 
                 # Note: Open-only TP signals have take_profits = [0] which is now valid
 
-        print("✅ All 82 user-provided signal formats passed!")
+        print("✅ All 84 user-provided signal formats passed!")
 
     def test_invisible_characters(self):
         """Test signal parsing with invisible/hidden characters like non-breaking spaces, zero-width spaces, etc."""
