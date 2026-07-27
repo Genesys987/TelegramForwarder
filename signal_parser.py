@@ -580,6 +580,19 @@ def parse_signal(text: str) -> SignalData | None:
                     signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
 
+            # NEW: "SELLING GOLD @ MARKET" / "BUYING GOLD @ MARKET" - market order format with no explicit TPs
+            match_selling_buying_market = re.match(
+                r"^(SELLING|BUYING)\s+([\w\.\/\-]+)\s+@\s+MARKET",
+                line_clean,
+                re.IGNORECASE,
+            )
+            if match_selling_buying_market:
+                action = match_selling_buying_market.group(1).upper()
+                signal.signal_type = "SELL" if action == "SELLING" else "BUY"
+                raw_symbol = match_selling_buying_market.group(2).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                continue
+
             # Format 2: "BUY BTCUSD" or "SELL GOLD" or "BUY CHFJPY 180.430" or "GOLD SELL 3334/3337"
             match_type_symbol = re.match(
                 r"^(BUY|SELL)\s+([\w\.\/\-]+)\s*([\d\/\.\-@]*)", line_clean, re.IGNORECASE
@@ -1056,6 +1069,17 @@ def parse_signal(text: str) -> SignalData | None:
             "No entry price parsed, 'now' keyword found - set to immediate entry"
         )
         signal.entry = 0
+
+    # Auto-generate 3 TPs based on R:R (1:1, 1:2, 1:3) when no TPs were found
+    # but entry and stop_loss are both known (e.g. "SELLING/BUYING @ MARKET" format)
+    if not signal.take_profits and signal.entry is not None and signal.entry != 0 and signal.stop_loss:
+        step = abs(signal.entry - signal.stop_loss)
+        if step > 0:
+            direction = 1 if is_buy_signal(signal.signal_type) else -1
+            signal.take_profits = [
+                round(signal.entry + n * step * direction, 2)
+                for n in range(1, 4)
+            ]
 
     # Final Validation: Check if all essential parts were found
     signal.fill_symbol_if_missing()

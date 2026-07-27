@@ -349,6 +349,7 @@ def detect_signal_type(message_text, stoploss_regexp):
         re.search(r"(breakeven|break\s*even)", message_text, re.IGNORECASE)
         or re.search(r"\bBE\b", message_text)  # uppercase BE = break even abbreviation
         or re.fullmatch(r"\s*Sl\s+entry\s*", message_text, re.IGNORECASE)  # standalone "Sl entry" = move SL to entry (breakeven)
+        or re.search(r"go(?:ing)?\s+risk\s+free", message_text, re.IGNORECASE)  # "Going risk free" / "Go risk free"
     )
     is_close = bool(
         re.search(r"close.*(profit|half|all).*breakeven", message_text, re.IGNORECASE)
