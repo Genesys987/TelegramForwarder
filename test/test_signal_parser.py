@@ -1022,6 +1022,33 @@ class TestSignalParser(unittest.TestCase):
 
         print("✅ All 10 new signal formats passed!")
 
+    def test_now_at_and_limit_at_formats(self):
+        """Test 'SYMBOL ACTION now at PRICE' and 'SYMBOL ACTION LIMIT at PRICE' formats."""
+        cases = [
+            # "AUDCHF SELL now at 0.5684"
+            (
+                "AUDCHF SELL now at 0.5684\nSL 0.5766\nTP 0.5500",
+                "SELL", "AUDCHF", 0.5684, [0.55], 0.5766,
+            ),
+            # "XAUUSD BUY LIMIT at 3970" → BUYLIMIT
+            (
+                "XAUUSD BUY LIMIT at 3970\nSL 3959\nTP 4000",
+                "BUYLIMIT", "XAUUSD", 3970.0, [4000.0], 3959.0,
+            ),
+        ]
+
+        for i, (text, exp_type, exp_symbol, exp_entry, exp_tps, exp_sl) in enumerate(cases, 1):
+            with self.subTest(signal=i):
+                result = parse_signal(text)
+                self.assertIsNotNone(result, f"Signal {i} should parse")
+                self.assertEqual(result.signal_type, exp_type, f"Signal {i} type")
+                self.assertEqual(result.symbol, exp_symbol, f"Signal {i} symbol")
+                self.assertEqual(result.entry, exp_entry, f"Signal {i} entry")
+                self.assertEqual(result.take_profits, exp_tps, f"Signal {i} TPs")
+                self.assertEqual(result.stop_loss, exp_sl, f"Signal {i} SL")
+
+        print("✅ now-at and LIMIT-at formats passed!")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -550,9 +550,9 @@ def parse_signal(text: str) -> SignalData | None:
                     signal.entry = parse_entry_price(entry_text, signal.signal_type)
                 continue
 
-            # NEW: "SYMBOL BUY/SELL LIMIT [price]" → BUYLIMIT/SELLLIMIT
+            # NEW: "SYMBOL BUY/SELL LIMIT [at] [price]" → BUYLIMIT/SELLLIMIT
             match_symbol_limit = re.match(
-                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+LIMIT\b\s*([\d\/\.\-@]*)",
+                r"^([\w\.\/\-]+)\s+(BUY|SELL)\s+LIMIT\b\s*(?:at\s+)?([\d\/\.\-@]*)",
                 line_clean,
                 re.IGNORECASE,
             )
