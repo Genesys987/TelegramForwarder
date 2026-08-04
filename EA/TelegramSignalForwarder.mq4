@@ -840,8 +840,8 @@ void SendOrders(Signal &signal)
     RefreshRates();
     ask = MarketInfo(signal.symbol, MODE_ASK);
     bid = MarketInfo(signal.symbol, MODE_BID);
-    bool isLateSignalLimit = !isImmediateOrder && (shouldBuy ? (allowedEntryLevel <= bid) : (ask <= allowedEntryLevel));
     bool isSignalLimit     = signal.isLimitOrder;
+    bool isLateSignalLimit = !isSignalLimit && !isImmediateOrder && (shouldBuy ? (allowedEntryLevel <= bid) : (ask <= allowedEntryLevel));
     bool shouldUseLimitOrder = isLateSignalLimit || isSignalLimit;
     if (isLateSignalLimit)
       PrintLog("Using late-signal limit order for TP level " + IntegerToString(k + 1));
