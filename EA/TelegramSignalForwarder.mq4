@@ -29,7 +29,8 @@ input double marginBufferPercentage   = 70.0;  // Max free margin usage (%)
 input int    warmupTimeoutSeconds = 120; // Warmup order timeout (seconds)
 input string lotSizeFactorConfig = ""; // Per-channel lot factors: ch:f,...
 input double defaultLotSizeFactor = 1.0; // Default lot factor (1.0=equal lots)
-input int    limitOrderExpirationMinutes = 30; // Limit order expiration in minutes
+input int    lateSignalLimitExpirationMinutes = 30; // Late-signal limit order expiry (minutes); brokers enforce a minimum (typically 10-30 min)
+input int    signalLimitExpirationMinutes = 0;       // BUYLIMIT/SELLLIMIT expiry in minutes (0=no expiry)
 input string channelAllowList = ""; // Allowed channels, empty=all
 input double stopLossReductionFactor = 0.0; // SL reduction: 0=none, 0.2=20% less
 input bool   aggressiveTrailingStopStrategy = true; // true=TP1>BE+TP2>TP1, false=TP2>BE
@@ -839,15 +840,24 @@ void SendOrders(Signal &signal)
     RefreshRates();
     ask = MarketInfo(signal.symbol, MODE_ASK);
     bid = MarketInfo(signal.symbol, MODE_BID);
-    bool shouldUseLimitOrder = (!isImmediateOrder && (shouldBuy ? (allowedEntryLevel <= bid) : (ask <= allowedEntryLevel))) || signal.isLimitOrder;
-    if (shouldUseLimitOrder) {
-      PrintLog("Using limit order for TP level " + IntegerToString(k + 1));
-    }
+    bool isSignalLimit     = signal.isLimitOrder;
+    bool isLateSignalLimit = !isSignalLimit && !isImmediateOrder && (shouldBuy ? (allowedEntryLevel <= bid) : (ask <= allowedEntryLevel));
+    bool shouldUseLimitOrder = isLateSignalLimit || isSignalLimit;
+    if (isLateSignalLimit)
+      PrintLog("Using late-signal limit order for TP level " + IntegerToString(k + 1));
+    else if (isSignalLimit)
+      PrintLog("Using signal limit order for TP level " + IntegerToString(k + 1));
     price = shouldUseLimitOrder ? signal.entry : (shouldBuy ? ask : bid);
     int orderType = shouldBuy ? (shouldUseLimitOrder ? OP_BUYLIMIT : OP_BUY) : (shouldUseLimitOrder ? OP_SELLLIMIT : OP_SELL);
     string comment = FormatOrderComment(signal.groupId, signal.channelName, k + 1, shouldUseLimitOrder);
     int magicNumber = GetMagic(signal.channelName);
-    datetime expiration = shouldUseLimitOrder ? (TimeCurrent() + limitOrderExpirationMinutes * 60) : 0;
+    datetime expiration = 0;
+    if (isLateSignalLimit)
+      expiration = TimeCurrent() + lateSignalLimitExpirationMinutes * 60;
+    else if (isSignalLimit && signalLimitExpirationMinutes > 0)
+      expiration = TimeCurrent() + signalLimitExpirationMinutes * 60;
+    string expirationStr = (expiration == 0) ? "none (GTC)" :
+        TimeToString(expiration - brokerTimeOffsetMinutes * 60, TIME_DATE | TIME_SECONDS) + " UTC";
     PrintLog(": Order[" + IntegerToString(k) + "] parameters: " +
              "Symbol=" + signal.symbol +
              " Type=" + IntegerToString(orderType) +
@@ -855,7 +865,7 @@ void SendOrders(Signal &signal)
              " Price=" + DoubleToString(price, digits) +
              " SL=" + DoubleToString(rawSL, digits) +
              " TP=" + DoubleToString(signal.tpLevels[k], digits) +
-             " Expiration=" + TimeToString(expiration, TIME_DATE | TIME_SECONDS) +
+             " Expiration=" + expirationStr +
              " Comment=" + comment +
              " Magic=" + magicNumber);
 
@@ -865,9 +875,11 @@ void SendOrders(Signal &signal)
                            rawSL, signal.tpLevels[k], comment, magicNumber, expiration, cols[colorIndex]);
 
     if(ticket < 0) {
+      int err = GetLastError();
       PrintLog(": ❌ Failed to create order[" + IntegerToString(k) + "] - " +
-               "Error=" + IntegerToString(GetLastError()) +
-               " (SL may be too close to entry price)");
+               "Error=" + IntegerToString(err) +
+               " Expiration=" + expirationStr +
+               " (if Error=3: broker may reject expiration shorter than its minimum)");
     }
 
     if(ticket > 0 && signal.isWarmup) {
