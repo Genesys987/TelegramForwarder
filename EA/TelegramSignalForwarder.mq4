@@ -33,7 +33,11 @@ input int    lateSignalLimitExpirationMinutes = 30; // Late-signal limit order e
 input int    signalLimitExpirationMinutes = 0;       // BUYLIMIT/SELLLIMIT expiry in minutes (0=no expiry)
 input string channelAllowList = ""; // Allowed channels, empty=all
 input double stopLossReductionFactor = 0.0; // SL reduction: 0=none, 0.2=20% less
-input bool   aggressiveTrailingStopStrategy = true; // true=TP1>BE+TP2>TP1, false=TP2>BE
+input double stopLossReductionFactorExplicit = 0.5; // Explicit SL reduction for exception channels
+input string stopLossReductionFactorChannels = ""; // Channels using explicit SL reduction (comma-separated)
+input bool   aggressiveTrailingStopStrategy = false; // true=TP1>BE+TP2>TP1, false=TP2>BE
+input bool   aggressiveTrailingStrategyExplicit = true; // Explicit aggressive trailing for exception channels
+input string aggressiveTrailingStrategyChannels = ""; // Channels using explicit aggressive trailing (comma-separated)
 input int    exposureLimit = 0; // Max open trades/channel (0=all)
 input int   forceTpLevel = 0; // Min TP orders forced (0=disable)
 
@@ -50,6 +54,8 @@ const int SLIPPAGE = 20;  // maximum allowed slippage during order creation/modi
 const int TRAILING_SCAN_PERIOD_SECONDS = 2;
 
 string allowedChannels[];
+string slReductionChannels[];
+string aggressiveStrategyChannels[];
 
 /*
  * Represents a signal coming from the forwarder.
@@ -151,6 +157,9 @@ void    SetSignalLotSizes(Signal &signal);
 void    ReduceStopLossDistance(Signal &signal, bool isStored);
 bool    IsSignalAllowed(Signal &signal);
 bool    IsBuySignal(Signal &signal);
+bool    IsChannelInList(string channelName, string &list[]);
+double  GetEffectiveSLReductionFactor(string channelName);
+bool    GetEffectiveAggressiveTrailing(string channelName);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -169,6 +178,18 @@ void OnInit()
   for(int i = 0; i < ArraySize(allowedChannels); i++) {
     StringTrimRight(allowedChannels[i]);
     StringTrimLeft(allowedChannels[i]);
+  }
+
+  StringSplit(stopLossReductionFactorChannels, ',', slReductionChannels);
+  for(int i = 0; i < ArraySize(slReductionChannels); i++) {
+    StringTrimRight(slReductionChannels[i]);
+    StringTrimLeft(slReductionChannels[i]);
+  }
+
+  StringSplit(aggressiveTrailingStrategyChannels, ',', aggressiveStrategyChannels);
+  for(int i = 0; i < ArraySize(aggressiveStrategyChannels); i++) {
+    StringTrimRight(aggressiveStrategyChannels[i]);
+    StringTrimLeft(aggressiveStrategyChannels[i]);
   }
 
 // Use event timer for events
@@ -1154,6 +1175,30 @@ bool IsChannelAllowed(string channelName)
 }
 
 //+------------------------------------------------------------------+
+bool IsChannelInList(string channelName, string &list[])
+{
+  for(int i = 0; i < ArraySize(list); i++) {
+    if(StringCompare(channelName, list[i], false) == 0)
+      return(true);
+  }
+  return(false);
+}
+
+double GetEffectiveSLReductionFactor(string channelName)
+{
+  if(IsChannelInList(channelName, slReductionChannels))
+    return(stopLossReductionFactorExplicit);
+  return(stopLossReductionFactor);
+}
+
+bool GetEffectiveAggressiveTrailing(string channelName)
+{
+  if(IsChannelInList(channelName, aggressiveStrategyChannels))
+    return(aggressiveTrailingStrategyExplicit);
+  return(aggressiveTrailingStopStrategy);
+}
+
+//+------------------------------------------------------------------+
 //| IsSignalTooOld: validate if signal timestamp is too old         |
 //+------------------------------------------------------------------+
 bool IsSignalTooOld(long signalTimestamp, int maxAgeSeconds)
@@ -1421,8 +1466,7 @@ double CalculateNewSL(int tpHitLevel, double currentStop, Signal &signal, string
     return NormalizeDouble(currentStop, digits); // No multiplier set, return original SL
   }
 
-  // VIPG channel always uses aggressive trailing (TP1 -> BE, TP2 -> TP1, ...)
-  bool effectiveAggressive = aggressiveTrailingStopStrategy || (channelName == "VIPG");
+  bool effectiveAggressive = GetEffectiveAggressiveTrailing(channelName);
 
 // implication: when conservative, we don't do anything at all for TP1
   if (!effectiveAggressive && tpHitLevel == 1) {
@@ -1890,8 +1934,8 @@ void SetSignalLotSizes(Signal &signal)
 //+--------------------------------------------------------------------------+
 void ReduceStopLossDistance(Signal &signal, bool isStored)
 {
-  if (stopLossReductionFactor <= 0.0 || stopLossReductionFactor >= 1.0 || signal.entry == 0.0) return;
-  if (signal.channelName == "VIPG") return;  // VIPG channel: skip stop loss reduction
+  double effectiveFactor = GetEffectiveSLReductionFactor(signal.channelName);
+  if (effectiveFactor <= 0.0 || effectiveFactor >= 1.0 || signal.entry == 0.0) return;
 
 // Only apply stop loss reduction to XAUUSD (case-insensitive)
   string symbolUpper = signal.symbol;
@@ -1900,11 +1944,11 @@ void ReduceStopLossDistance(Signal &signal, bool isStored)
   double originalStopLoss = signal.stopLoss;
 // for BUY, (entry - SL) is positive and we add this to the SL to reduce its distance from entry
 // for SELL, (entry - SL) is negative and we subtract this from the SL to reduce its distance from entry
-  double distance = (signal.entry - signal.stopLoss) * stopLossReductionFactor;
+  double distance = (signal.entry - signal.stopLoss) * effectiveFactor;
   signal.stopLoss += distance;
 
   if (signal.stopLoss != originalStopLoss && !isStored)
-    PrintLog(": Stop loss distance reduced by factor of " + DoubleToString(stopLossReductionFactor, 2) +
+    PrintLog(": Stop loss distance reduced by factor of " + DoubleToString(effectiveFactor, 2) +
              " from " + DoubleToString(originalStopLoss, 2) +
              " to " + DoubleToString(signal.stopLoss, 2));
 }
