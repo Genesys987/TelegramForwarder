@@ -1063,13 +1063,6 @@ def parse_signal(text: str) -> SignalData | None:
                 take_profits.sort(reverse=True)
             signal.take_profits = take_profits
 
-    # NEW: Simple check for immediate entry - set entry to 0 if NOW keyword found BUT no entry was set
-    if "NOW" in text.upper() and signal.entry is None:
-        logger.info(
-            "No entry price parsed, 'now' keyword found - set to immediate entry"
-        )
-        signal.entry = 0
-
     # Auto-generate 3 TPs based on R:R (1:1, 1:2, 1:3) when no TPs were found
     # but entry and stop_loss are both known (e.g. "SELLING/BUYING @ MARKET" format)
     if not signal.take_profits and signal.entry is not None and signal.entry != 0 and signal.stop_loss:
