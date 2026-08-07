@@ -521,7 +521,7 @@ async def process_warmup_signal(
 
 
 async def process_warmup_signal_modify(signal_data: SignalData):
-    """Process FXTM signals as modifications to existing warmup signals."""
+    """Process  signals as modifications to existing warmup signals."""
     global current_warmup_gid
 
     # Check if there's a pending warmup signal
@@ -530,7 +530,7 @@ async def process_warmup_signal_modify(signal_data: SignalData):
         return False
 
     logger.info(
-        f"   FXTM signal modify: GID {current_warmup_gid} frissítése új TP/SL értékekkel"
+        f"   Warmup signal modify: GID {current_warmup_gid} frissítése új TP/SL értékekkel"
     )
 
     # Create modify signal with new TP/SL values but keep original GID

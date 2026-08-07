@@ -26,7 +26,7 @@ input ENUM_NAS100_SYMBOL nas100Symbol = NAS100; // NAS100 broker symbol name
 input double accountRiskPercentage = 1.0; // Risk percentage per trade
 input double stopLossMultiplier       = 0.2;   // SL at TP1: 0.0=entry, 1.0=original
 input double marginBufferPercentage   = 70.0;  // Max free margin usage (%)
-input int    warmupTimeoutSeconds = 120; // Warmup order timeout (seconds)
+input int    warmupTimeoutSeconds = 240; // Warmup order timeout (seconds)
 input string lotSizeFactorConfig = ""; // Per-channel lot factors: ch:f,...
 input double defaultLotSizeFactor = 1.0; // Default lot factor (1.0=equal lots)
 input int    lateSignalLimitExpirationMinutes = 30; // Late-signal limit order expiry (minutes); brokers enforce a minimum (typically 10-30 min)

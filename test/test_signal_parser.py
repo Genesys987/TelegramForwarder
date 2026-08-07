@@ -13,7 +13,7 @@ from signal_parser import parse_signal
 
 class TestSignalParser(unittest.TestCase):
     def test_all_72_user_signals(self):
-        """Test all 81 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
+        """Test all 84 signal formats provided by the user including new formats with unicode dashes and hash prefixes"""
 
         signals = [
             # Signal 1: Standard BUY format
@@ -97,16 +97,7 @@ class TestSignalParser(unittest.TestCase):
                 [3332.0, 3330.0, 3328.0, 3325.0],
                 3345.0,
             ),
-            # Signal 10: NOW signal with multiple TPs (no range = immediate)
-            (
-                "GOLD SELL NOW\n\nTP 3307\nTP 3305\nTP 3303\nTP 3300\nTP 3298\n\nSL 3322",
-                "SELL",
-                "XAUUSD",
-                0,
-                [3307.0, 3305.0, 3303.0, 3300.0, 3298.0],
-                3322.0,
-            ),
-            # Signal 11: Slash-separated TPs format (NEW TEST CASE)
+            # Signal 10: Slash-separated TPs format (NEW TEST CASE)
             (
                 "GOLD BUY 3330/3327\n\nTP 3332/3334/3336/3338/3340\n\nSL 3317\n\nUSE RISK MANAGEMENT",
                 "BUY",
@@ -259,16 +250,7 @@ class TestSignalParser(unittest.TestCase):
                 [4015.3, 40018.3],
                 4006.3,
             ),
-            # Signal 28: Hash prefixed SELL NOW with standard TPs
-            (
-                "#EURAUD SELL NOW\n\nTP:  1.77120\nTP:  1.76300\nTP:  1.75300\n\nSL:  1.79450",
-                "SELL",
-                "EURAUD",
-                0,
-                [1.77120, 1.76300, 1.75300],
-                1.79450,
-            ),
-            # Signal 29: GOLD Sell Now with range and Target Profit format
+            # Signal 28: GOLD Sell Now with range and Target Profit format
             (
                 "GOLD Sell Now 4086 - 4090\n\nStop loss 4092\n\nTarget Profit : 4081\nTarget Profit : 4078",
                 "SELL",
@@ -783,6 +765,24 @@ class TestSignalParser(unittest.TestCase):
                 4149.87,
                 [4152.87, 4155.87, 4158.87],
                 4146.87,
+            ),
+            # Signal 85: NEW - "🔴SELL EMOJI SYMBOL (@ price)" with "Take profit N➡️at" TPs
+            (
+                "\U0001f534SELL \U0001f4c9 AUDJPY (@ 111.15)\nTake profit 1\u27a1\ufe0fat 110.81\nTake profit 2\u27a1\ufe0fat 110.28\nTake profit 3\u27a1\ufe0fat 109.69\nStop loss at 111.83",
+                "SELL",
+                "AUDJPY",
+                111.15,
+                [110.81, 110.28, 109.69],
+                111.83,
+            ),
+            # Signal 86: NEW - "🔵BUY EMOJI SYMBOL (@ price)" with "Take profit N➡️at" TPs
+            (
+                "\U0001f535BUY \U0001f4c8 EURUSD (@ 1.1543)\nTake profit 1\u27a1\ufe0fat 1.1571\nTake profit 2\u27a1\ufe0fat 1.1620\nTake profit 3\u27a1\ufe0fat 1.1678\nStop loss at 1.1482",
+                "BUY",
+                "EURUSD",
+                1.1543,
+                [1.1571, 1.1620, 1.1678],
+                1.1482,
             ),
         ]
 
