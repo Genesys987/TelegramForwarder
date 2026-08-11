@@ -737,7 +737,7 @@ class TestSignalParser(unittest.TestCase):
                 [4128.0, 4120.0, 4112.0, 4065.0],
                 4139.0,
             ),
-            # Signal 82: NEW - ✅ used decoratively inline with buy action and as ✅TP prefix
+            # Signal 82: ✅ is a plain decorative emoji; only 💥 triggers skip
             (
                 "\U0001f947 GOLD buy\U0001f525 \u2705 Now\n\U0001f4ca Zone:4703-4701\n\u274cSL:4698\n\u2705TP1:4713\n\u2705TP2:4720",
                 "BUY",
@@ -1048,6 +1048,17 @@ class TestSignalParser(unittest.TestCase):
                 self.assertEqual(result.stop_loss, exp_sl, f"Signal {i} SL")
 
         print("✅ now-at and LIMIT-at formats passed!")
+
+    def test_explosion_emoji_skip(self):
+        """Messages containing 💥 must be silently dropped."""
+        cases = [
+            "💥 XAUUSD SELL 3290\nSL 3300\nTP 3270",
+            "XAUUSD SELL 3290\n💥 TP1 hit\nSL 3300\nTP 3270",
+            "💥",
+        ]
+        for text in cases:
+            self.assertIsNone(parse_signal(text), f"Should be None for: {text!r}")
+        print("✅ 💥 skip tests passed!")
 
 
 if __name__ == "__main__":

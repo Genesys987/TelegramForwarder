@@ -261,18 +261,10 @@ def parse_signal(text: str) -> SignalData | None:
     if not text:
         return None  # Handle empty input
 
-    # If the signal contains a ✅ checkmark it means a TP was already hit on a
-    # previously processed version of this signal - skip it entirely.
-    # Exception: ✅ used decoratively on the same line as a BUY/SELL keyword
-    # (e.g. "GOLD buy🔥 ✅ Now") — these are valid new signals, not TP-hit updates.
-    if "\u2705" in text:
-        has_action_with_checkmark = any(
-            "\u2705" in line and re.search(r"\b(?:buy|sell)\b", line, re.IGNORECASE)
-            for line in text.splitlines()
-        )
-        if not has_action_with_checkmark:
-            logger.info("Signal contains ✅ (TP hit marker) - skipping")
-            return None
+    # 💥 in a signal means a TP was already hit - skip it entirely.
+    if "\U0001f4a5" in text:
+        logger.info("Signal contains 💥 (TP hit marker) - skipping")
+        return None
 
     # Clean invisible characters from the input text
     text = clean_invisible_chars(text)
