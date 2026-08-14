@@ -489,6 +489,19 @@ def parse_signal(text: str) -> SignalData | None:
                 continue
 
             # Format 1.5: "Sell Gold @3339-3344" or similar @ formats
+            # Handles both "SELLING/BUYING GOLD @ MARKET" and "SELL/BUY GOLD @ MARKET"
+            match_selling_buying_market = re.match(
+                r"^(SELLING|BUYING|SELL|BUY)\s+([\w\.\/\-]+)\s+@\s+MARKET",
+                line_clean,
+                re.IGNORECASE,
+            )
+            if match_selling_buying_market:
+                action = match_selling_buying_market.group(1).upper()
+                signal.signal_type = "SELL" if action in ("SELLING", "SELL") else "BUY"
+                raw_symbol = match_selling_buying_market.group(2).upper()
+                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
+                continue
+
             match_symbol_at = re.match(
                 r"^(BUY|SELL)\s+([\w\.\/\-]+)\s+@\s*([\d\.\-\s]+)", line_clean, re.IGNORECASE
             )
@@ -570,19 +583,6 @@ def parse_signal(text: str) -> SignalData | None:
                 entry_text = match_type_position_symbol.group(3)
                 if entry_text:
                     signal.entry = parse_entry_price(entry_text, signal.signal_type)
-                continue
-
-            # NEW: "SELLING GOLD @ MARKET" / "BUYING GOLD @ MARKET" - market order format with no explicit TPs
-            match_selling_buying_market = re.match(
-                r"^(SELLING|BUYING)\s+([\w\.\/\-]+)\s+@\s+MARKET",
-                line_clean,
-                re.IGNORECASE,
-            )
-            if match_selling_buying_market:
-                action = match_selling_buying_market.group(1).upper()
-                signal.signal_type = "SELL" if action == "SELLING" else "BUY"
-                raw_symbol = match_selling_buying_market.group(2).upper()
-                signal.symbol = symbol_mappings.get(raw_symbol, raw_symbol)
                 continue
 
             # Format 2: "BUY BTCUSD" or "SELL GOLD" or "BUY CHFJPY 180.430" or "GOLD SELL 3334/3337"
@@ -1057,7 +1057,7 @@ def parse_signal(text: str) -> SignalData | None:
 
     # Auto-generate 3 TPs based on R:R (1:1, 1:2, 1:3) when no TPs were found
     # but entry and stop_loss are both known (e.g. "SELLING/BUYING @ MARKET" format)
-    if not signal.take_profits and signal.entry is not None and signal.entry != 0 and signal.stop_loss:
+    if not signal.take_profits and isinstance(signal.entry, (int, float)) and signal.entry != 0 and signal.stop_loss:
         step = abs(signal.entry - signal.stop_loss)
         if step > 0:
             direction = 1 if is_buy_signal(signal.signal_type) else -1

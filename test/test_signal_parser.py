@@ -766,6 +766,25 @@ class TestSignalParser(unittest.TestCase):
                 [4152.87, 4155.87, 4158.87],
                 4146.87,
             ),
+            # NEW: "SELL GOLD @ MARKET" (imperative form) - entry from next line
+            # SL distance = 4379 - 4375.5 = 3.5; TP1=-3.5, TP2=-7.0, TP3=-10.5 from entry
+            (
+                "SELL GOLD @ MARKET\n\nENTRY 4375.5\nSL 4379",
+                "SELL",
+                "XAUUSD",
+                4375.5,
+                [round(4375.5 - 3.5, 2), round(4375.5 - 7.0, 2), round(4375.5 - 10.5, 2)],
+                4379.0,
+            ),
+            # Signal 88: "BUY GOLD @ MARKET" (imperative form) - entry from next line
+            (
+                "BUY GOLD @ MARKET\n\nENTRY 4375.5\nSL 4370",
+                "BUY",
+                "XAUUSD",
+                4375.5,
+                [round(4375.5 + 5.5, 2), round(4375.5 + 11.0, 2), round(4375.5 + 16.5, 2)],
+                4370.0,
+            ),
             # Signal 85: NEW - "🔴SELL EMOJI SYMBOL (@ price)" with "Take profit N➡️at" TPs
             (
                 "\U0001f534SELL \U0001f4c9 AUDJPY (@ 111.15)\nTake profit 1\u27a1\ufe0fat 110.81\nTake profit 2\u27a1\ufe0fat 110.28\nTake profit 3\u27a1\ufe0fat 109.69\nStop loss at 111.83",
@@ -826,7 +845,7 @@ class TestSignalParser(unittest.TestCase):
 
                 # Note: Open-only TP signals have take_profits = [0] which is now valid
 
-        print("✅ All 84 user-provided signal formats passed!")
+        print(f"✅ All {len(signals)} user-provided signal formats passed!")
 
     def test_invisible_characters(self):
         """Test signal parsing with invisible/hidden characters like non-breaking spaces, zero-width spaces, etc."""

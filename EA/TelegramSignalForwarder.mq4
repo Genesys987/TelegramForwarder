@@ -899,8 +899,7 @@ void SendOrders(Signal &signal)
       int err = GetLastError();
       PrintLog(": ❌ Failed to create order[" + IntegerToString(k) + "] - " +
                "Error=" + IntegerToString(err) +
-               " Expiration=" + expirationStr +
-               " (if Error=3: broker may reject expiration shorter than its minimum)");
+               " Expiration=" + expirationStr);
     }
 
     if(ticket > 0 && signal.isWarmup) {
