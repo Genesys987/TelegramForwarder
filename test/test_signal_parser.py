@@ -766,7 +766,7 @@ class TestSignalParser(unittest.TestCase):
                 [4152.87, 4155.87, 4158.87],
                 4146.87,
             ),
-            # Signal 87: "SELL GOLD @ MARKET" (imperative form) - entry from next line
+            # NEW: "SELL GOLD @ MARKET" (imperative form) - entry from next line
             # SL distance = 4379 - 4375.5 = 3.5; TP1=-3.5, TP2=-7.0, TP3=-10.5 from entry
             (
                 "SELL GOLD @ MARKET\n\nENTRY 4375.5\nSL 4379",
