@@ -177,6 +177,63 @@ class TestWarmupSignalFormats(unittest.TestCase):
         self.assertTrue(signal.is_warmup)
         self.assertTrue(signal.is_valid())
 
+    def test_open_order_warmup_detection(self):
+        """Multi-line 'Open order: ... sl: 0 tp: 0' must be detected as warmup."""
+        cases = [
+            (
+                "4️⃣1️⃣8️⃣ Open order: SELL NZDCHF at 0.47647 sl: 0.00000 tp: 0.00000\n"
+                "(Risk 1% of account balance based on SL of 50 pips)",
+                "SELL", "NZDCHF",
+            ),
+            (
+                "Open order: BUY XAUUSD at 3400.00 sl: 0.00000 tp: 0.00000\n"
+                "(Risk 2%)",
+                "BUY", "XAUUSD",
+            ),
+            (
+                "Open order: SELL GOLD at 3400.00 sl: 0 tp: 0",
+                "SELL", "XAUUSD",  # GOLD → XAUUSD via mapping
+            ),
+        ]
+        for text, exp_type, exp_symbol in cases:
+            is_ready, signal_type, symbol = is_warmup_message(text)
+            self.assertTrue(is_ready, f"Should detect warmup: {text!r}")
+            self.assertEqual(signal_type, exp_type)
+            self.assertEqual(symbol, exp_symbol)
+
+    def test_open_order_non_warmup_not_detected(self):
+        """'Open order:' with real SL/TP must NOT be detected as warmup."""
+        text = "Open order: SELL NZDCHF at 0.47647 sl: 0.48147 tp: 0.46147"
+        is_ready, _, _ = is_warmup_message(text)
+        self.assertFalse(is_ready)
+
+    def test_generate_warmup_single_tp(self):
+        """generate_warmup_signal with tp_levels=1 must produce a single [0] TP."""
+        signal = generate_warmup_signal("SELL", "NZDCHF", tp_levels=1)
+        self.assertEqual(signal.take_profits, [0])
+        self.assertTrue(signal.is_valid())
+        self.assertTrue(signal.is_warmup)
+
+    def test_generate_warmup_default_tp_levels(self):
+        """Default generate_warmup_signal must still produce [0,0,0,0]."""
+        signal = generate_warmup_signal("BUY", "XAUUSD")
+        self.assertEqual(signal.take_profits, [0, 0, 0, 0])
+
+    def test_open_order_warmup_workflow(self):
+        """Full workflow: Open order warmup detected → single-TP warmup generated."""
+        text = (
+            "4️⃣1️⃣8️⃣ Open order: SELL NZDCHF at 0.47647 sl: 0.00000 tp: 0.00000\n"
+            "(Risk 1% of account balance based on SL of 50 pips)"
+        )
+        is_ready, signal_type, symbol = is_warmup_message(text)
+        self.assertTrue(is_ready)
+        signal = generate_warmup_signal(signal_type, symbol, tp_levels=1)
+        self.assertEqual(signal.signal_type, "SELL")
+        self.assertEqual(signal.symbol, "NZDCHF")
+        self.assertEqual(signal.take_profits, [0])
+        self.assertTrue(signal.is_warmup)
+        self.assertTrue(signal.is_valid())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -151,7 +151,6 @@ async def handle_new_message(event):
             signal_type = detect_signal_type(message_text, stoploss_regexp)
 
             if signal_type:
-                logger.info(f"Processing trading instruction: {signal_type}")
                 if retrieved_group_id:
                     is_success = False
                     if signal_type == "MODIFY":
@@ -367,6 +366,7 @@ def detect_signal_type(message_text, stoploss_regexp):
     if (
         re.search("limit order expired", message_text, re.IGNORECASE)
         or re.search(r"delete\s+limit\s+order", message_text, re.IGNORECASE)
+        or re.search(r"Delete\s+order\s*:", message_text, re.IGNORECASE)
         or re.fullmatch(r"\s*delete\s*", message_text, re.IGNORECASE)
     ):
         return "CLOSE"
@@ -486,8 +486,11 @@ async def process_warmup_signal(
         f"   Ready üzenet felismerve: {signal_type} {warmup_symbol} (EA számítja ki TP/SL értékeket)"
     )
 
+    # "Open order:" warmup format uses a single TP slot
+    tp_levels = 1 if re.search(r"Open\s+order\s*:", message_text, re.IGNORECASE) else 4
+
     # Generate warmup signal with detected symbol
-    signal_data = generate_warmup_signal(signal_type, warmup_symbol)
+    signal_data = generate_warmup_signal(signal_type, warmup_symbol, tp_levels=tp_levels)
     if not signal_data:
         logger.error("   Warmup signal generálás sikertelen")
         return None

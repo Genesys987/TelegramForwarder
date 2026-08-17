@@ -1079,6 +1079,72 @@ class TestSignalParser(unittest.TestCase):
             self.assertIsNone(parse_signal(text), f"Should be None for: {text!r}")
         print("✅ 💥 skip tests passed!")
 
+    def test_open_order_format(self):
+        """Test 'Open order:' signal format (regular, limit, warmup-zero)."""
+        cases = [
+            # Regular BUY
+            (
+                "4️⃣1️⃣6️⃣ Open order: BUY NG at 2.750 sl: 2.5000 tp: 5.000\n(Risk 1.5% of account balance based on SL of 250 pips)",
+                "BUY", "NG", 2.75, [5.0], 2.5,
+            ),
+            # LIMIT BUY
+            (
+                "4️⃣1️⃣4️⃣ Open order: Buy LIMIT EURNZD at 1.94250 sl: 1.92750 tp: 1.99205\n(Risk 1.5% of account balance based on SL of 150 pips)",
+                "BUYLIMIT", "EURNZD", 1.9425, [1.99205], 1.9275,
+            ),
+            # SELL
+            (
+                "Open order: SELL XAUUSD at 3290.5 sl: 3298.8 tp: 3281.4",
+                "SELL", "XAUUSD", 3290.5, [3281.4], 3298.8,
+            ),
+        ]
+        for i, (text, exp_type, exp_symbol, exp_entry, exp_tps, exp_sl) in enumerate(cases, 1):
+            with self.subTest(case=i):
+                result = parse_signal(text)
+                self.assertIsNotNone(result, f"Open order case {i} should parse")
+                self.assertEqual(result.signal_type, exp_type, f"Case {i} type")
+                self.assertEqual(result.symbol, exp_symbol, f"Case {i} symbol")
+                self.assertEqual(result.entry, exp_entry, f"Case {i} entry")
+                self.assertEqual(result.take_profits, exp_tps, f"Case {i} TPs")
+                self.assertEqual(result.stop_loss, exp_sl, f"Case {i} SL")
+
+        # Warmup format (sl=0, tp=0) must return None from parse_signal
+        warmup_text = "4️⃣1️⃣8️⃣ Open order: SELL NZDCHF at 0.47647 sl: 0.00000 tp: 0.00000\n(Risk 1% of account balance based on SL of 50 pips)"
+        self.assertIsNone(parse_signal(warmup_text), "Warmup Open order must return None from parse_signal")
+
+        print("✅ Open order format tests passed!")
+
+    def test_modify_order_warmup_reply(self):
+        """'Modify order:' without breakeven should parse as a signal (warmup reply)."""
+        text = (
+            "Modify order: SELL NZDCHF at 0.47647 sl: 0.48147 tp: 0.46147\n"
+            "➖➖➖➖➖➖➖➖➖\n"
+            "(Change SL) (Change TP)\n"
+            "➖➖➖➖➖➖➖➖➖"
+        )
+        result = parse_signal(text)
+        self.assertIsNotNone(result, "Modify order warmup reply must parse")
+        self.assertEqual(result.signal_type, "SELL")
+        self.assertEqual(result.symbol, "NZDCHF")
+        self.assertAlmostEqual(result.entry, 0.47647)
+        self.assertEqual(result.take_profits, [0.46147])
+        self.assertAlmostEqual(result.stop_loss, 0.48147)
+        print("✅ Modify order warmup reply test passed!")
+
+    def test_modify_order_breakeven_skipped(self):
+        """'Modify order:' + 'breakeven' must return None (handled as breakeven command)."""
+        text = (
+            "Modify order: BUY EURNZD at 1.95405 sl: 1.95405 tp: 1.99205\n"
+            "➖➖➖➖➖➖➖➖➖\n"
+            "(Change SL)\n"
+            "➖➖➖➖➖➖➖➖➖\n"
+            "I recommend to set trade to breakeven‼️\n"
+            "(Breakeven=Risk Free: Move Stop Loss to the entry level)\n"
+            "➖➖➖➖➖➖➖➖➖"
+        )
+        self.assertIsNone(parse_signal(text), "Modify order + breakeven must return None")
+        print("✅ Modify order breakeven guard test passed!")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

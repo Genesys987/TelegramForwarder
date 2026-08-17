@@ -306,7 +306,7 @@ Signal ReadSignalFile()
         if(!FileExists(gSignalFile))
           return signal;
         signalFileHandle = FileOpen(gSignalFile, FILE_READ|FILE_SHARE_READ | FILE_TXT | FILE_ANSI);
-        PrintLog(": Opening signal file " + gSignalFile);
+        if(debugMode) PrintLog(": Opening signal file " + gSignalFile);
         if(signalFileHandle == INVALID_HANDLE) {
           PrintLog(": Failed to open signal file");
           return signal;
@@ -351,7 +351,7 @@ Signal ReadSignalFile()
   } while(shouldKeepReading);
 
   if(signal.isValid) {
-    PrintLog(": Found valid signal: " + line);
+    if(debugMode) PrintLog(": Found valid signal: " + line);
     storedTestSignal = "";
     SaveSignalToFile(signal);
   }
@@ -564,9 +564,9 @@ Signal ParseBuySellSignal(string &parts[], string line, bool isStored)
   ReduceStopLossDistance(signal, isStored);
 
   signal.isWarmup = (signal.entry == 0.0 && signal.stopLoss == 0.0 &&
-                     signal.tpCount >= 2 && signal.tpLevels[0] == 0.0 && signal.tpLevels[1] == 0.0);
+                     signal.tpCount >= 1 && signal.tpLevels[0] == 0.0);
 
-  if(!isStored) {
+  if(!isStored && debugMode) {
     PrintLog(": Parsed trading signal GID=" + IntegerToString(signal.groupId) + " from channel '" + signal.channelName + "'");
   }
 
@@ -621,11 +621,10 @@ Signal ParseActionSignal(string &parts[], string line, bool isStored)
       ReduceStopLossDistance(signal, isStored);
 
       if (!isStored)
-        PrintLog(": Parsed MODIFY signal GID=" + IntegerToString(signal.groupId) +
-                 " Symbol=" + signal.symbol +
-                 " NewSL=" + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
-                 " TPCount=" + IntegerToString(signal.tpCount) +
-                 " from channel '" + signal.channelName + "'");
+        PrintLog(": MODIFY GID=" + IntegerToString(signal.groupId) +
+                 " [" + signal.channelName + "] " + signal.symbol +
+                 " SL=" + DoubleToString(signal.stopLoss, MarketInfo(signal.symbol, MODE_DIGITS)) +
+                 " TP=" + IntegerToString(signal.tpCount));
     } else if (partCount == 5) {
       // Regular SL modification format: TIMESTAMP|MODIFY|NEW_SL|GID:xxx|CHANNEL
       string slPart = parts[2];
@@ -645,9 +644,8 @@ Signal ParseActionSignal(string &parts[], string line, bool isStored)
       // Parse channel name
       signal.channelName = CleanChannelName(parts[4]);
 
-      PrintLog(eaName + ": Parsed old format MODIFY signal GID=" + IntegerToString(signal.groupId) +
-               " NewSL=" + DoubleToString(signal.stopLoss, 5) +
-               " from channel '" + signal.channelName + "'");
+      PrintLog(": MODIFY GID=" + IntegerToString(signal.groupId) +
+               " [" + signal.channelName + "] SL=" + DoubleToString(signal.stopLoss, 5));
     } else {
       PrintLog(eaName + ": Invalid MODIFY signal format, expected 5 or 8 parts but got " + IntegerToString(partCount));
       return signal;
@@ -897,9 +895,8 @@ void SendOrders(Signal &signal)
 
     if(ticket < 0) {
       int err = GetLastError();
-      PrintLog(": ❌ Failed to create order[" + IntegerToString(k) + "] - " +
-               "Error=" + IntegerToString(err) +
-               " Expiration=" + expirationStr);
+      PrintLog(": [ERR] Order[" + IntegerToString(k) + "] err=" + IntegerToString(err) +
+               " Exp=" + expirationStr);
     }
 
     if(ticket > 0 && signal.isWarmup) {
@@ -925,8 +922,6 @@ void ProcessModifySlSignal(Signal &signal)
 // if not modify, then breakeven
   bool isModifySignal = signal.type == "MODIFY";
   string operation = isModifySignal ? "SL modification" : "SL breakeven";
-  PrintLog(": Processing " + operation + " - GID=" + IntegerToString(signal.groupId) +
-           " NewSL=" + DoubleToString(signal.stopLoss, 5));
 
   int updatedCount = 0;
   int total = OrdersTotal();
@@ -952,9 +947,9 @@ void ProcessModifySlSignal(Signal &signal)
   }
 
   if(updatedCount == 0) {
-    PrintLog(": ⚠️ No orders found with GID=" + IntegerToString(signal.groupId) + " for " + operation);
+    PrintLog(": [WARN] No orders for " + operation + " GID=" + IntegerToString(signal.groupId));
   } else {
-    PrintLog(": ✅ " + operation + " for " + IntegerToString(updatedCount) + " orders with GID=" + IntegerToString(signal.groupId));
+    PrintLog(": [OK] " + operation + " applied to " + IntegerToString(updatedCount) + " order(s) GID=" + IntegerToString(signal.groupId));
   }
 }
 
@@ -997,29 +992,23 @@ bool SetCurrentOrderStopLoss(Signal &signal)
     double op = OrderOpenPrice();
 
     if (OrderModify(OrderTicket(), op, normalizedNewSL, newTp, OrderExpiration(), clrGold)) {
-      string logMsg = "✅ " + operation + " success for ticket " + IntegerToString(OrderTicket()) +
+      string logMsg = "[OK] " + operation + " #" + IntegerToString(OrderTicket()) +
                       " GID=" + IntegerToString(signal.groupId);
-
-      if (slChanged) {
-        logMsg += " SL: " + DoubleToString(currentSL, digits) + " -> " + DoubleToString(normalizedNewSL, digits);
-      }
-
-      if (tpChanged) {
-        logMsg += " TP: " + DoubleToString(currentTP, digits) + " -> " + DoubleToString(newTp, digits);
-      }
-
+      if (slChanged)
+        logMsg += " SL: " + DoubleToString(currentSL, digits) + "->" + DoubleToString(normalizedNewSL, digits);
+      if (tpChanged)
+        logMsg += " TP: " + DoubleToString(currentTP, digits) + "->" + DoubleToString(newTp, digits);
       PrintLog(": " + logMsg);
       return true;
     } else {
       int error = GetLastError();
-      PrintLog(": ❌ " + operation + " failed for ticket " + IntegerToString(OrderTicket()) +
-               " GID=" + IntegerToString(signal.groupId) +
-               " error=" + IntegerToString(error));
-
       if (error == ERR_INVALID_STOPS && !isModifySignal) {
-        PrintLog(": Error 130 detected - breakeven too close, closing order instead");
+        PrintLog(": [WARN] breakeven too close for #" + IntegerToString(OrderTicket()) + ", closing");
         return CloseCurrentOrder(signal);
       } else {
+        PrintLog(": [ERR] " + operation + " #" + IntegerToString(OrderTicket()) +
+                 " GID=" + IntegerToString(signal.groupId) +
+                 " err=" + IntegerToString(error));
         return false;
       }
     }
@@ -1097,15 +1086,14 @@ bool CloseCurrentOrder(Signal &signal)
   if(isPendingOrder ?
       OrderDelete(ticket) :
       OrderClose(ticket, lots, closePrice, SLIPPAGE, clrRed)) {
-    PrintLog(": ✅ Closed order ticket " + IntegerToString(ticket) +
+    PrintLog(": [OK] Closed #" + IntegerToString(ticket) +
              " GID=" + IntegerToString(signal.groupId) +
-             " Symbol=" + symbol +
-             " Lots=" + DoubleToString(lots, 2));
+             " " + symbol + " " + DoubleToString(lots, 2) + " lots");
     return true;
   } else {
-    PrintLog(": ❌ Failed to close order ticket " + IntegerToString(ticket) +
+    PrintLog(": [ERR] Close #" + IntegerToString(ticket) +
              " GID=" + IntegerToString(signal.groupId) +
-             " error=" + IntegerToString(GetLastError()));
+             " err=" + IntegerToString(GetLastError()));
     return false;
   }
 }
@@ -1681,31 +1669,39 @@ void SetWarmupLevels(Signal &signal)
   double tp4Diff = isNas100 ? 86.0 : 12.0;  // NAS100 / XAUUSD avg TP4 distance
   double slDiff  = isNas100 ? 90.0 : 6.0;   // NAS100 / XAUUSD avg SL distance
 
+// single-TP warmup (Open order format) only generates TP1; classic warmup keeps 4 TPs
+  int originalTpCount = signal.tpCount;
+  bool isSingleTp = (originalTpCount == 1);
+
 // Calculate TP and SL based on signal type
   if(IsBuySignal(signal)) {
     signal.tpLevels[0] = signal.entry + tp1Diff;
-    signal.tpLevels[1] = signal.entry + tp2Diff;
-    signal.tpLevels[2] = signal.entry + tp3Diff;
-    signal.tpLevels[3] = signal.entry + tp4Diff;
+    if(!isSingleTp) {
+      signal.tpLevels[1] = signal.entry + tp2Diff;
+      signal.tpLevels[2] = signal.entry + tp3Diff;
+      signal.tpLevels[3] = signal.entry + tp4Diff;
+    }
     signal.stopLoss = signal.entry - slDiff;
   } else { // SELL
     signal.tpLevels[0] = signal.entry - tp1Diff;
-    signal.tpLevels[1] = signal.entry - tp2Diff;
-    signal.tpLevels[2] = signal.entry - tp3Diff;
-    signal.tpLevels[3] = signal.entry - tp4Diff;
+    if(!isSingleTp) {
+      signal.tpLevels[1] = signal.entry - tp2Diff;
+      signal.tpLevels[2] = signal.entry - tp3Diff;
+      signal.tpLevels[3] = signal.entry - tp4Diff;
+    }
     signal.stopLoss = signal.entry + slDiff;
   }
 
-// Set TP count for warmup signals
-  signal.tpCount = 4;
+  signal.tpCount = isSingleTp ? 1 : 4;
 
   int digits = MarketInfo(signal.symbol, MODE_DIGITS);
+  string tpLog = " TP1: " + DoubleToString(signal.tpLevels[0], digits);
+  if(!isSingleTp)
+    tpLog += " TP2: " + DoubleToString(signal.tpLevels[1], digits) +
+             " TP3: " + DoubleToString(signal.tpLevels[2], digits) +
+             " TP4: " + DoubleToString(signal.tpLevels[3], digits);
   PrintLog(": Warmup levels calculated - Entry: " + DoubleToString(signal.entry, digits) +
-           " TP1: " + DoubleToString(signal.tpLevels[0], digits) +
-           " TP2: " + DoubleToString(signal.tpLevels[1], digits) +
-           " TP3: " + DoubleToString(signal.tpLevels[2], digits) +
-           " TP4: " + DoubleToString(signal.tpLevels[3], digits) +
-           " SL: " + DoubleToString(signal.stopLoss, digits));
+           tpLog + " SL: " + DoubleToString(signal.stopLoss, digits));
 }
 
 //+------------------------------------------------------------------+
