@@ -78,9 +78,6 @@ def _mark_signal_processed(group_id, channel_name, signal_type: SignalType):
     timestamp = time.time()
     if signal_type in _processed_signals:
         _processed_signals[signal_type][key] = timestamp
-        logger.info(
-            f"{signal_type.upper()} marked as processed for GID={group_id}, Channel={channel_name}"
-        )
     else:
         logger.error(f"Unknown signal type: {signal_type}")
 
@@ -102,7 +99,7 @@ def process_signal(
     signal_type: SignalType, group_id, channel_name="UNKN", modified_value=None
 ):
     """Internal unified signal processor for CLOSE, BREAKEVEN, MODIFY"""
-    logger.info(f"Process: {signal_type} GID={group_id}, Channel={channel_name}")
+    logger.info(f"{signal_type} GID={group_id} [{channel_name}]")
     if not isinstance(group_id, int) or group_id <= 0:
         logger.error(f"Hiba {signal_type} Process: Érvénytelen group_id: {group_id}")
         return None

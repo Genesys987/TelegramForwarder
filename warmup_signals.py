@@ -21,6 +21,7 @@ def is_warmup_message(text: str) -> tuple[bool, SignalType | None, str | None]:
 
     A warmup message is always a single line (no newlines) that matches:
       [High risk] SYMBOL BUY/SELL [price] [optional trailing]
+    OR a multi-line "Open order: ... sl: 0.00000 tp: 0.00000" message.
 
     Supported symbols: XAUUSD, GOLD, NAS100, NQ
 
@@ -33,7 +34,20 @@ def is_warmup_message(text: str) -> tuple[bool, SignalType | None, str | None]:
     text = clean_invisible_chars(text)
     stripped = text.strip()
 
-    # Multi-line messages are never warmup signals
+    # Check for multi-line "Open order: ACTION SYMBOL at PRICE sl: 0.00000 tp: 0.00000"
+    m_open = re.search(
+        r"Open\s+order\s*:\s*(BUY|SELL)\s+([\w\.]+)\s+at\s+[\d\.]+\s+sl\s*:\s*([\d\.]+)\s+tp\s*:\s*([\d\.]+)",
+        stripped, re.IGNORECASE,
+    )
+    if m_open:
+        sl_v = float(m_open.group(3))
+        tp_v = float(m_open.group(4))
+        if sl_v == 0.0 and tp_v == 0.0:
+            raw_symbol = m_open.group(2).upper()
+            symbol = _WARMUP_SYMBOL_MAP.get(raw_symbol, raw_symbol)
+            return True, m_open.group(1).upper(), symbol
+
+    # Multi-line messages are never warmup signals (single-line patterns below)
     if "\n" in stripped:
         return False, None, None
 
@@ -71,13 +85,18 @@ def is_warmup_message(text: str) -> tuple[bool, SignalType | None, str | None]:
     return False, None, None
 
 
-def generate_warmup_signal(signal_type: SignalType | None, symbol: str | None = None):
+def generate_warmup_signal(
+    signal_type: SignalType | None,
+    symbol: str | None = None,
+    tp_levels: int = 4,
+):
     """
     Generate a warmup signal with zero values - EA calculates actual TP/SL.
 
     Args:
         signal_type: "BUY" or "SELL"
         symbol: Trading symbol (e.g. "XAUUSD", "NAS100"); defaults to "XAUUSD"
+        tp_levels: Number of zero TP slots to include (default 4, use 1 for Open-order format)
 
     Returns:
         SignalData: Generated warmup signal data with zeros for EA calculation
@@ -87,7 +106,7 @@ def generate_warmup_signal(signal_type: SignalType | None, symbol: str | None = 
         signal_type=signal_type,
         symbol=symbol or "XAUUSD",
         entry=0,  # EA will use current market price
-        take_profits=[0, 0, 0, 0],  # EA will calculate based on its logic
+        take_profits=[0] * tp_levels,  # EA will calculate based on its logic
         stop_loss=0,  # EA will calculate based on its logic
         channel_name=WARMUP_SIGNAL_CHANNEL,  # Use configured channel name
         is_warmup=True,  # Flag to identify warmup signals

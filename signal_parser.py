@@ -269,6 +269,54 @@ def parse_signal(text: str) -> SignalData | None:
     # Clean invisible characters from the input text
     text = clean_invisible_chars(text)
 
+    # "Modify order:" + breakeven text = breakeven command, not a parseable signal
+    if re.search(r"Modify\s+order\s*:", text, re.IGNORECASE) and re.search(
+        r"breakeven|break\s*even", text, re.IGNORECASE
+    ):
+        return None
+
+    # Pre-parse: "Open order: BUY/SELL [LIMIT] SYMBOL at PRICE sl: SL tp: TP"
+    _m_open = re.search(
+        r"Open\s+order\s*:\s*(BUY|SELL)\s+(?:(LIMIT)\s+)?([\w\.]+)\s+at\s+([\d\.]+)\s+sl\s*:\s*([\d\.]+)\s+tp\s*:\s*([\d\.]+)",
+        text, re.IGNORECASE,
+    )
+    if _m_open:
+        _dir = _m_open.group(1).upper()
+        _limit = _m_open.group(2)
+        _raw_sym = _m_open.group(3).upper()
+        _entry_v = float(_m_open.group(4))
+        _sl_v = float(_m_open.group(5))
+        _tp_v = float(_m_open.group(6))
+        if _sl_v == 0.0 and _tp_v == 0.0:
+            return None  # Warmup format – handled by warmup_signals.py
+        _sig = SignalData(
+            signal_type=(_dir + "LIMIT") if _limit else _dir,
+            symbol=symbol_mappings.get(_raw_sym, _raw_sym),
+            entry=_entry_v,
+            take_profits=[_tp_v],
+            stop_loss=_sl_v,
+        )
+        _sig.fill_symbol_if_missing()
+        return _sig if _sig.is_valid() else None
+
+    # Pre-parse: "Modify order: BUY/SELL SYMBOL at PRICE sl: SL tp: TP" (warmup reply)
+    _m_modify = re.search(
+        r"Modify\s+order\s*:\s*(BUY|SELL)\s+([\w\.]+)\s+at\s+([\d\.]+)\s+sl\s*:\s*([\d\.]+)\s+tp\s*:\s*([\d\.]+)",
+        text, re.IGNORECASE,
+    )
+    if _m_modify:
+        _dir = _m_modify.group(1).upper()
+        _raw_sym = _m_modify.group(2).upper()
+        _sig = SignalData(
+            signal_type=_dir,
+            symbol=symbol_mappings.get(_raw_sym, _raw_sym),
+            entry=float(_m_modify.group(3)),
+            take_profits=[float(_m_modify.group(5))],
+            stop_loss=float(_m_modify.group(4)),
+        )
+        _sig.fill_symbol_if_missing()
+        return _sig if _sig.is_valid() else None
+
     signal = SignalData()
     take_profits = signal.take_profits
 
