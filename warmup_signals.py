@@ -19,11 +19,11 @@ def is_warmup_message(text: str) -> tuple[bool, SignalType | None, str | None]:
     Check if the message is a standalone warmup signal (no TP/SL) that instructs
     the EA to open a position; the real TP/SL arrives as a follow-up message.
 
-    A warmup message is always a single line (no newlines) that matches:
-      [High risk] SYMBOL BUY/SELL [price] [optional trailing]
-    OR a multi-line "Open order: ... sl: 0.00000 tp: 0.00000" message.
+    A warmup message is either:
+      - a single line (no newlines) that matches: [High risk] SYMBOL BUY/SELL [price] [optional trailing]
+      - a multi-line "Open order: ... sl: 0.00000 tp: 0.00000" message.
 
-    Supported symbols: XAUUSD, GOLD, NAS100, NQ
+    Single-line supported symbols: XAUUSD, GOLD, NAS100, NQ
 
     Args:
         text: Message text to check
