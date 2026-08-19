@@ -326,9 +326,13 @@ async def handle_new_message(event):
 
 
 # --- Fő Feldolgozó Függvények ---
-sl_clause = "(sl|stoploss|stop loss)?"
+_sl = r"(sl|stoploss|stop\s*loss)"
+_act = r"(change|move|moving|adjust|set|update)"
+# SL mention required near the action (either before or after) to prevent false positives from unrelated text
 stoploss_regexp = (
-    rf"{sl_clause}.*(change|move|moving|adjust|set|update).*{sl_clause}.*\d+"
+    rf"{_sl}.{{0,60}}{_act}.{{0,60}}\d+"
+    rf"|"
+    rf"{_act}.{{0,60}}{_sl}.{{0,60}}\d+"
 )
 
 
@@ -358,7 +362,7 @@ def detect_signal_type(message_text, stoploss_regexp):
             r"secure.*(entry|entries|first|profit)", message_text, re.IGNORECASE
         )
         or re.search(
-            r"(close|exit|entries\s+are\s+closed)", message_text, re.IGNORECASE
+            r"(close|closing|exit|entries\s+are\s+closed)", message_text, re.IGNORECASE
         )
     )
 
