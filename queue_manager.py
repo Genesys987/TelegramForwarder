@@ -212,7 +212,6 @@ def process_signal_queue() -> None:
                 try:
                     with open(signal_path, "w", encoding="utf-8") as f:
                         f.write(next_signal)
-                    logger.info(f"--- opening {os.path.basename(signal_path)}: {next_signal} ---")
                 except IOError as e:
                     logger.error(
                         f"❌ [Queue->EA] Hiba signals.txt írásnál ({signal_path}): {e}"

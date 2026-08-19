@@ -306,7 +306,7 @@ Signal ReadSignalFile()
         if(!FileExists(gSignalFile))
           return signal;
         signalFileHandle = FileOpen(gSignalFile, FILE_READ|FILE_SHARE_READ | FILE_TXT | FILE_ANSI);
-        if(debugMode) PrintLog(": Opening signal file " + gSignalFile);
+        PrintLog(": --- opening " + gSignalFile + " ---");
         if(signalFileHandle == INVALID_HANDLE) {
           PrintLog(": Failed to open signal file");
           return signal;
