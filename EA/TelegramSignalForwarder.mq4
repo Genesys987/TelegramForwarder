@@ -602,8 +602,11 @@ Signal ParseActionSignal(string &parts[], string line, bool isStored)
       // Parse TP levels
       string tpsArr[];
       signal.tpCount = StringSplit(parts[4], ',', tpsArr);
+      if(signal.tpCount < 1) {
+        PrintLog(": Invalid TP levels '" + parts[4] + "', skipping");
+        return signal;
+      }
       if(signal.tpCount > MAX_TP_LEVELS) signal.tpCount = MAX_TP_LEVELS;
-      ArrayResize(signal.tpLevels, signal.tpCount);
       for(int i=0; i<signal.tpCount; i++) {
         signal.tpLevels[i] = NormalizeDouble(StrToDouble(tpsArr[i]), MarketInfo(signal.symbol, MODE_DIGITS));
       }
