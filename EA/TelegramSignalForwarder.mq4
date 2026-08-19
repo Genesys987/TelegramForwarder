@@ -478,6 +478,7 @@ Signal ParseBuySellSignal(string &parts[], string line, bool isStored)
       PrintLog(": Invalid TP levels '" + parts[4] + "', skipping");
     return signal;
   }
+  if(signal.tpCount > MAX_TP_LEVELS) signal.tpCount = MAX_TP_LEVELS;
 
 // Resize array to hold all TPs (up to maximum)
   ArrayResize(signal.tpLevels, signal.tpCount);
@@ -601,6 +602,7 @@ Signal ParseActionSignal(string &parts[], string line, bool isStored)
       // Parse TP levels
       string tpsArr[];
       signal.tpCount = StringSplit(parts[4], ',', tpsArr);
+      if(signal.tpCount > MAX_TP_LEVELS) signal.tpCount = MAX_TP_LEVELS;
       ArrayResize(signal.tpLevels, signal.tpCount);
       for(int i=0; i<signal.tpCount; i++) {
         signal.tpLevels[i] = NormalizeDouble(StrToDouble(tpsArr[i]), MarketInfo(signal.symbol, MODE_DIGITS));
@@ -868,6 +870,24 @@ void SendOrders(Signal &signal)
       PrintLog("Using signal limit order for TP level " + IntegerToString(k + 1));
     price = shouldUseLimitOrder ? signal.entry : (shouldBuy ? ask : bid);
     int orderType = shouldBuy ? (shouldUseLimitOrder ? OP_BUYLIMIT : OP_BUY) : (shouldUseLimitOrder ? OP_SELLLIMIT : OP_SELL);
+
+// Re-check margin with live AccountFreeMargin — SetSignalLotSizes ran before any order was placed
+    if(AccountFreeMarginCheck(signal.symbol, orderType, lotSize) < 0) {
+      double minLotRs  = MarketInfo(signal.symbol, MODE_MINLOT);
+      double lotStepRs = MarketInfo(signal.symbol, MODE_LOTSTEP);
+      double origLot   = lotSize;
+      while(lotSize >= minLotRs) {
+        if(AccountFreeMarginCheck(signal.symbol, orderType, lotSize) >= 0) break;
+        lotSize -= lotStepRs;
+        lotSize  = MathFloor(lotSize / lotStepRs) * lotStepRs;
+      }
+      if(lotSize < minLotRs) {
+        PrintLog(": Order[" + IntegerToString(k) + "] skipped - no margin after resize (FreeMargin=" + DoubleToString(AccountFreeMargin(), 2) + ")");
+        continue;
+      }
+      PrintLog(": Order[" + IntegerToString(k) + "] lot resized " + DoubleToString(origLot, 2) + " -> " + DoubleToString(lotSize, 2) + " (FreeMargin=" + DoubleToString(AccountFreeMargin(), 2) + ")");
+    }
+
     string comment = FormatOrderComment(signal.groupId, signal.channelName, k + 1, shouldUseLimitOrder);
     int magicNumber = GetMagic(signal.channelName);
     datetime expiration = 0;
