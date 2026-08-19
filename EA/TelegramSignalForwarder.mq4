@@ -875,7 +875,8 @@ void SendOrders(Signal &signal)
     int orderType = shouldBuy ? (shouldUseLimitOrder ? OP_BUYLIMIT : OP_BUY) : (shouldUseLimitOrder ? OP_SELLLIMIT : OP_SELL);
 
 // Re-check margin with live AccountFreeMargin — SetSignalLotSizes ran before any order was placed
-    if(AccountFreeMarginCheck(signal.symbol, orderType, lotSize) < 0) {
+    // AccountFreeMarginCheck only supports OP_BUY/OP_SELL; pending orders don't consume margin until triggered
+    if(!shouldUseLimitOrder && AccountFreeMarginCheck(signal.symbol, orderType, lotSize) < 0) {
       double minLotRs  = MarketInfo(signal.symbol, MODE_MINLOT);
       double lotStepRs = MarketInfo(signal.symbol, MODE_LOTSTEP);
       double origLot   = lotSize;
