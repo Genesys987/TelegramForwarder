@@ -328,7 +328,7 @@ async def handle_new_message(event):
 # --- Fő Feldolgozó Függvények ---
 _sl = r"(sl|stoploss|stop\s*loss)"
 _act = r"(change|move|moving|adjust|set|update)"
-# SL mention required on both sides to prevent false positives from unrelated text
+# SL mention required near the action (either before or after) to prevent false positives from unrelated text
 stoploss_regexp = (
     rf"{_sl}.{{0,60}}{_act}.{{0,60}}\d+"
     rf"|"
